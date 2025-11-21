@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown IDE</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="node_modules/xterm/css/xterm.css" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="node_modules/katex/dist/katex.min.css" />
+</head>
+
+<body>
+    <div class="ide-container" id="ide-container">
+        <div class="top-bar" id="top-bar">
+            <div class="top-left-controls">
+                <div class="left-slot">
+                    <button id="btn-toggle-leftpane" title="サイドペインの表示/非表示">≡</button>
+                </div>
+                <div class="side-switch-group">
+                    <button class="side-switch active" data-target="files" id="btn-top-files" title="ファイル">📄</button>
+                    <button class="side-switch" data-target="git" id="btn-top-git" title="Git管理">🌿</button>
+                    <button class="side-switch" data-target="outline" id="btn-top-outline" title="アウトライン">📑</button>
+                </div>
+            </div>
+            <div class="editor-tabs" id="editor-tabs">
+            </div>
+            <!-- <div class="top-right-controls">
+                <button id="btn-toggle-right-activity" class="window-control-btn" title="右パネルの表示/非表示">⊳</button>
+                <button id="btn-minimize" class="window-control-btn" title="最小化">−</button>
+                <button id="btn-maximize" class="window-control-btn" title="最大化">□</button>
+                <button id="btn-close" class="window-control-btn close" title="閉じる">✕</button>
+            </div> -->
+            <div class="top-right-controls">
+                <button id="btn-toggle-right-activity" class="window-control-btn" title="右パネルの表示/非表示">
+                    <span style="font-size: 12px;">◫</span>
+                </button>
+
+                <button id="btn-minimize" class="window-control-btn" title="最小化">
+                    <svg width="10" height="10" viewBox="0 0 10.2 1">
+                        <rect width="10.2" height="1" fill="currentColor" />
+                    </svg>
+                </button>
+
+                <button id="btn-maximize" class="window-control-btn" title="最大化">
+                    <svg class="icon-maximize" width="10" height="10" viewBox="0 0 10 10">
+                        <path d="M0,0v10h10V0H0z M9,9H1V1h8V9z" fill="currentColor" />
+                    </svg>
+                    <svg class="icon-restore hidden" width="10" height="10" viewBox="0 0 10 10">
+                        <path d="M2,0v2H0v8h8V8h2V0H2z M7,9H1V3h6V9z M9,7H8V2H3V1h6V7z" fill="currentColor" />
+                    </svg>
+                </button>
+
+                <button id="btn-close" class="window-control-btn close" title="閉じる">
+                    <svg width="10" height="10" viewBox="0 0 10 10">
+                        <polygon points="10,0.7 9.3,0 5,4.3 0.7,0 0,0.7 4.3,5 0,9.3 0.7,10 5,5.7 9.3,10 10,9.3 5.7,5"
+                            fill="currentColor" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="activity-bar">
+                <div class="spacer"></div>
+                <div class="icon" id="btn-zen" title="Zenモード">🧘</div>
+                <div class="icon" id="btn-settings" title="設定">⚙️</div>
+            </div>
+
+            <div class="left-pane" id="left-pane">
+                <div class="left-pane-header" id="left-pane-header">
+                    <!-- ファイルエクスプローラー用ボタン -->
+                    <div class="header-buttons header-buttons-files" id="header-buttons-files">
+                        <button id="btn-open-folder" class="header-btn" title="フォルダを開く">📂</button>
+                        <button id="btn-new-file" class="header-btn" title="新規ファイルを作成">📄</button>
+                        <button id="btn-new-folder" class="header-btn" title="新規フォルダを作成">📁</button>
+                        <button id="btn-sort-asc" class="header-btn" title="昇順でソート">▲</button>
+                        <button id="btn-sort-desc" class="header-btn" title="降順でソート">▼</button>
+                    </div>
+                    <!-- Git用ボタン -->
+                    <div class="header-buttons header-buttons-git content-hidden" id="header-buttons-git">
+                        <button id="btn-git-stage" class="header-btn" title="すべての変更をステージング">✓</button>
+                        <button id="btn-git-unstage" class="header-btn" title="すべての変更をアンステージング">✕</button>
+                        <button id="btn-git-refresh" class="header-btn" title="更新">�</button>
+                    </div>
+                    <!-- アウトライン用ボタン -->
+                    <div class="header-buttons header-buttons-outline content-hidden" id="header-buttons-outline">
+                        <button id="btn-outline-collapse" class="header-btn" title="すべて折りたたむ">−</button>
+                        <button id="btn-outline-expand" class="header-btn" title="すべて展開">+</button>
+                    </div>
+                </div>
+
+                <div class="file-tree">
+                    <div class="tree-item expanded" data-path=".">
+                        <span class="tree-toggle">▼</span>
+                        <span class="tree-icon">📂</span>
+                        <span class="tree-label"></span>
+                    </div>
+                    <div class="tree-children" style="display: block;"></div>
+                </div>
+
+                <!-- Git パネル -->
+                <div class="left-pane-content content-hidden" id="content-git">
+                    <strong>Git: 変更</strong>
+                    <div class="git-section">
+                        <div class="git-section-title">変更（Unstaged）</div>
+                        <div class="git-file-list" id="git-unstaged"></div>
+                    </div>
+                    <div class="git-section">
+                        <div class="git-section-title">ステージ済み（Staged）</div>
+                        <div class="git-file-list" id="git-staged"></div>
+                    </div>
+                    <div class="git-commit-area">
+                        <textarea id="git-message" placeholder="コミットメッセージ..." rows="3"></textarea>
+                        <button id="git-commit-btn" class="git-action-btn">Commit</button>
+                        <button id="git-push-btn" class="git-action-btn">Push</button>
+                    </div>
+                </div>
+
+                <!-- アウトライン -->
+                <div class="left-pane-content content-hidden" id="content-outline">
+                    <strong>アウトライン</strong>
+                    <ul id="outline-tree"></ul>
+                </div>
+            </div>
+
+            <div class="center-pane" id="center-pane">
+                <div class="toolbar">
+                    <div class="toolbar-left">
+                        <button id="bold-btn" title="太字"><b>B</b></button>
+                        <button id="italic-btn" title="斜体"><i>I</i></button>
+                        <button title="Table">Table</button>
+
+                        <!-- 見出しレベル選択 -->
+                        <div class="toolbar-group">
+                            <select id="heading-selector" title="見出しレベルを選択">
+                                <option value="">段落</option>
+                                <option value="h1">H1</option>
+                                <option value="h2">H2</option>
+                                <option value="h3">H3</option>
+                                <option value="h4">H4</option>
+                                <option value="h5">H5</option>
+                                <option value="h6">H6</option>
+                            </select>
+                        </div>
+
+                        <!-- リスト選択 -->
+                        <div class="toolbar-group">
+                            <button id="btn-bullet-list" title="番号なしリスト">• リスト</button>
+                            <button id="btn-number-list" title="番号付きリスト">1. リスト</button>
+                        </div>
+
+                        <!-- 配置とカラー -->
+                        <div class="toolbar-group">
+                            <button id="btn-align-center" title="中央揃え">中央</button>
+                            <input type="color" id="color-picker" title="テキスト色を変更" value="#000000">
+                        </div>
+                    </div>
+                    <!-- 右側の PDFプレビューボタンは削除 -->
+                    <div class="toolbar-right">
+                    </div>
+                </div>
+
+                <div class="editor-area" id="content-readme">
+                    <div class="editor-wrapper">
+                        <textarea id="editor" class="markdown-textarea" spellcheck="false"
+                            placeholder="Markdownを入力してください..."></textarea>
+                        <div id="preview" class="markdown-preview"></div>
+                    </div>
+                </div>
+
+                <div class="settings-view-content content-hidden" id="content-settings">
+                    <h1>設定</h1>
+                    <h2>エディタ (Editor)</h2>
+                    <div class="setting-item">
+                        <label for="font-size">フォントサイズ</label>
+                        <input type="text" id="font-size" value="16px">
+                    </div>
+                    <div class="setting-item">
+                        <label><input type="checkbox" checked> 自動保存を有効にする</label>
+                    </div>
+                    <h2>外観 (Appearance)</h2>
+                    <div class="setting-item">
+                        <label for="theme">テーマ</label>
+                        <select id="theme">
+                            <option value="light">ライト</option>
+                            <option value="dark">ダーク</option>
+                        </select>
+                    </div>
+                    <h2>PDF出力 (Export)</h2>
+                    <div class="setting-item">
+                        <label for="paper-size">用紙サイズ</label>
+                        <select id="paper-size">
+                            <option value="a4">A4</option>
+                            <option value="letter">Letter</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-pane hidden" id="right-pane">
+                <div class="terminal-header" id="terminal-header">
+                    ターミナル
+                </div>
+                <div id="terminal-container" class="terminal-content"></div>
+
+                <div class="pdf-preview-header hidden" id="pdf-preview-header">
+                    PDFプレビュー
+                    <div class="pdf-controls">
+                        <!-- <button id="pdf-prev-page" title="前のページ">◀</button> -->
+                        <span id="pdf-page-info"></span>
+                        <!-- <button id="pdf-next-page" title="次のページ">▶</button> -->
+                    </div>
+                </div>
+                <div id="pdf-preview-container" class="pdf-preview-content hidden">
+                    <canvas id="pdf-canvas"></canvas>
+                </div>
+            </div>
+
+            <div class="resizer" id="resizer-right"></div>
+
+            <div class="right-activity-bar">
+                <div class="icon" id="btn-terminal-right" title="ターミナル">💻</div>
+                <!-- 右アクティビティバーにPDFプレビューボタンを追加 -->
+                <div class="icon" id="btn-pdf-preview" title="PDFプレビュー">📄</div>
+            </div>
+        </div>
+
+        <div class="bottom-pane hidden" id="bottom-pane">
+            <div class="terminal-header">
+                ターミナル
+            </div>
+            <div id="terminal-bottom-container" class="terminal-content"></div>
+        </div>
+
+        <div class="resizer" id="resizer-bottom"></div>
+
+        <div class="status-bar">
+            <div class="status-left">
+                <span class="icon">🌿 main*</span>
+            </div>
+            <div class="status-right">
+                <span id="file-stats">文字数: 0 | 行数: 0</span>
+                <span class="icon" id="btn-toggle-position" title="ターミナルの位置を切り替え"> ◧ </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prism.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+
+    <!-- xterm.js -->
+    <script src="node_modules/xterm/lib/xterm.js"></script>
+    <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+
+    <!-- KaTeX -->
+    <script src="node_modules/katex/dist/katex.min.js"></script>
+    <script src="node_modules/katex/dist/contrib/auto-render.min.js"></script>
+
+    <!-- Mermaid.js -->
+    <script src="node_modules/mermaid/dist/mermaid.min.js"></script>
+
+    <!-- Marked.js for Markdown rendering -->
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
+
+    <!-- PDF.js - Load as ES module -->
+    <script type="module">
+        import * as pdfjsLib from './node_modules/pdfjs-dist/build/pdf.min.mjs';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
+        window.pdfjsLib = pdfjsLib;
+    </script>
+
+    <script src="./renderer.js"></script>
+</body>
+
+</html>
