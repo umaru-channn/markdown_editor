@@ -2,8 +2,14 @@
 
 html, body {
     margin: 0; padding: 0; height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* 日本語フォントを優先して見やすくする */
+    font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
     background-color: #f0f2f5; color: #333; overflow: hidden;
+    
+    /* ★追加: アプリ全体のテキスト選択を無効化（ネイティブアプリ風の挙動） */
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default; /* 基本カーソルを矢印に */
 }
 
 :root {
@@ -14,12 +20,21 @@ html, body {
     --leftpane-width: 240px;
     --leftslot-bg: #f5f9fd;
     --right-pane-width: 350px;
+    /* ★追加: 現在の左ペイン幅を管理する変数（JSで制御） */
+    --current-left-pane-width: 240px;
 }
 
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
+
+/* ★追加: 入力フォームとテキストエリアは常に選択・編集可能にする */
+input, textarea {
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
 .ide-container {
@@ -39,11 +54,9 @@ html, body {
     position: relative;
     z-index: 2;
     height: 40px;
-    /* ★追加: このバーを掴んでウィンドウを移動できるようにする */
     -webkit-app-region: drag;
 }
 
-/* ★追加: ボタン類はドラッグ対象外にしないとクリックできなくなる */
 .top-bar button, 
 .window-control-btn,
 .editor-tabs .tab {
@@ -148,26 +161,23 @@ html, body {
 
 /* トップバー右側コントロール */
 .top-right-controls {
-    /* 以下を追加・変更 */
-    position: absolute; /* 親のpaddingを無視して配置 */
+    position: absolute;
     top: 0;
     right: 0;
-    bottom: 0;          /* 高さいっぱいに広げる */
-    
+    bottom: 0;
     display: flex;
     gap: 0;
-    align-items: stretch; /* ボタンを縦方向に引き伸ばす */
+    align-items: stretch;
     padding: 0;
-    z-index: 10;          /* 他の要素より手前に */
-    -webkit-app-region: no-drag; /* ここ全体をドラッグ不可にしておく */
+    z-index: 10;
+    -webkit-app-region: no-drag;
 }
 
 /* ウィンドウコントロールボタン */
 .window-control-btn {
     -webkit-app-region: no-drag;
     width: 46px;
-    height: 100%; /* 親要素に合わせて高さ100% */
-    /* ... (以下のスタイルは以前のまま維持) ... */
+    height: 100%;
     background-color: transparent;
     border: none;
     color: #000000;
@@ -180,41 +190,30 @@ html, body {
     padding: 0;
 }
 
-/* .window-control-btn:hover {
-    opacity: 1;
-    background-color: rgba(0, 0, 0, 0.1);
-} */
-
-/* 最小化・最大化のホバー（薄いグレー） */
 .window-control-btn:not(.close):hover {
     background-color: #e5e5e5; 
 }
 
-/* 最小化・最大化のクリック時（濃いグレー） */
 .window-control-btn:not(.close):active {
     background-color: #cccccc;
 }
 
-/* 閉じるボタンのホバー（赤背景・白アイコン） */
 .window-control-btn.close:hover {
     background-color: #e81123;
     color: #ffffff;
 }
 
-/* 閉じるボタンのクリック時（少し薄い赤） */
 .window-control-btn.close:active {
     background-color: #f1707a;
     color: #ffffff;
 }
 
-/* SVGアイコンの色を親要素(color)に合わせる */
 .window-control-btn svg path,
 .window-control-btn svg rect,
 .window-control-btn svg polygon {
     fill: currentColor;
 }
 
-/* アイコン切り替え用 */
 .window-control-btn svg.hidden {
     display: none;
 }
@@ -254,7 +253,6 @@ html, body {
     flex-direction: column;
     align-items: center;
     transition: width 0.2s ease;
-    z-index: 1;
 }
 
 .activity-bar .icon {
@@ -336,11 +334,23 @@ html, body {
     border-radius: 3px;
 }
 
+/* ★変更: left-pane-content をファイルツリーにも適用し、スクロールを有効にする */
 .left-pane-content {
-    padding: 15px;
+    padding: 0 15px; /* ファイルツリーのコンテンツはツリー構造のインデントを考慮してパディングを調整 */
     overflow-y: auto;
     flex-grow: 1;
     font-size: 14px;
+}
+
+/* ファイルエクスプローラー用のコンテンツIDに、他のコンテンツと同じパディングを設定 */
+#content-files {
+    padding: 5px 0 10px 0; /* ツリーの上下のパディングを調整 */
+    overflow-y: auto;
+    flex-grow: 1;
+}
+/* GitとOutlineのパディングを維持 */
+#content-git, #content-outline {
+    padding: 15px;
 }
 
 .left-pane-content ul {
@@ -378,9 +388,9 @@ html, body {
 }
 
 .outline-item.active {
-    background-color: #e0e8f0; /* ファイルツリーの選択色に合わせる */
+    background-color: #e0e8f0;
     color: inherit;
-    border: 1px solid #b0c4de; /* ボーダーも合わせる */
+    border: 1px solid #b0c4de;
 }
 
 .hidden-outline-item {
@@ -411,10 +421,16 @@ html, body {
 .tree-item {
     display: flex;
     align-items: center;
-    padding: 3px 6px;
+    height: 22px;
+    padding: 0 4px 0 15px; /* ルート要素のパディングを調整 */
     cursor: pointer;
-    border-radius: 3px;
-    gap: 6px;
+    border: 1px solid transparent;
+    gap: 2px;
+}
+
+/* ルートフォルダのパディングを調整 */
+#file-tree-container > .tree-item.expanded {
+    padding-left: 5px;
 }
 
 .tree-item:hover {
@@ -422,34 +438,46 @@ html, body {
 }
 
 .tree-item.selected {
-    background-color: #e0e8f0;
-    border: 1px solid #b0c4de;
+    background-color: #e0e8f0 !important;
+    border-color: #b0c4de;
+    color: inherit;
 }
 
 .tree-toggle {
-    width: 16px;
-    text-align: center;
-    font-size: 12px;
+    width: 20px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #999;
     flex-shrink: 0;
+    user-select: none;
 }
 
 .tree-icon {
     width: 20px;
-    text-align: center;
-    font-size: 14px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    margin-right: 2px;
     flex-shrink: 0;
 }
 
 .tree-label {
-    flex-grow: 1;
     font-size: 13px;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    padding-top: 1px;
+    line-height: 22px;
 }
 
 .tree-children {
-    margin-left: 16px;
+    margin-left: 10px;
+    border-left: 1px solid #404040;
 }
 
 /* Git セクション */
@@ -642,7 +670,7 @@ html, body {
     background-color: #eee;
     padding: 2px 5px;
     border-radius: 4px;
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: "SFMono-Regular", Consolas, "Courier New", "Hiragino Kaku Gothic ProN", "Meiryo", monospace;
 }
 
 .editor-wrapper {
@@ -657,12 +685,16 @@ html, body {
     overflow-y: auto;
     outline: none;
     font-size: 15px;
-    font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
+    font-family: "SFMono-Regular", Consolas, "Courier New", "Hiragino Kaku Gothic ProN", "Meiryo", monospace;
     line-height: 1.6;
     border: none;
     resize: none;
     background-color: #ffffff;
     color: #333;
+    /* ★追加: エディタエリアはテキスト選択を許可 */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
 #editor:focus {
@@ -677,10 +709,14 @@ html, body {
     line-height: 1.7;
     background-color: #fafafa;
     border-left: 1px solid #e0e0e0;
+    /* ★追加: プレビューエリアはテキスト選択を許可 */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
 .markdown-textarea {
-    font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
+    font-family: "SFMono-Regular", Consolas, "Courier New", "Hiragino Kaku Gothic ProN", "Meiryo", monospace;
     resize: none;
 }
 
@@ -743,7 +779,7 @@ html, body {
     background-color: #f5f5f5;
     padding: 2px 6px;
     border-radius: 3px;
-    font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
+    font-family: "SFMono-Regular", Consolas, "Courier New", "Hiragino Kaku Gothic ProN", "Meiryo", monospace;
     font-size: 0.95em;
 }
 
@@ -818,6 +854,10 @@ html, body {
     background-color: #ffffff;
     overflow-y: auto;
     flex-grow: 1;
+    /* ★追加: 設定画面も値をコピーしたい場合があるので選択可に */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
 .settings-view-content.content-hidden {
@@ -882,25 +922,154 @@ html, body {
 }
 
 .terminal-header {
-    font-weight: bold;
-    background-color: #333333;
+    padding: 0;
+    background-color: #252526;
+    border-bottom: 1px solid #333;
+    height: 35px;
+    display: flex;
+    align-items: center;
     flex-shrink: 0;
-    padding: 10px 15px;
-    border-bottom: 1px solid #444;
+}
+
+/* Terminal Tabs */
+.terminal-tabs-container {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.terminal-tabs-list {
+    display: flex;
+    height: 100%;
+    overflow-x: auto;
+    flex: 1;
+}
+
+.terminal-tab {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    height: 100%;
+    background-color: #2d2d2d;
+    border-right: 1px solid #1e1e1e;
+    color: #969696;
+    cursor: pointer;
+    font-size: 12px;
+    user-select: none;
+    max-width: 150px;
+    min-width: 80px;
+}
+
+.terminal-tab.active {
+    background-color: #1e1e1e;
+    color: #ffffff;
+    border-top: 1px solid #007acc;
+}
+
+.terminal-tab:hover:not(.active) {
+    background-color: #333;
+}
+
+.terminal-tab-title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 5px;
+}
+
+.terminal-tab-close {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+    border-radius: 3px;
+    opacity: 0;
+}
+
+.terminal-tab:hover .terminal-tab-close,
+.terminal-tab.active .terminal-tab-close {
+    opacity: 1;
+}
+
+.terminal-tab-close:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* New Terminal Button & Dropdown */
+.new-terminal-container {
+    display: flex;
+    align-items: center;
+    padding: 0 5px;
+}
+
+#new-terminal-btn, #dropdown-toggle {
+    background: none;
+    border: none;
+    color: #cccccc;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 6px;
+    border-radius: 3px;
+}
+
+#new-terminal-btn:hover, #dropdown-toggle:hover {
+    background-color: #3e3e3e;
+}
+
+#shell-dropdown {
+    position: fixed;
+    background-color: #252526;
+    border: 1px solid #454545;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    z-index: 1000;
+    min-width: 150px;
+    padding: 4px 0;
+}
+
+#shell-dropdown .dropdown-item {
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #cccccc;
+}
+
+#shell-dropdown .dropdown-item:hover {
+    background-color: #007acc;
+    color: white;
 }
 
 #terminal-container {
     flex-grow: 1;
     overflow: hidden;
+    position: relative;
+    background-color: #1e1e1e;
+}
+
+.terminal-instance {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* Ensure scrolling is handled by xterm */
+    overflow: hidden; 
 }
 
 .terminal-content {
-    padding: 15px;
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
     font-size: 14px;
     flex-grow: 1;
-    overflow-y: auto;
+    overflow: hidden; /* xterm handles scroll */
     height: 100%;
+    /* ★追加: ターミナルはテキスト選択を許可 */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
 .terminal-content .prompt {
@@ -931,11 +1100,15 @@ html, body {
 }
 
 #resizer-bottom {
-    left: var(--activitybar-width);
-    right: var(--activitybar-width);
+    /* ★修正: 左ペインの幅を考慮して開始位置を調整 */
+    left: calc(var(--activitybar-width) + var(--current-left-pane-width));
+    right: 0; /* bottom-paneに合わせて右端まで */
     height: 4px;
-    top: calc(100vh - 150px - 24px);
+    /* 初期位置はJSで制御される場合もあるがCSSでも指定 */
+    top: calc(100vh - 200px - 24px); 
     cursor: row-resize;
+    /* トランジションを追加してサイドバー開閉時にスムーズに動くようにする */
+    transition: left 0.2s ease, top 0.2s ease, opacity 0.2s ease; 
 }
 
 #resizer-bottom:hover,
@@ -946,19 +1119,21 @@ html, body {
 
 /* ========== 下ペイン ========== */
 .bottom-pane {
-    height: 150px;
-    width: 100%;
+    height: 200px;
+    /* widthはデフォルトでauto、固定配置 */
     background-color: #1e1e1e;
     color: #cccccc;
     border-top: 1px solid #d9d9d9;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    transition: height 0.2s ease, opacity 0.2s ease;
+    transition: height 0.2s ease, opacity 0.2s ease, left 0.2s ease;
     position: fixed;
     bottom: 24px;
-    left: 0;
+    /* ★修正: 左サイドバーの幅を考慮して開始位置を調整 */
+    left: calc(var(--activitybar-width) + var(--current-left-pane-width));
     right: 0;
+    z-index: 1; 
 }
 
 .bottom-pane.hidden {
@@ -968,15 +1143,17 @@ html, body {
     overflow: hidden;
 }
 
-.bottom-pane .terminal-header {
-    padding: 5px 15px;
-    font-size: 13px;
-    border-bottom: 1px solid #444;
-}
+/* ★修正: bottom-paneのヘッダーもright-paneと同じスタイルを適用するため、個別のpadding等を削除 */
+/* .bottom-pane .terminal-header { */
+    /* padding: 5px 15px;  <- 削除 */
+    /* font-size: 13px;    <- 削除 */
+    /* border-bottom: 1px solid #444; <- terminal-headerクラスで定義済み */
+/* } */
 
 #terminal-bottom-container {
     flex-grow: 1;
     overflow: hidden;
+    position: relative;
 }
 
 /* ========== ステータスバー ========== */
@@ -991,6 +1168,9 @@ html, body {
     justify-content: space-between;
     flex-shrink: 0;
     transition: height 0.2s ease, opacity 0.2s ease;
+    /* ステータスバーは一番手前 */
+    position: relative; 
+    z-index: 10;
 }
 
 .status-bar .icon {
@@ -1084,8 +1264,6 @@ html, body {
 }
 
 .pdf-controls {
-    /* ナビゲーションボタンは削除するため、スタイルは不要になりますが、
-       ページ数表示だけ残す場合に備えてそのまま、もしくは調整 */
     display: flex;
     gap: 8px;
     align-items: center;
@@ -1114,53 +1292,58 @@ html, body {
     font-size: 12px;
     min-width: 60px;
     text-align: center;
+    /* ★追加: ページ番号はコピーしたい場合があるので選択可にしてもよいが、UI的なので一応そのままか、textにする */
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .pdf-preview-content {
     background-color: #525252;
-    overflow-y: auto; /* 縦スクロールを有効化 */
+    overflow-y: auto;
     overflow-x: hidden;
     flex: 1;
     display: flex;
-    flex-direction: column; /* 縦並びに変更 */
-    align-items: center;    /* 水平方向は中央揃え */
-    justify-content: flex-start; /* 垂直方向は上詰め (余白削除のキモ) */
-    padding: 10px 0; /* 上下のパディングを少し調整 */
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 10px 0;
 }
 
-/* 修正箇所: キャンバスのスタイル調整 */
 .pdf-page-canvas {
     border: 1px solid #ccc;
     background-color: white;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    max-width: 95%; /* 横幅いっぱいになりすぎないように */
+    max-width: 95%;
     height: auto;
-    margin-bottom: 10px; /* ページ間の隙間 */
+    margin-bottom: 10px;
 }
-/* id="pdf-canvas" のスタイルは削除または .pdf-page-canvas に統合 */
 
 /* VS Code風の新規作成入力ボックス */
 .tree-item.creation-mode {
     display: flex;
     align-items: center;
-    padding: 2px 6px 2px 20px; /* 他のアイテムのインデントに合わせる */
+    padding: 2px 6px 2px 20px;
 }
 
 .creation-input {
     flex: 1;
-    background-color: #ffffff; /* 入力欄の背景 */
+    background-color: #ffffff;
     color: #333;
-    border: 1px solid #007acc; /* 青いボーダー */
+    border: 1px solid #007acc;
     padding: 2px 4px;
     font-size: 13px;
     font-family: inherit;
     outline: none;
     margin-left: 5px;
     border-radius: 2px;
-    min-width: 0; /* Flexbox内ではみ出し防止 */
+    min-width: 0;
+    /* ★追加: 入力欄は選択可 */
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
 }
 
-/* 右クリックメニュー（コンテキストメニュー） */
+/* 右クリックメニュー */
 .context-menu {
     position: fixed;
     background: white;
@@ -1184,76 +1367,11 @@ html, body {
     color: white;
 }
 
-/* ========== VS Code風ツリーレイアウト調整 ========== */
-
-/* 1行全体のレイアウト */
-.tree-item {
-    display: flex;
-    align-items: center;
-    height: 22px; /* VS Code標準に近い高さ */
-    padding: 0 4px; /* 全体の余白 */
-    cursor: pointer;
-    border: 1px solid transparent; /* 選択時の枠線用 */
-    gap: 2px; /* 各要素間の隙間 */
-}
-
-.tree-item.selected {
-    background-color: #e0e8f0 !important;
-    border-color: #b0c4de;
-    color: inherit; /* 文字色は反転させない */
-}
-
-/* 矢印エリア（固定幅で揃えるのが重要） */
-.tree-toggle {
-    width: 20px;  /* 矢印エリアの幅を固定 */
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    color: #999;
-    flex-shrink: 0;
-    user-select: none;
-}
-
-/* アイコンエリア */
-.tree-icon {
-    width: 20px; /* アイコンエリアの幅も固定 */
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px; /* 絵文字サイズ */
-    margin-right: 2px;
-    flex-shrink: 0;
-}
-
 /* 文字アイコン（JS, TS, # 等）の調整 */
 .file-icon-styled {
     font-size: 11px;
     font-family: 'Consolas', 'Monaco', monospace;
     font-weight: 700;
-}
-
-/* ファイル名の調整 */
-.tree-label {
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding-top: 1px; /* 微調整 */
-    line-height: 22px;
-}
-
-/* インデント（階層）の調整 */
-.tree-children {
-    margin-left: 10px; /* 左の線を繋げたい場合はここを調整 */
-    border-left: 1px solid #404040; /* 階層ガイド線（お好みで） */
-}
-
-/* 以前追加したpadding調整は削除（固定幅レイアウトにしたため不要） */
-.tree-item.file {
-    padding-left: 4px; /* リセット */
 }
 
 /* カスタムモーダル */
@@ -1308,4 +1426,27 @@ html, body {
 
 .modal-btn:hover {
     opacity: 0.9;
+}
+
+/* ========== リサイズ中の制御 ========== */
+/* リサイズ操作中に背面の要素が選択されたり反応したりするのを防ぐ */
+body.is-resizing-col,
+body.is-resizing-row {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body.is-resizing-col {
+    cursor: col-resize !important;
+}
+
+body.is-resizing-row {
+    cursor: row-resize !important;
+}
+
+/* 全要素のポインターイベントを無効化することで、
+   ドラッグ中にiframeや他の要素にイベントを奪われるのを防ぐ */
+body.is-resizing-col *,
+body.is-resizing-row * {
+    pointer-events: none !important;
 }

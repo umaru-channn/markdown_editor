@@ -7,13 +7,89 @@ const iconv = require('iconv-lite')
 const os = require('os')
 const git = require('isomorphic-git')
 const http = require('isomorphic-git/http/node')
+const { terminalService } = require('./terminalService');
 
 // 各ウィンドウごとのカレントディレクトリを保持
 const workingDirectories = new Map();
+let mainWindow = null;
+
+/**
+ * Load terminal state from disk
+ */
+function loadTerminalState() {
+  const statePath = path.join(app.getPath('userData'), 'terminal-state.json');
+  try {
+    if (fs.existsSync(statePath)) {
+      const stateData = fs.readFileSync(statePath, 'utf8');
+      return JSON.parse(stateData);
+    }
+  } catch (error) {
+    console.error('Failed to load terminal state:', error);
+  }
+  return null;
+}
+
+/**
+ * Save terminal state to disk
+ */
+function saveTerminalState() {
+  const statePath = path.join(app.getPath('userData'), 'terminal-state.json');
+  try {
+    const state = terminalService.getTerminalState();
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Failed to save terminal state:', error);
+  }
+}
+
+/**
+ * 全ての起動中ターミナルのカレントディレクトリを変更するヘルパー関数
+ * @param {string} targetPath - 移動先のディレクトリパス
+ */
+function changeAllTerminalsDirectory(targetPath) {
+  try {
+    const terminals = terminalService.getAllTerminals();
+    terminals.forEach(term => {
+      if (!term.isDisposed) {
+        const shellName = (term.shellName || '').toLowerCase();
+        let cmd = '';
+        
+        // プラットフォームとシェルに応じてコマンドを生成
+        if (process.platform === 'win32') {
+          // Windowsの場合
+          if (shellName.includes('cmd') || shellName.includes('command prompt')) {
+            // cmd.exe: /d オプションでドライブ変更も対応
+            cmd = `cd /d "${targetPath}"\r`;
+          } else if (shellName.includes('powershell')) {
+            // PowerShell
+            cmd = `cd "${targetPath}"\r`;
+          } else {
+            // Git Bash (bash.exe) やその他Unix互換シェル
+            // Windowsパスのバックスラッシュをスラッシュに変換して渡すのが安全
+            const unixPath = targetPath.replace(/\\/g, '/');
+            cmd = `cd "${unixPath}"\r`;
+          }
+        } else {
+          // macOS / Linux (bash, zsh, etc.)
+          cmd = `cd "${targetPath}"\r`;
+        }
+
+        if (cmd) {
+          // コマンドを送信（Enterキー相当の \r を含む）
+          term.write(cmd);
+          // 視覚的にプロンプトを更新するために改行を追加で送る場合もあるが、基本は上記でOK
+        }
+      }
+    });
+    console.log(`All terminals changed directory to: ${targetPath}`);
+  } catch (e) {
+    console.error('Failed to change terminals directory:', e);
+  }
+}
 
 function createWindow() {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     frame: false,           // ★追加: OS標準のフレーム(タイトルバーなど)を削除
@@ -37,40 +113,165 @@ function createWindow() {
     })
   })
 
+  // --- Integrated Terminal Setup with TerminalService ---
+  
+  // Set up terminal service event handlers
+  terminalService.on('terminal-data', ({ terminalId, data }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:data', { terminalId, data });
+    }
+  });
+
+  terminalService.on('terminal-exit', ({ terminalId, exitCode, signal }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:exit', { terminalId, exitCode });
+    }
+  });
+
+  terminalService.on('terminal-error', ({ terminalId, error }) => {
+    console.error(`Terminal ${terminalId} error:`, error);
+  });
+
+  // Get terminal configuration
+  ipcMain.handle('terminal:get-config', () => {
+    return terminalService.getConfig();
+  });
+
+  // Update terminal configuration
+  ipcMain.handle('terminal:update-config', (event, updates) => {
+    terminalService.updateConfig(updates);
+    return terminalService.getConfig();
+  });
+
+  // Get available shells handler
+  ipcMain.handle('get-available-shells', () => {
+    const shells = terminalService.getAvailableShells();
+    console.log('Get available shells called, returning:', shells);
+    return shells;
+  });
+
+  // Create new terminal handler
+  ipcMain.handle('terminal:create', (event, { profileName, cwd }) => {
+    try {
+      // ★変更: cwdが指定されていない場合、現在開いている親フォルダを使用する
+      let targetCwd = cwd;
+      if (!targetCwd) {
+        const webContentsId = event.sender.id;
+        targetCwd = workingDirectories.get(webContentsId);
+      }
+
+      // ターゲットCWDがまだない（初期状態など）場合はホームディレクトリなどをフォールバックに使用
+      if (!targetCwd) {
+        targetCwd = os.homedir();
+      }
+
+      console.log(`Creating terminal with CWD: ${targetCwd}`);
+      const terminal = terminalService.createTerminal(profileName, targetCwd);
+      return {
+        terminalId: terminal.id,
+        shellName: terminal.shellName,
+        cols: terminal.dimensions.cols,
+        rows: terminal.dimensions.rows
+      };
+    } catch (error) {
+      console.error('Failed to create terminal:', error);
+      throw error;
+    }
+  });
+
+  // Send data to specific terminal
+  ipcMain.on('pty:write', (event, { terminalId, data }) => {
+    try {
+      const terminal = terminalService.getTerminal(terminalId);
+      if (terminal && !terminal.isDisposed) {
+        terminal.write(data);
+      } else if (!terminal) {
+        console.warn(`Terminal ${terminalId} not found for write operation`);
+      }
+    } catch (error) {
+      console.error(`Error writing to terminal ${terminalId}:`, error.message);
+    }
+  });
+
+  // Resize specific terminal
+  ipcMain.on('pty:resize', (event, { terminalId, cols, rows }) => {
+    try {
+      const terminal = terminalService.getTerminal(terminalId);
+      if (terminal && !terminal.isDisposed) {
+        terminal.resize(cols, rows);
+      }
+    } catch (error) {
+      console.error(`Error resizing terminal ${terminalId}:`, error.message);
+    }
+  });
+
+  // Close specific terminal
+  ipcMain.handle('terminal:close', async (event, terminalId) => {
+    try {
+      console.log(`IPC: Closing terminal ${terminalId}`);
+      const result = terminalService.closeTerminal(terminalId);
+      
+      // Wait a bit for the process to fully clean up
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      console.log(`IPC: Terminal ${terminalId} close completed`);
+      return result;
+    } catch (error) {
+      console.error(`Error closing terminal ${terminalId}:`, error);
+      return false;
+    }
+  });
+
+  // Save terminal state
+  ipcMain.handle('terminal:save-state', () => {
+    saveTerminalState();
+    return true;
+  });
+  
+  // --- End of Terminal Setup ---
+
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
 
   // ★追加: ウィンドウ操作用のIPCハンドラー
   ipcMain.handle('window-minimize', () => {
-    mainWindow.minimize();
+    if(mainWindow) mainWindow.minimize();
   });
 
   ipcMain.handle('window-maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow.maximize();
+    if(mainWindow) {
+        if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+        } else {
+        mainWindow.maximize();
+        }
     }
   });
 
   ipcMain.handle('window-close', () => {
-    mainWindow.close();
+    if(mainWindow) mainWindow.close();
   });
 
-  // Open the DevTools.（Electron の DevTools が Autofill ドメインを持たない環境でのエラー回避）
-  // デフォルトでは開かない。必要時は Ctrl+Shift+I で開くか、開発時のみ開く。
+  // Open the DevTools.
   if (process.env.NODE_ENV === 'development') {
     try {
       mainWindow.webContents.openDevTools({ mode: 'detach' })
     } catch { /* no-op */ }
   }
 
+  // Restore terminal state after window is ready
+  mainWindow.webContents.once('did-finish-load', () => {
+    const savedState = loadTerminalState();
+    if (savedState && savedState.terminals && savedState.terminals.length > 0) {
+      // Send restore signal to renderer
+      mainWindow.webContents.send('terminal:restore-state', savedState);
+    }
+  });
 
   // webContents IDを取得（ウィンドウ破棄前に保存）
   const webContentsId = mainWindow.webContents.id;
 
   // ★変更: 初期状態で開きたいフォルダ（保管庫）のパスを指定
-  // ※ Windowsの場合はパスの区切り文字を \\ (二重バックスラッシュ) にしてください
   const initialFolderPath = 'C:\\Users\\it222184.TSITCL\\electron_app\\markdown_editor\\markdown_vault';
 
   if (fs.existsSync(initialFolderPath)) {
@@ -81,9 +282,20 @@ function createWindow() {
     workingDirectories.set(webContentsId, os.homedir());
   }
 
+  // Save state periodically
+  const saveInterval = setInterval(() => {
+    try {
+      saveTerminalState();
+    } catch (error) {
+      console.error('Failed to save terminal state:', error);
+    }
+  }, 30000); // Every 30 seconds
+
   // ウィンドウが閉じられたらマップから削除
   mainWindow.on('closed', () => {
+    clearInterval(saveInterval);
     workingDirectories.delete(webContentsId);
+    mainWindow = null;
   });
 }
 
@@ -188,6 +400,10 @@ ipcMain.handle('execute-command', async (event, command, currentDir) => {
       try {
         if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
           workingDirectories.set(webContentsId, newPath);
+          
+          // ★追加: 内部コマンドでCDが実行された場合もターミナルを同期
+          changeAllTerminalsDirectory(newPath);
+
           resolve({
             success: true,
             output: '',
@@ -479,6 +695,10 @@ ipcMain.handle('select-folder', async (event) => {
       // カレントディレクトリを更新
       const webContentsId = event.sender.id;
       workingDirectories.set(webContentsId, selectedPath);
+      
+      // ★追加: フォルダ変更時に全ターミナルのディレクトリを同期
+      changeAllTerminalsDirectory(selectedPath);
+
       return { success: true, path: selectedPath };
     } else {
       return { success: false, path: null };
@@ -609,6 +829,12 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', function () {
+  // Save terminal state before quitting
+  saveTerminalState();
+  
+  // Dispose all terminals
+  terminalService.dispose();
+
   if (process.platform !== 'darwin') app.quit()
 })
 

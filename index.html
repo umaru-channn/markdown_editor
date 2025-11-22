@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Markdown IDE</title>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="node_modules/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="node_modules/katex/dist/katex.min.css" />
 </head>
@@ -82,7 +82,7 @@
                     <div class="header-buttons header-buttons-git content-hidden" id="header-buttons-git">
                         <button id="btn-git-stage" class="header-btn" title="すべての変更をステージング">✓</button>
                         <button id="btn-git-unstage" class="header-btn" title="すべての変更をアンステージング">✕</button>
-                        <button id="btn-git-refresh" class="header-btn" title="更新">�</button>
+                        <button id="btn-git-refresh" class="header-btn" title="更新">🔄</button>
                     </div>
                     <!-- アウトライン用ボタン -->
                     <div class="header-buttons header-buttons-outline content-hidden" id="header-buttons-outline">
@@ -91,14 +91,18 @@
                     </div>
                 </div>
 
-                <div class="file-tree">
-                    <div class="tree-item expanded" data-path=".">
-                        <span class="tree-toggle">▼</span>
-                        <span class="tree-icon">📂</span>
-                        <span class="tree-label"></span>
+                <!-- ファイルエクスプローラーのコンテナを here に変更 -->
+                <div class="left-pane-content" id="content-files">
+                    <div class="file-tree" id="file-tree-container">
+                        <div class="tree-item expanded" data-path=".">
+                            <span class="tree-toggle">▼</span>
+                            <span class="tree-icon">📂</span>
+                            <span class="tree-label"></span>
+                        </div>
+                        <div class="tree-children" style="display: block;"></div>
                     </div>
-                    <div class="tree-children" style="display: block;"></div>
                 </div>
+                <!-- /here -->
 
                 <!-- Git パネル -->
                 <div class="left-pane-content content-hidden" id="content-git">
@@ -200,9 +204,21 @@
             </div>
 
             <div class="right-pane hidden" id="right-pane">
+                <!-- Terminal UI Structure -->
                 <div class="terminal-header" id="terminal-header">
-                    ターミナル
+                    <div class="terminal-tabs-container" id="terminal-tabs-container">
+                        <div class="terminal-tabs-list" id="terminal-tabs-list"></div>
+                        <div class="new-terminal-container">
+                            <button id="new-terminal-btn" title="New Terminal">+</button>
+                            <button id="dropdown-toggle" title="Select Shell">▾</button>
+                        </div>
+                    </div>
                 </div>
+                
+                <!-- Shell Dropdown -->
+                <div id="shell-dropdown" class="hidden"></div>
+
+                <!-- Terminal Container -->
                 <div id="terminal-container" class="terminal-content"></div>
 
                 <div class="pdf-preview-header hidden" id="pdf-preview-header">
@@ -228,7 +244,8 @@
         </div>
 
         <div class="bottom-pane hidden" id="bottom-pane">
-            <div class="terminal-header">
+            <!-- ★修正: IDを追加してJSから操作可能に -->
+            <div class="terminal-header" id="bottom-terminal-header">
                 ターミナル
             </div>
             <div id="terminal-bottom-container" class="terminal-content"></div>
@@ -253,8 +270,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
 
     <!-- xterm.js -->
-    <script src="node_modules/xterm/lib/xterm.js"></script>
-    <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+    <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 
     <!-- KaTeX -->
     <script src="node_modules/katex/dist/katex.min.js"></script>
