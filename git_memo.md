@@ -38,7 +38,7 @@ git pull --no-ff
 # ブランチの削除
 git push origin --delete
 git branch -D 
-set BRANCH_NAME=copilot/fix-terminal-pdf-display-issue
+set BRANCH_NAME=live_preview
 git push origin --delete %BRANCH_NAME% && git branch -D %BRANCH_NAME%
 # gitのリモートの最新状態を受け取る
 git pull origin main

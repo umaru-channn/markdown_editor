@@ -353,6 +353,44 @@ html, body {
     padding: 3px 0;
 }
 
+/* アウトライン専用スタイル */
+#outline-tree {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.outline-item {
+    cursor: pointer;
+    padding: 4px 8px;
+    color: #555;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background-color 0.1s;
+    line-height: 1.4;
+}
+
+.outline-item:hover {
+    background-color: #f0f0f0;
+    color: #333;
+}
+
+.outline-item.active {
+    background-color: #e0e8f0; /* ファイルツリーの選択色に合わせる */
+    color: inherit;
+    border: 1px solid #b0c4de; /* ボーダーも合わせる */
+}
+
+.hidden-outline-item {
+    display: none;
+}
+
+.outline-text {
+    vertical-align: middle;
+}
+
 .left-pane-content .git-changes {
     color: #d48806;
 }
@@ -1217,4 +1255,57 @@ html, body {
 .tree-item.file {
     padding-left: 4px; /* リセット */
 }
-/*
+
+/* カスタムモーダル */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+
+.modal-content {
+    background-color: white;
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    width: 300px;
+    max-width: 90%;
+}
+
+.modal-message {
+    margin-bottom: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.modal-btn {
+    padding: 6px 12px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+    background-color: #f0f0f0;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.modal-btn.primary {
+    background-color: #e81123;
+    color: white;
+    border-color: #d0101f;
+}
+
+.modal-btn:hover {
+    opacity: 0.9;
+}
