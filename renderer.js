@@ -1,6 +1,6 @@
 /**
  * Markdown IDE - Main Renderer Process
- * Integrated layout with full Markdown functionality
+ * Integrated layout with full Markdown functionality and Terminal Support
  */
 
 // ========== DOM要素取得 ==========
@@ -30,8 +30,18 @@ const btnTogglePosition = document.getElementById('btn-toggle-position');
 // 左アクティビティバー
 const btnZen = document.getElementById('btn-zen');
 const btnSettings = document.getElementById('btn-settings');
-// PDFプレビュー用ボタン（サイドバー）
 const btnPdfPreview = document.getElementById('btn-pdf-preview');
+
+// ========== 左ペイン幅の動的制御用変数更新関数 ==========
+function updateLeftPaneWidthVariable() {
+    const isHidden = leftPane.classList.contains('hidden');
+    // styles.cssの --leftpane-width: 240px と合わせる
+    const width = isHidden ? '0px' : '240px';
+    document.documentElement.style.setProperty('--current-left-pane-width', width);
+}
+
+// 初期化時に実行
+updateLeftPaneWidthVariable();
 
 // エディタ
 const editor = document.getElementById('editor');
@@ -62,9 +72,17 @@ let savedRightActivityBarState = true;
 let isPdfPreviewVisible = false;
 let pdfDocument = null;
 
-// ========== xterm.js ==========
-let term = null;
-let fitAddon = null;
+// ========== Terminal Integration State ==========
+const terminals = new Map();
+let activeTerminalId = null;
+let terminalConfig = null;
+let availableShells = [];
+
+// Terminal DOM Elements
+const terminalTabsList = document.getElementById('terminal-tabs-list');
+const newTerminalBtn = document.getElementById('new-terminal-btn');
+const dropdownToggle = document.getElementById('dropdown-toggle');
+const shellDropdown = document.getElementById('shell-dropdown');
 
 // ========== コマンド履歴 ==========
 let commandHistory = [];
@@ -76,28 +94,269 @@ let completionCandidates = [];
 let completionIndex = -1;
 let completionPrefix = '';
 
-// サポートされる言語のリスト
-const supportedLanguages = [
-    { name: 'JavaScript', value: 'javascript', aliases: ['js'] },
-    { name: 'TypeScript', value: 'typescript', aliases: ['ts'] },
-    { name: 'Python', value: 'python', aliases: ['py'] },
-    { name: 'Java', value: 'java', aliases: [] },
-    { name: 'C', value: 'c', aliases: [] },
-    { name: 'C++', value: 'cpp', aliases: ['c++'] },
-    { name: 'PHP', value: 'php', aliases: [] },
-    { name: 'Ruby', value: 'ruby', aliases: ['rb'] },
-    { name: 'Go', value: 'go', aliases: ['golang'] },
-    { name: 'Rust', value: 'rust', aliases: ['rs'] },
-    { name: 'Swift', value: 'swift', aliases: [] },
-    { name: 'SQL', value: 'sql', aliases: [] },
-    { name: 'Bash', value: 'bash', aliases: ['sh', 'shell'] },
-    { name: 'JSON', value: 'json', aliases: [] },
-    { name: 'YAML', value: 'yaml', aliases: ['yml'] },
-    { name: 'CSS', value: 'css', aliases: [] },
-    { name: 'HTML', value: 'markup', aliases: ['html', 'xml'] },
-    { name: 'Markdown', value: 'markdown', aliases: ['md'] },
-    { name: 'Mermaid', value: 'mermaid', aliases: [] }
-];
+// ========== Terminal Initialization & Logic (Integrated) ==========
+
+async function initializeTerminal() {
+    if (terminals.size > 0) return; // Already initialized
+
+    console.log('Initializing Integrated Terminal...');
+    try {
+        terminalConfig = await window.electronAPI.getTerminalConfig();
+        availableShells = await window.electronAPI.getAvailableShells();
+    } catch (e) {
+        console.error("Failed to load terminal config/shells:", e);
+    }
+
+    renderShellDropdown();
+
+    // UI Listeners
+    if (newTerminalBtn) {
+        const newBtn = newTerminalBtn.cloneNode(true);
+        newTerminalBtn.parentNode.replaceChild(newBtn, newTerminalBtn);
+        newBtn.addEventListener('click', () => createTerminalSession());
+    }
+    if (dropdownToggle) {
+        const newToggle = dropdownToggle.cloneNode(true);
+        dropdownToggle.parentNode.replaceChild(newToggle, dropdownToggle);
+
+        newToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const rect = newToggle.getBoundingClientRect();
+            if (shellDropdown) {
+                shellDropdown.style.top = `${rect.bottom + 2}px`;
+                shellDropdown.style.left = `${rect.left - 100}px`; // Adjust to left
+                shellDropdown.classList.toggle('hidden');
+            }
+        });
+    }
+    document.addEventListener('click', () => {
+        if (shellDropdown) shellDropdown.classList.add('hidden');
+    });
+
+    // Data Listeners
+    window.electronAPI.onTerminalData(({ terminalId, data }) => {
+        const term = terminals.get(terminalId);
+        if (term) term.xterm.write(data);
+    });
+
+    window.electronAPI.onTerminalExit(({ terminalId }) => {
+        closeTerminalSession(terminalId);
+    });
+
+    // Restore State
+    window.electronAPI.onRestoreState(async (state) => {
+        if (state.terminals && state.terminals.length > 0) {
+            for (const t of state.terminals) {
+                await createTerminalSession(t.shellProfile);
+            }
+        }
+    });
+
+    // Initial creation if empty and visible
+    if (isTerminalVisible && terminals.size === 0) {
+        setTimeout(() => {
+            if (terminals.size === 0) createTerminalSession();
+        }, 300);
+    }
+}
+
+function renderShellDropdown() {
+    if (!shellDropdown) return;
+    shellDropdown.innerHTML = '';
+    if (availableShells.length === 0) {
+        const item = document.createElement('div');
+        item.className = 'dropdown-item';
+        item.textContent = 'No shells detected';
+        shellDropdown.appendChild(item);
+        return;
+    }
+    availableShells.forEach(shell => {
+        const item = document.createElement('div');
+        item.className = 'dropdown-item';
+        item.textContent = shell.displayName;
+        item.addEventListener('click', () => {
+            createTerminalSession(shell.name);
+        });
+        shellDropdown.appendChild(item);
+    });
+}
+
+// ターミナルのリサイズ処理を一元化
+function fitTerminal(terminalId) {
+    const term = terminals.get(terminalId);
+    if (!term || !term.xterm || !term.fitAddon) return;
+
+    // DOMが表示されていない場合はスキップ
+    if (term.element.offsetParent === null) return;
+
+    try {
+        // 現在のサイズを保存して比較（不要なリサイズイベントを減らす）
+        const oldCols = term.xterm.cols;
+        const oldRows = term.xterm.rows;
+
+        // fitを実行
+        term.fitAddon.fit();
+
+        const newCols = term.xterm.cols;
+        const newRows = term.xterm.rows;
+
+        // サイズが変わった場合のみバックエンドに通知
+        if (newCols !== oldCols || newRows !== oldRows) {
+            window.electronAPI.resizeTerminal(terminalId, newCols, newRows);
+            // 再描画を強制し、カーソル位置を調整
+            term.xterm.refresh(0, newRows - 1);
+            
+            // カーソルが見えるようにスクロール（VS Codeライクな挙動）
+            // 少し遅延させることでレンダリング完了を待つ
+            setTimeout(() => {
+                term.xterm.scrollToBottom();
+            }, 0);
+        }
+    } catch (e) {
+        console.warn(`Fit terminal ${terminalId} failed:`, e);
+    }
+}
+
+async function createTerminalSession(profileName = null) {
+    try {
+        const { terminalId, shellName } = await window.electronAPI.createTerminal({ profileName });
+
+        // Determine container (Right or Bottom based on state)
+        const container = isPositionRight ? terminalContainer : terminalBottomContainer;
+        if (!container) return;
+
+        // Setup xterm.js
+        // レンダラータイプを明示的に指定しないことでデフォルト(Canvas)を使用させる
+        const xterm = new Terminal({
+            cursorBlink: terminalConfig?.cursorBlink ?? true,
+            fontSize: terminalConfig?.fontSize || 14,
+            fontFamily: terminalConfig?.fontFamily || 'Consolas, monospace',
+            theme: terminalConfig?.theme || { background: '#1e1e1e' },
+            allowTransparency: true
+        });
+
+        const fitAddon = new FitAddon.FitAddon();
+        xterm.loadAddon(fitAddon);
+
+        if (typeof WebLinksAddon !== 'undefined') {
+            xterm.loadAddon(new WebLinksAddon.WebLinksAddon());
+        }
+
+        // Create Wrapper Element
+        const el = document.createElement('div');
+        el.className = 'terminal-instance';
+        el.id = `term-${terminalId}`;
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+        container.appendChild(el);
+
+        // xtermを開く
+        xterm.open(el);
+
+        // Observe resize
+        const resizeObserver = new ResizeObserver(() => {
+            // リサイズ時はrequestAnimationFrameを使って描画サイクルに合わせる
+            requestAnimationFrame(() => {
+                fitTerminal(terminalId);
+            });
+        });
+        resizeObserver.observe(el);
+
+        xterm.onData(data => window.electronAPI.writeToTerminal(terminalId, data));
+
+        terminals.set(terminalId, { xterm, fitAddon, element: el, resizeObserver });
+
+        // Create Tab
+        const tab = document.createElement('div');
+        tab.className = 'terminal-tab';
+        tab.dataset.id = terminalId;
+        tab.innerHTML = `<span class="terminal-tab-title">${shellName}</span><button class="terminal-tab-close">×</button>`;
+
+        tab.addEventListener('click', () => switchTerminal(terminalId));
+        tab.querySelector('.terminal-tab-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeTerminalSession(terminalId);
+        });
+
+        if (terminalTabsList) {
+            terminalTabsList.appendChild(tab);
+        }
+
+        // 少し待ってからアクティブにする（DOM描画待ち）
+        requestAnimationFrame(() => {
+            switchTerminal(terminalId);
+        });
+
+    } catch (e) {
+        console.error('Failed to create terminal', e);
+    }
+}
+
+function switchTerminal(terminalId) {
+    activeTerminalId = terminalId;
+
+    // Update Tabs
+    if (terminalTabsList) {
+        Array.from(terminalTabsList.children).forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.id == terminalId);
+        });
+    }
+
+    // Update Visibility
+    terminals.forEach((term, id) => {
+        const isActive = id === terminalId;
+
+        if (isActive) {
+            term.element.style.visibility = 'visible';
+            term.element.style.opacity = '1';
+            term.element.style.zIndex = '10';
+
+            // Ensure element is in the correct container (in case position changed)
+            const targetContainer = isPositionRight ? terminalContainer : terminalBottomContainer;
+            if (term.element.parentElement !== targetContainer) {
+                targetContainer.appendChild(term.element);
+            }
+
+            // アクティブ化時に確実にフィットさせる
+            requestAnimationFrame(() => {
+                fitTerminal(id);
+                term.xterm.focus();
+            });
+        } else {
+            term.element.style.visibility = 'hidden';
+            term.element.style.opacity = '0';
+            term.element.style.zIndex = '0';
+        }
+    });
+}
+
+async function closeTerminalSession(terminalId) {
+    const term = terminals.get(terminalId);
+    if (!term) return;
+
+    // Cleanup DOM
+    if (term.resizeObserver) term.resizeObserver.disconnect();
+    if (term.xterm) term.xterm.dispose();
+    if (term.element) term.element.remove();
+    terminals.delete(terminalId);
+
+    // Remove Tab
+    if (terminalTabsList) {
+        const tab = terminalTabsList.querySelector(`.terminal-tab[data-id="${terminalId}"]`);
+        if (tab) tab.remove();
+    }
+
+    // Notify Backend
+    await window.electronAPI.closeTerminal(terminalId);
+
+    // Switch to another if active closed
+    if (activeTerminalId === terminalId) {
+        activeTerminalId = null;
+        if (terminals.size > 0) {
+            switchTerminal(terminals.keys().next().value);
+        }
+    }
+}
 
 // ========== ターミナル・右ペイン表示状態更新 (統合版) ==========
 function updateTerminalVisibility() {
@@ -106,7 +365,6 @@ function updateTerminalVisibility() {
 
     // DOM要素
     const terminalHeader = document.getElementById('terminal-header');
-    const terminalContainer = document.getElementById('terminal-container');
     const pdfPreviewHeader = document.getElementById('pdf-preview-header');
     const pdfPreviewContainer = document.getElementById('pdf-preview-container');
 
@@ -122,7 +380,6 @@ function updateTerminalVisibility() {
 
     if (needRightPane) {
         rightPane.classList.remove('hidden');
-        // ★追加: 右リサイザーを表示
         if (resizerRight) resizerRight.classList.remove('hidden');
 
         // コンテンツの排他表示切り替え
@@ -147,7 +404,6 @@ function updateTerminalVisibility() {
     } else {
         // 右ペインを隠す
         rightPane.classList.add('hidden');
-        // ★追加: 右リサイザーを隠す
         if (resizerRight) resizerRight.classList.add('hidden');
 
         document.documentElement.style.setProperty('--right-pane-width', '0px');
@@ -158,11 +414,14 @@ function updateTerminalVisibility() {
     // 下ペイン（ターミナル）の制御
     if (isTerminalVisible && !isPositionRight) {
         bottomPane.classList.remove('hidden');
-        // ★追加: 下リサイザーを表示
         if (resizerBottom) resizerBottom.classList.remove('hidden');
+        // 下部表示時は高さを確保
+        if (!bottomPane.style.height || bottomPane.style.height === '0px') {
+            bottomPane.style.height = '200px';
+            resizerBottom.style.top = `calc(100vh - 200px - 24px)`;
+        }
     } else {
         bottomPane.classList.add('hidden');
-        // ★追加: 下リサイザーを隠す
         if (resizerBottom) resizerBottom.classList.add('hidden');
     }
 
@@ -170,9 +429,46 @@ function updateTerminalVisibility() {
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
 
-    // ターミナル初期化
-    if (isTerminalVisible && !term && typeof initializeTerminal === 'function') {
-        initializeTerminal();
+    // ターミナル初期化 & リフィット
+    if (isTerminalVisible) {
+        if (terminals.size === 0) {
+            initializeTerminal();
+        } else if (activeTerminalId) {
+            // ペイン移動したかもしれないのでDOM移動
+            const targetContainer = isPositionRight ? terminalContainer : terminalBottomContainer;
+            const term = terminals.get(activeTerminalId);
+            if (term && term.element.parentElement !== targetContainer) {
+                targetContainer.appendChild(term.element);
+                // DOM移動直後はサイズ計算が狂うことがあるので、即座にfitを試みる
+                fitTerminal(activeTerminalId);
+            }
+
+            // ★重要: アニメーション完了後にFitを実行
+            const paneToWatch = isPositionRight ? rightPane : bottomPane;
+
+            const handleTransitionEnd = () => {
+                if (activeTerminalId) {
+                    fitTerminal(activeTerminalId);
+                    const t = terminals.get(activeTerminalId);
+                    if (t) t.xterm.focus();
+                }
+                paneToWatch.removeEventListener('transitionend', handleTransitionEnd);
+            };
+
+            paneToWatch.addEventListener('transitionend', handleTransitionEnd);
+
+            // フォールバック: イベントが発火しなかった場合のためにsetTimeoutも入れておく
+            setTimeout(() => {
+                if (activeTerminalId) {
+                    fitTerminal(activeTerminalId);
+                    const t = terminals.get(activeTerminalId);
+                    if(t) t.xterm.focus();
+                }
+            }, 100); 
+            setTimeout(() => {
+                if (activeTerminalId) fitTerminal(activeTerminalId);
+            }, 350);
+        }
     }
 }
 
@@ -233,7 +529,15 @@ if (btnTerminalRight) {
 if (btnTogglePosition) {
     btnTogglePosition.addEventListener('click', () => {
         isPositionRight = !isPositionRight;
-        updateTerminalVisibility();
+        
+        // コンテナの切り替え処理をスムーズにするため、一瞬待機
+        requestAnimationFrame(() => {
+            updateTerminalVisibility();
+            // 切り替え直後に強制的にFitを実行
+            if (activeTerminalId) {
+                setTimeout(() => fitTerminal(activeTerminalId), 50);
+            }
+        });
     });
 }
 
@@ -243,6 +547,16 @@ if (btnToggleLeftPane) {
         const willHide = !leftPane.classList.contains('hidden');
         leftPane.classList.toggle('hidden', willHide);
         ideContainer.classList.toggle('left-pane-hidden', willHide);
+
+        // 左ペイン幅変数の更新 (アニメーション待ち)
+        updateLeftPaneWidthVariable();
+
+        // Bottom Paneの位置を再計算するためにTransition完了を待つ
+        leftPane.addEventListener('transitionend', () => {
+            if (isTerminalVisible && !isPositionRight && activeTerminalId) {
+                fitTerminal(activeTerminalId);
+            }
+        }, { once: true });
     });
 }
 
@@ -256,6 +570,7 @@ topSideSwitchButtons.forEach(btn => {
 
         leftPane.classList.remove('hidden');
         ideContainer.classList.remove('left-pane-hidden');
+        updateLeftPaneWidthVariable();
 
         topSideSwitchButtons.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -294,7 +609,7 @@ if (btnZen) {
         const enteringZenMode = !ideContainer.classList.contains('zen-mode-active');
 
         if (enteringZenMode) {
-            savedRightActivityBarState = isRightActivityBarVisible;  
+            savedRightActivityBarState = isRightActivityBarVisible;
             isTerminalVisible = false;
             isPdfPreviewVisible = false;
             isRightActivityBarVisible = false;
@@ -352,9 +667,8 @@ async function generatePdfPreview() {
             // Use Electron API
             await renderHtmlToPdf(htmlContent);
         } else {
-            // Fallback for browser environment (just render HTML in preview container basically)
+            // Fallback for browser environment
             console.warn('PDF generation API not available, using fallback');
-            // 簡易プレビュー用の仮要素を作成して描画
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = htmlContent;
             await createCanvasBasedPreview(tempDiv);
@@ -488,8 +802,8 @@ document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         if (ideContainer.classList.contains('zen-mode-active')) {
             ideContainer.classList.remove('zen-mode-active');
-            isRightActivityBarVisible = savedRightActivityBarState; 
-            updateTerminalVisibility(); 
+            isRightActivityBarVisible = savedRightActivityBarState;
+            updateTerminalVisibility();
         }
     }
 });
@@ -624,7 +938,7 @@ function updateOutline() {
     const content = editor.value;
     const headers = [];
     const lines = content.split('\n');
-    
+
     lines.forEach((line, index) => {
         const match = line.match(/^(#{1,6})\s+(.*)/);
         if (match) {
@@ -643,9 +957,9 @@ function updateOutline() {
 
     let html = '';
     headers.forEach((header, i) => {
-        const paddingLeft = (header.level - 1) * 15 + 5; 
+        const paddingLeft = (header.level - 1) * 15 + 5;
         const fontSize = Math.max(14 - (header.level - 1), 11);
-        
+
         // data-level属性を追加して、折りたたみ制御に使用
         html += `<li class="outline-item" data-line="${header.lineNumber}" data-level="${header.level}" style="padding-left: ${paddingLeft}px; font-size: ${fontSize}px;">
             <span class="outline-text">${header.text}</span>
@@ -659,7 +973,7 @@ function updateOutline() {
         item.addEventListener('click', () => {
             const lineNum = parseInt(item.dataset.line);
             scrollToLine(lineNum);
-            
+
             // アクティブ状態の更新（手動クリック時）
             items.forEach(i => i.classList.remove('active'));
             item.classList.add('active');
@@ -670,7 +984,7 @@ function updateOutline() {
 // カーソル位置に連動してアウトラインをハイライトする関数
 function syncOutlineWithCursor() {
     if (!editor || !outlineTree) return;
-    
+
     // アウトラインが表示されていない場合は処理しない
     const outlineContent = document.getElementById('content-outline');
     if (!outlineContent || outlineContent.classList.contains('content-hidden')) return;
@@ -678,7 +992,7 @@ function syncOutlineWithCursor() {
     // カーソル位置（文字インデックス）を取得
     const cursorPos = editor.selectionStart;
     const content = editor.value;
-    
+
     // カーソル位置までの行数を計算
     const textBeforeCursor = content.substring(0, cursorPos);
     const currentLine = textBeforeCursor.split('\n').length - 1;
@@ -700,9 +1014,6 @@ function syncOutlineWithCursor() {
     items.forEach(i => i.classList.remove('active'));
     if (activeItem) {
         activeItem.classList.add('active');
-        // 必要に応じてアウトラインをスクロール（アイテムが見えるように）
-        // activeItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); 
-        // ↑頻繁に動くと見づらい場合があるので一旦コメントアウト、必要なら有効化
     }
 }
 
@@ -714,7 +1025,7 @@ function scrollToLine(lineNumber) {
     let charIndex = 0;
     // 行番号が範囲外でないかチェック
     if (lineNumber >= lines.length) lineNumber = lines.length - 1;
-    
+
     for (let i = 0; i < lineNumber; i++) {
         charIndex += lines[i].length + 1; // +1 for newline
     }
@@ -722,18 +1033,18 @@ function scrollToLine(lineNumber) {
     editor.focus();
     // カーソル位置をセット
     editor.setSelectionRange(charIndex, charIndex);
-    
+
     // --- 正確なスクロール位置の計算 (ダミー要素を使用) ---
     const div = document.createElement('div');
     const style = window.getComputedStyle(editor);
-    
+
     // エディタと同じスタイルをコピーして、テキストの折り返し状態を再現する
     const copyStyles = [
-        'font-family', 'font-size', 'font-weight', 'line-height', 
+        'font-family', 'font-size', 'font-weight', 'line-height',
         'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
         'border-width', 'box-sizing', 'width', 'white-space', 'word-wrap', 'word-break'
     ];
-    
+
     copyStyles.forEach(prop => {
         div.style[prop] = style.getPropertyValue(prop);
     });
@@ -744,26 +1055,24 @@ function scrollToLine(lineNumber) {
     div.style.top = '-9999px';
     div.style.left = '-9999px';
     // エディタの実際の幅をセット
-    div.style.width = editor.clientWidth + 'px'; 
+    div.style.width = editor.clientWidth + 'px';
 
     // カーソル位置までのテキストをセット
-    // 末尾が改行だと高さが反映されないことがあるので、ゼロ幅スペースなどを足す等の工夫が必要だが、
-    // 今回は見出し行（文字がある）へのジャンプなので、その行のテキストまでを含める。
     div.textContent = editor.value.substring(0, charIndex);
-    
+
     // マーカー要素を追加して、その位置を取得する
     const span = document.createElement('span');
     span.textContent = 'I'; // 高さ確保用
     div.appendChild(span);
 
     document.body.appendChild(div);
-    
-    // スクロール位置を計算 (マーカーの位置 - エディタの高さの半分 = 画面中央)
+
+    // スクロール位置を計算
     const targetTop = span.offsetTop;
     const editorHeight = editor.clientHeight;
-    
+
     document.body.removeChild(div);
-    
+
     // スムーズにスクロール
     editor.scrollTo({
         top: Math.max(0, targetTop - (editorHeight / 3)), // 中央より少し上に見出しが来るように /3 くらいが見やすい
@@ -851,6 +1160,13 @@ if (resizerRight) {
     });
 }
 
+if (resizerBottom) {
+    resizerBottom.addEventListener('mousedown', () => {
+        isResizingBottom = true;
+        resizerBottom.classList.add('resizing');
+    });
+}
+
 document.addEventListener('mousemove', (e) => {
     if (isResizingRight && resizerRight) {
         const rightActivityBarWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--activitybar-width')) || 50;
@@ -862,6 +1178,11 @@ document.addEventListener('mousemove', (e) => {
             document.documentElement.style.setProperty('--right-pane-width', newWidth + 'px');
             const mainContent = centerPane.parentElement;
             mainContent.style.marginRight = (newWidth + rightActivityBarWidth) + 'px';
+
+            // リサイズ中にターミナルもリフィット (throttleなしでrequestAnimationFrame)
+            if (activeTerminalId) {
+                requestAnimationFrame(() => fitTerminal(activeTerminalId));
+            }
         }
     }
 
@@ -871,6 +1192,10 @@ document.addEventListener('mousemove', (e) => {
         if (newHeight > 50 && newHeight < window.innerHeight - 200) {
             bottomPane.style.height = newHeight + 'px';
             resizerBottom.style.top = (window.innerHeight - newHeight - 24) + 'px';
+
+            if (activeTerminalId) {
+                requestAnimationFrame(() => fitTerminal(activeTerminalId));
+            }
         }
     }
 });
@@ -879,19 +1204,16 @@ document.addEventListener('mouseup', () => {
     if (isResizingRight) {
         isResizingRight = false;
         if (resizerRight) resizerRight.classList.remove('resizing');
+        // リサイズ終了時に確実にフィットさせる
+        if (activeTerminalId) setTimeout(() => fitTerminal(activeTerminalId), 10);
     }
     if (isResizingBottom) {
         isResizingBottom = false;
         if (resizerBottom) resizerBottom.classList.remove('resizing');
+        // リサイズ終了時に確実にフィットさせる
+        if (activeTerminalId) setTimeout(() => fitTerminal(activeTerminalId), 10);
     }
 });
-
-if (resizerBottom) {
-    resizerBottom.addEventListener('mousedown', () => {
-        isResizingBottom = true;
-        if (resizerBottom) resizerBottom.classList.add('resizing');
-    });
-}
 
 // ファイルの統計情報を更新する関数
 function updateFileStats(content) {
@@ -949,13 +1271,18 @@ window.addEventListener('load', () => {
     showWelcomeReadme();
     initializeFileTree();
     updateOutline(); // 初期ロード時にもアウトライン更新
+
+    // ターミナルの初期化
+    if (isTerminalVisible) {
+        initializeTerminal();
+    }
 });
 
 // ========== ファイルシステム操作 ==========
-let currentFilePath = null;
 let currentDirectoryPath = null;
 let openedFiles = new Map();
 let fileModificationState = new Map();
+let currentSortOrder = 'asc';
 
 // ファイルツリーの初期化とイベント設定 (イベント委譲版)
 async function initializeFileTree() {
@@ -1098,7 +1425,6 @@ async function reloadContainer(container, path) {
 }
 
 // ========== ソート設定とヘルパー ==========
-let currentSortOrder = 'asc';
 
 async function getSortedDirectoryContents(dirPath) {
     let items = await readDirectory(dirPath);
@@ -1224,7 +1550,6 @@ async function openFile(filePath, fileName) {
         switchToFile(filePath);
     } catch (error) {
         console.error('Failed to open file:', error);
-        // アラートによるフォーカスロストを防ぐため、consoleのみにするか、控えめな通知にする
     }
 }
 
@@ -1342,9 +1667,6 @@ function switchToFile(filePath) {
     }
 
     updateFileStats();
-    
-    // ファイル切り替え後にエディタにフォーカス
-    // editor.focus();
 }
 
 function closeFile(filePath, tabElement) {
@@ -1486,7 +1808,7 @@ async function showCreationInput(isFolder) {
     };
 
     const finishCreation = async () => {
-        if (isCreating) return; 
+        if (isCreating) return;
         isCreating = true;
 
         const name = inputField.value.trim();
@@ -1536,17 +1858,17 @@ async function showCreationInput(isFolder) {
     // blurイベントでの削除を少し遅延させて、他の操作との競合を防ぐ
     inputField.addEventListener('blur', () => {
         if (!isCreating) {
-            setTimeout(safeRemove, 100); 
+            setTimeout(safeRemove, 100);
         }
     });
 }
 
 async function createNewFile() {
-    showCreationInput(false); 
+    showCreationInput(false);
 }
 
 async function createNewFolder() {
-    showCreationInput(true);  
+    showCreationInput(true);
 }
 
 async function openFolder() {
@@ -1602,10 +1924,10 @@ document.addEventListener('keydown', (e) => {
         }
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
-        e.preventDefault(); 
+        e.preventDefault();
 
         const tabs = Array.from(document.querySelectorAll('.editor-tabs .tab'));
-        if (tabs.length <= 1) return; 
+        if (tabs.length <= 1) return;
 
         const activeIndex = tabs.findIndex(tab => tab.classList.contains('active'));
         if (activeIndex === -1) return;
@@ -1623,7 +1945,7 @@ document.addEventListener('keydown', (e) => {
     // Deleteキーの処理を修正
     if (e.key === 'Delete' || (e.metaKey && e.key === 'Backspace')) {
         const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-        
+
         // 入力フォームにフォーカスがある場合は削除処理を実行しない
         if (activeTag === 'input' || activeTag === 'textarea') return;
 
@@ -1664,7 +1986,7 @@ if (editor) {
         }
 
         renderMarkdownLive();
-        
+
         // エディタの内容が変わったらアウトラインも更新
         if (window.outlineUpdateTimeout) clearTimeout(window.outlineUpdateTimeout);
         window.outlineUpdateTimeout = setTimeout(() => {
@@ -1684,7 +2006,6 @@ if (editor) {
     });
 
     // カーソル移動やクリック時のイベントリスナー（アウトライン同期用）
-    // 頻繁に発火するためデバウンス処理を入れる
     const syncHandler = () => {
         if (window.cursorSyncTimeout) clearTimeout(window.cursorSyncTimeout);
         window.cursorSyncTimeout = setTimeout(syncOutlineWithCursor, 100);
@@ -1772,7 +2093,7 @@ function showModalConfirm(itemName, onConfirm) {
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'modal-btn';
     cancelBtn.textContent = 'キャンセル';
-    
+
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'modal-btn primary';
     deleteBtn.textContent = '削除';
@@ -1847,7 +2168,7 @@ function showContextMenu(x, y, path, name) {
         // コンテキストメニューからの削除でもモーダルを表示
         menu.remove();
         activeContextMenu = null;
-        
+
         showModalConfirm(name, () => {
             confirmAndDelete(path);
         });

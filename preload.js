@@ -10,6 +10,47 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Renderer ProcessにNode.js APIを安全に公開
 contextBridge.exposeInMainWorld('electronAPI', {
+  // --- Terminal APIs ---
+  // Get terminal configuration
+  getTerminalConfig: () => ipcRenderer.invoke('terminal:get-config'),
+
+  // Update terminal configuration
+  updateTerminalConfig: (updates) => ipcRenderer.invoke('terminal:update-config', updates),
+
+  // 利用可能なシェルの一覧を取得
+  getAvailableShells: () => ipcRenderer.invoke('get-available-shells'),
+
+  // 新しいターミナルを作成
+  createTerminal: (options) => ipcRenderer.invoke('terminal:create', options),
+
+  // ターミナルを閉じる
+  closeTerminal: (terminalId) => ipcRenderer.invoke('terminal:close', terminalId),
+
+  // ターミナルにデータを送信
+  writeToTerminal: (terminalId, data) => ipcRenderer.send('pty:write', { terminalId, data }),
+
+  // ターミナルのサイズを変更
+  resizeTerminal: (terminalId, cols, rows) => ipcRenderer.send('pty:resize', { terminalId, cols, rows }),
+
+  // Save terminal state
+  saveTerminalState: () => ipcRenderer.invoke('terminal:save-state'),
+
+  // ターミナルからのデータを受信
+  onTerminalData: (callback) => ipcRenderer.on('pty:data', (event, payload) => {
+    callback(payload);
+  }),
+
+  // ターミナルの終了を受信
+  onTerminalExit: (callback) => ipcRenderer.on('pty:exit', (event, payload) => {
+    callback(payload);
+  }),
+
+  // Restore terminal state
+  onRestoreState: (callback) => ipcRenderer.on('terminal:restore-state', (event, state) => {
+    callback(state);
+  }),
+
+  // --- Editor & System APIs ---
   // コマンド実行
   executeCommand: (command, currentDir) => {
     return ipcRenderer.invoke('execute-command', command, currentDir);
@@ -67,7 +108,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder: () => {
     return ipcRenderer.invoke('select-folder');
   },
-  // ★以下を追加: ウィンドウ操作用のAPI
+  // ウィンドウ操作用のAPI
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
@@ -88,4 +129,4 @@ window.addEventListener('DOMContentLoaded', () => {
   for (const type of ['chrome', 'node', 'electron']) {
     replaceText(`${type}-version`, process.versions[type])
   }
-})
+});

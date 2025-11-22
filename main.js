@@ -7,13 +7,44 @@ const iconv = require('iconv-lite')
 const os = require('os')
 const git = require('isomorphic-git')
 const http = require('isomorphic-git/http/node')
+const { terminalService } = require('./terminalService');
 
 // 各ウィンドウごとのカレントディレクトリを保持
 const workingDirectories = new Map();
+let mainWindow = null;
+
+/**
+ * Load terminal state from disk
+ */
+function loadTerminalState() {
+  const statePath = path.join(app.getPath('userData'), 'terminal-state.json');
+  try {
+    if (fs.existsSync(statePath)) {
+      const stateData = fs.readFileSync(statePath, 'utf8');
+      return JSON.parse(stateData);
+    }
+  } catch (error) {
+    console.error('Failed to load terminal state:', error);
+  }
+  return null;
+}
+
+/**
+ * Save terminal state to disk
+ */
+function saveTerminalState() {
+  const statePath = path.join(app.getPath('userData'), 'terminal-state.json');
+  try {
+    const state = terminalService.getTerminalState();
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Failed to save terminal state:', error);
+  }
+}
 
 function createWindow() {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     frame: false,           // ★追加: OS標準のフレーム(タイトルバーなど)を削除
@@ -37,24 +68,130 @@ function createWindow() {
     })
   })
 
+  // --- Integrated Terminal Setup with TerminalService ---
+  
+  // Set up terminal service event handlers
+  terminalService.on('terminal-data', ({ terminalId, data }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:data', { terminalId, data });
+    }
+  });
+
+  terminalService.on('terminal-exit', ({ terminalId, exitCode, signal }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:exit', { terminalId, exitCode });
+    }
+  });
+
+  terminalService.on('terminal-error', ({ terminalId, error }) => {
+    console.error(`Terminal ${terminalId} error:`, error);
+  });
+
+  // Get terminal configuration
+  ipcMain.handle('terminal:get-config', () => {
+    return terminalService.getConfig();
+  });
+
+  // Update terminal configuration
+  ipcMain.handle('terminal:update-config', (event, updates) => {
+    terminalService.updateConfig(updates);
+    return terminalService.getConfig();
+  });
+
+  // Get available shells handler
+  ipcMain.handle('get-available-shells', () => {
+    const shells = terminalService.getAvailableShells();
+    console.log('Get available shells called, returning:', shells);
+    return shells;
+  });
+
+  // Create new terminal handler
+  ipcMain.handle('terminal:create', (event, { profileName, cwd }) => {
+    try {
+      const terminal = terminalService.createTerminal(profileName, cwd);
+      return {
+        terminalId: terminal.id,
+        shellName: terminal.shellName,
+        cols: terminal.dimensions.cols,
+        rows: terminal.dimensions.rows
+      };
+    } catch (error) {
+      console.error('Failed to create terminal:', error);
+      throw error;
+    }
+  });
+
+  // Send data to specific terminal
+  ipcMain.on('pty:write', (event, { terminalId, data }) => {
+    try {
+      const terminal = terminalService.getTerminal(terminalId);
+      if (terminal && !terminal.isDisposed) {
+        terminal.write(data);
+      } else if (!terminal) {
+        console.warn(`Terminal ${terminalId} not found for write operation`);
+      }
+    } catch (error) {
+      console.error(`Error writing to terminal ${terminalId}:`, error.message);
+    }
+  });
+
+  // Resize specific terminal
+  ipcMain.on('pty:resize', (event, { terminalId, cols, rows }) => {
+    try {
+      const terminal = terminalService.getTerminal(terminalId);
+      if (terminal && !terminal.isDisposed) {
+        terminal.resize(cols, rows);
+      }
+    } catch (error) {
+      console.error(`Error resizing terminal ${terminalId}:`, error.message);
+    }
+  });
+
+  // Close specific terminal
+  ipcMain.handle('terminal:close', async (event, terminalId) => {
+    try {
+      console.log(`IPC: Closing terminal ${terminalId}`);
+      const result = terminalService.closeTerminal(terminalId);
+      
+      // Wait a bit for the process to fully clean up
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      console.log(`IPC: Terminal ${terminalId} close completed`);
+      return result;
+    } catch (error) {
+      console.error(`Error closing terminal ${terminalId}:`, error);
+      return false;
+    }
+  });
+
+  // Save terminal state
+  ipcMain.handle('terminal:save-state', () => {
+    saveTerminalState();
+    return true;
+  });
+  
+  // --- End of Terminal Setup ---
+
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
 
   // ★追加: ウィンドウ操作用のIPCハンドラー
   ipcMain.handle('window-minimize', () => {
-    mainWindow.minimize();
+    if(mainWindow) mainWindow.minimize();
   });
 
   ipcMain.handle('window-maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow.maximize();
+    if(mainWindow) {
+        if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+        } else {
+        mainWindow.maximize();
+        }
     }
   });
 
   ipcMain.handle('window-close', () => {
-    mainWindow.close();
+    if(mainWindow) mainWindow.close();
   });
 
   // Open the DevTools.（Electron の DevTools が Autofill ドメインを持たない環境でのエラー回避）
@@ -65,6 +202,14 @@ function createWindow() {
     } catch { /* no-op */ }
   }
 
+  // Restore terminal state after window is ready
+  mainWindow.webContents.once('did-finish-load', () => {
+    const savedState = loadTerminalState();
+    if (savedState && savedState.terminals && savedState.terminals.length > 0) {
+      // Send restore signal to renderer
+      mainWindow.webContents.send('terminal:restore-state', savedState);
+    }
+  });
 
   // webContents IDを取得（ウィンドウ破棄前に保存）
   const webContentsId = mainWindow.webContents.id;
@@ -81,9 +226,20 @@ function createWindow() {
     workingDirectories.set(webContentsId, os.homedir());
   }
 
+  // Save state periodically
+  const saveInterval = setInterval(() => {
+    try {
+      saveTerminalState();
+    } catch (error) {
+      console.error('Failed to save terminal state:', error);
+    }
+  }, 30000); // Every 30 seconds
+
   // ウィンドウが閉じられたらマップから削除
   mainWindow.on('closed', () => {
+    clearInterval(saveInterval);
     workingDirectories.delete(webContentsId);
+    mainWindow = null;
   });
 }
 
@@ -609,6 +765,12 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', function () {
+  // Save terminal state before quitting
+  saveTerminalState();
+  
+  // Dispose all terminals
+  terminalService.dispose();
+
   if (process.platform !== 'darwin') app.quit()
 })
 
