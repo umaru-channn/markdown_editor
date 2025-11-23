@@ -13,6 +13,7 @@
 
 <body>
     <div class="ide-container" id="ide-container">
+        <!-- トップバー -->
         <div class="top-bar" id="top-bar">
             <div class="top-left-controls">
                 <div class="left-slot">
@@ -26,12 +27,6 @@
             </div>
             <div class="editor-tabs" id="editor-tabs">
             </div>
-            <!-- <div class="top-right-controls">
-                <button id="btn-toggle-right-activity" class="window-control-btn" title="右パネルの表示/非表示">⊳</button>
-                <button id="btn-minimize" class="window-control-btn" title="最小化">−</button>
-                <button id="btn-maximize" class="window-control-btn" title="最大化">□</button>
-                <button id="btn-close" class="window-control-btn close" title="閉じる">✕</button>
-            </div> -->
             <div class="top-right-controls">
                 <button id="btn-toggle-right-activity" class="window-control-btn" title="右パネルの表示/非表示">
                     <span style="font-size: 12px;">◫</span>
@@ -62,12 +57,14 @@
         </div>
 
         <div class="main-content">
+            <!-- 左アクティビティバー -->
             <div class="activity-bar">
                 <div class="spacer"></div>
                 <div class="icon" id="btn-zen" title="Zenモード">🧘</div>
                 <div class="icon" id="btn-settings" title="設定">⚙️</div>
             </div>
 
+            <!-- 左ペイン -->
             <div class="left-pane" id="left-pane">
                 <div class="left-pane-header" id="left-pane-header">
                     <!-- ファイルエクスプローラー用ボタン -->
@@ -91,7 +88,7 @@
                     </div>
                 </div>
 
-                <!-- ファイルエクスプローラーのコンテナを here に変更 -->
+                <!-- ファイルエクスプローラー -->
                 <div class="left-pane-content" id="content-files">
                     <div class="file-tree" id="file-tree-container">
                         <div class="tree-item expanded" data-path=".">
@@ -102,7 +99,6 @@
                         <div class="tree-children" style="display: block;"></div>
                     </div>
                 </div>
-                <!-- /here -->
 
                 <!-- Git パネル -->
                 <div class="left-pane-content content-hidden" id="content-git">
@@ -129,60 +125,104 @@
                 </div>
             </div>
 
+            <!-- 中央ペイン（エディタ） -->
             <div class="center-pane" id="center-pane">
+                <!-- 拡張ツールバー -->
                 <div class="toolbar">
-                    <div class="toolbar-left">
-                        <button id="bold-btn" title="太字"><b>B</b></button>
-                        <button id="italic-btn" title="斜体"><i>I</i></button>
-                        <button title="Table">Table</button>
+                    <div class="toolbar-left" id="toolbar-left">
+                        <!-- 保存 -->
+                        <button id="btn-save" title="保存 (Ctrl+S)">💾</button>
+                        <span class="separator">|</span>
+                        
+                        <!-- Undo/Redo -->
+                        <button id="toolbar-undo" title="元に戻す (Ctrl+Z)">↩</button>
+                        <button id="toolbar-redo" title="やり直し (Ctrl+Y)">↪</button>
+                        <span class="separator">|</span>
 
-                        <!-- 見出しレベル選択 -->
-                        <div class="toolbar-group">
-                            <select id="heading-selector" title="見出しレベルを選択">
-                                <option value="">段落</option>
-                                <option value="h1">H1</option>
-                                <option value="h2">H2</option>
-                                <option value="h3">H3</option>
-                                <option value="h4">H4</option>
-                                <option value="h5">H5</option>
-                                <option value="h6">H6</option>
-                            </select>
+                        <!-- 見出し -->
+                        <button id="btn-h2" title="見出し2">H2</button>
+                        <button id="btn-h3" title="見出し3">H3</button>
+                        <div class="toolbar-dropdown-container">
+                            <button id="btn-hn" title="その他の見出し">Hn ▼</button>
+                            <div class="toolbar-dropdown-menu">
+                                <button class="dropdown-item" data-action="h1">Heading 1</button>
+                                <button class="dropdown-item" data-action="h4">Heading 4</button>
+                                <button class="dropdown-item" data-action="h5">Heading 5</button>
+                                <button class="dropdown-item" data-action="h6">Heading 6</button>
+                            </div>
+                        </div>
+                        <span class="separator">|</span>
+
+                        <!-- 書式 -->
+                        <button id="bold-btn" title="太字 (Ctrl+B)"><b>B</b></button>
+                        <button id="italic-btn" title="斜体 (Ctrl+I)"><i>I</i></button>
+                        <button id="strike-btn" title="取り消し線"><s>S</s></button>
+                        
+                        <!-- リンク・画像 -->
+                        <button id="link-btn" title="リンク挿入">Link</button>
+                        <button id="image-btn" title="画像挿入">Img</button>
+                        
+                        <span class="separator">|</span>
+
+                        <!-- ブロック要素 -->
+                        <button id="inline-code-btn" title="インラインコード (` `)">`</button>
+                        <button id="quote-btn" title="引用">”</button>
+                        <button id="code-btn" title="コードブロック">Code</button>
+                        <button id="hr-btn" title="区切り線">—</button>
+                        
+                        <!-- リスト -->
+                        <div class="toolbar-dropdown-container">
+                            <button id="btn-list-menu" title="リスト">≡ ▼</button>
+                            <div class="toolbar-icon-menu">
+                                <button id="btn-bullet-list" title="箇条書きリスト">•</button>
+                                <button id="btn-number-list" title="番号付きリスト">1.</button>
+                                <button id="btn-check-list" title="チェックリスト">☑</button>
+                            </div>
                         </div>
 
-                        <!-- リスト選択 -->
-                        <div class="toolbar-group">
-                            <button id="btn-bullet-list" title="番号なしリスト">• リスト</button>
-                            <button id="btn-number-list" title="番号付きリスト">1. リスト</button>
-                        </div>
-
-                        <!-- 配置とカラー -->
-                        <div class="toolbar-group">
-                            <button id="btn-align-center" title="中央揃え">中央</button>
-                            <input type="color" id="color-picker" title="テキスト色を変更" value="#000000">
-                        </div>
+                        <!-- オーバーフロー用「もっと見る」ボタン -->
+                        <button id="btn-toolbar-more" class="hidden" title="さらに表示" style="font-weight: bold;">»</button>
                     </div>
-                    <!-- 右側の PDFプレビューボタンは削除 -->
+                    
                     <div class="toolbar-right">
+                        <!-- ゴミ箱（ファイルを閉じる） -->
+                        <button id="btn-close-file-toolbar" title="現在のファイルを閉じる" style="color: #d9534f;">🗑</button>
                     </div>
+
+                    <!-- オーバーフローメニュー (ボタンが押されたときに表示) -->
+                    <div id="toolbar-overflow-menu" class="toolbar-overflow-menu hidden"></div>
                 </div>
 
                 <div class="editor-area" id="content-readme">
-                    <div class="editor-wrapper">
-                        <textarea id="editor" class="markdown-textarea" spellcheck="false"
-                            placeholder="Markdownを入力してください..."></textarea>
-                        <div id="preview" class="markdown-preview"></div>
-                    </div>
+                    <div id="editor" style="height: 100%;"></div>
                 </div>
 
+                <!-- 設定画面 -->
                 <div class="settings-view-content content-hidden" id="content-settings">
                     <h1>設定</h1>
                     <h2>エディタ (Editor)</h2>
                     <div class="setting-item">
                         <label for="font-size">フォントサイズ</label>
-                        <input type="text" id="font-size" value="16px">
+                        <select id="font-size">
+                            <option value="12px">12px</option>
+                            <option value="14px">14px</option>
+                            <option value="16px" selected>16px</option>
+                            <option value="18px">18px</option>
+                            <option value="20px">20px</option>
+                            <option value="24px">24px</option>
+                        </select>
                     </div>
                     <div class="setting-item">
-                        <label><input type="checkbox" checked> 自動保存を有効にする</label>
+                        <label for="font-family">フォント (Font Family)</label>
+                        <select id="font-family">
+                            <option value='"Segoe UI", "Helvetica Neue", Arial, sans-serif' selected>Default (Segoe UI / Helvetica)</option>
+                            <option value='"Consolas", "Monaco", monospace'>Monospace (Consolas / Monaco)</option>
+                            <option value='"Meiryo", "Yu Gothic", sans-serif'>Japanese (Meiryo / Yu Gothic)</option>
+                            <option value='"Times New Roman", Times, serif'>Serif (Times New Roman)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label><input type="checkbox" id="auto-save" checked> 自動保存を有効にする</label>
                     </div>
                     <h2>外観 (Appearance)</h2>
                     <div class="setting-item">
@@ -192,19 +232,11 @@
                             <option value="dark">ダーク</option>
                         </select>
                     </div>
-                    <h2>PDF出力 (Export)</h2>
-                    <div class="setting-item">
-                        <label for="paper-size">用紙サイズ</label>
-                        <select id="paper-size">
-                            <option value="a4">A4</option>
-                            <option value="letter">Letter</option>
-                        </select>
-                    </div>
                 </div>
             </div>
 
+            <!-- 右ペイン（ターミナル/プレビュー） -->
             <div class="right-pane hidden" id="right-pane">
-                <!-- Terminal UI Structure -->
                 <div class="terminal-header" id="terminal-header">
                     <div class="terminal-tabs-container" id="terminal-tabs-container">
                         <div class="terminal-tabs-list" id="terminal-tabs-list"></div>
@@ -214,19 +246,14 @@
                         </div>
                     </div>
                 </div>
-                
-                <!-- Shell Dropdown -->
-                <div id="shell-dropdown" class="hidden"></div>
 
-                <!-- Terminal Container -->
+                <div id="shell-dropdown" class="hidden"></div>
                 <div id="terminal-container" class="terminal-content"></div>
 
                 <div class="pdf-preview-header hidden" id="pdf-preview-header">
                     PDFプレビュー
                     <div class="pdf-controls">
-                        <!-- <button id="pdf-prev-page" title="前のページ">◀</button> -->
                         <span id="pdf-page-info"></span>
-                        <!-- <button id="pdf-next-page" title="次のページ">▶</button> -->
                     </div>
                 </div>
                 <div id="pdf-preview-container" class="pdf-preview-content hidden">
@@ -236,15 +263,15 @@
 
             <div class="resizer" id="resizer-right"></div>
 
+            <!-- 右アクティビティバー -->
             <div class="right-activity-bar">
                 <div class="icon" id="btn-terminal-right" title="ターミナル">💻</div>
-                <!-- 右アクティビティバーにPDFプレビューボタンを追加 -->
                 <div class="icon" id="btn-pdf-preview" title="PDFプレビュー">📄</div>
             </div>
         </div>
 
+        <!-- 下ペイン -->
         <div class="bottom-pane hidden" id="bottom-pane">
-            <!-- ★修正: IDを追加してJSから操作可能に -->
             <div class="terminal-header" id="bottom-terminal-header">
                 ターミナル
             </div>
@@ -264,34 +291,22 @@
         </div>
     </div>
 
-    <!-- Prism.js -->
+    <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
-
-    <!-- xterm.js -->
     <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
-
-    <!-- KaTeX -->
     <script src="node_modules/katex/dist/katex.min.js"></script>
     <script src="node_modules/katex/dist/contrib/auto-render.min.js"></script>
-
-    <!-- Mermaid.js -->
     <script src="node_modules/mermaid/dist/mermaid.min.js"></script>
-
-    <!-- Marked.js for Markdown rendering -->
     <script src="node_modules/marked/lib/marked.umd.js"></script>
-
-    <!-- PDF.js - Load as ES module -->
     <script type="module">
         import * as pdfjsLib from './node_modules/pdfjs-dist/build/pdf.min.mjs';
         pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
         window.pdfjsLib = pdfjsLib;
     </script>
-
     <script src="./renderer.js"></script>
 </body>
-
 </html>

@@ -1,5 +1,5 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, ipcMain, dialog, session } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, session, shell } = require('electron') // shellを追加
 const path = require('node:path')
 const fs = require('fs')
 const { exec } = require('child_process')
@@ -39,6 +39,41 @@ function saveTerminalState() {
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
   } catch (error) {
     console.error('Failed to save terminal state:', error);
+  }
+}
+
+/**
+ * Load app settings from disk
+ */
+function loadAppSettings() {
+  const settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
+  try {
+    if (fs.existsSync(settingsPath)) {
+      return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    }
+  } catch (error) {
+    console.error('Failed to load app settings:', error);
+  }
+  // Default settings
+  return {
+    fontSize: '16px',
+    fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+    theme: 'light',
+    autoSave: true
+  };
+}
+
+/**
+ * Save app settings to disk
+ */
+function saveAppSettings(settings) {
+  const settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    return true;
+  } catch (error) {
+    console.error('Failed to save app settings:', error);
+    return false;
   }
 }
 
@@ -96,8 +131,8 @@ function createWindow() {
     autoHideMenuBar: true,  // ★追加: メニューバーを隠す
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true
+      nodeIntegration: true,
+      contextIsolation: false
     }
   })
 
@@ -233,6 +268,11 @@ function createWindow() {
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
 
+  // ★追加: 外部リンクを開くためのハンドラー
+  ipcMain.handle('open-external', async (event, url) => {
+    await shell.openExternal(url);
+  });
+
   // ★追加: ウィンドウ操作用のIPCハンドラー
   ipcMain.handle('window-minimize', () => {
     if(mainWindow) mainWindow.minimize();
@@ -250,6 +290,15 @@ function createWindow() {
 
   ipcMain.handle('window-close', () => {
     if(mainWindow) mainWindow.close();
+  });
+
+  // Settings Handlers
+  ipcMain.handle('load-app-settings', () => {
+    return loadAppSettings();
+  });
+
+  ipcMain.handle('save-app-settings', (event, settings) => {
+    return saveAppSettings(settings);
   });
 
   // Open the DevTools.
@@ -278,7 +327,7 @@ function createWindow() {
     workingDirectories.set(webContentsId, initialFolderPath);
   } else {
     // 指定したパスが無い場合はホームディレクトリにする（安全策）
-    console.log('指定されたフォルダが見つかりません。ホームディレクトリを使用します。');
+    // console.log('指定されたフォルダが見つかりません。ホームディレクトリを使用します。');
     workingDirectories.set(webContentsId, os.homedir());
   }
 

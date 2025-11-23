@@ -1,132 +1,70 @@
-/**
- * The preload script runs before `index.html` is loaded
- * in the renderer. It has access to web APIs as well as
- * Electron's renderer process modules and some polyfilled
- * Node.js functions.
- *
- * https://www.electronjs.org/docs/latest/tutorial/sandbox
- */
-const { contextBridge, ipcRenderer } = require('electron');
+// preload.js
+const { ipcRenderer } = require('electron');
 
-// Renderer ProcessにNode.js APIを安全に公開
-contextBridge.exposeInMainWorld('electronAPI', {
+// contextBridge ではなく window オブジェクトに直接割り当てる
+window.electronAPI = {
   // --- Terminal APIs ---
-  // Get terminal configuration
   getTerminalConfig: () => ipcRenderer.invoke('terminal:get-config'),
-
-  // Update terminal configuration
   updateTerminalConfig: (updates) => ipcRenderer.invoke('terminal:update-config', updates),
-
-  // 利用可能なシェルの一覧を取得
   getAvailableShells: () => ipcRenderer.invoke('get-available-shells'),
-
-  // 新しいターミナルを作成
   createTerminal: (options) => ipcRenderer.invoke('terminal:create', options),
-
-  // ターミナルを閉じる
   closeTerminal: (terminalId) => ipcRenderer.invoke('terminal:close', terminalId),
-
-  // ターミナルにデータを送信
   writeToTerminal: (terminalId, data) => ipcRenderer.send('pty:write', { terminalId, data }),
-
-  // ターミナルのサイズを変更
   resizeTerminal: (terminalId, cols, rows) => ipcRenderer.send('pty:resize', { terminalId, cols, rows }),
-
-  // Save terminal state
   saveTerminalState: () => ipcRenderer.invoke('terminal:save-state'),
-
-  // ターミナルからのデータを受信
-  onTerminalData: (callback) => ipcRenderer.on('pty:data', (event, payload) => {
-    callback(payload);
-  }),
-
-  // ターミナルの終了を受信
-  onTerminalExit: (callback) => ipcRenderer.on('pty:exit', (event, payload) => {
-    callback(payload);
-  }),
-
-  // Restore terminal state
-  onRestoreState: (callback) => ipcRenderer.on('terminal:restore-state', (event, state) => {
-    callback(state);
-  }),
+  
+  onTerminalData: (callback) => {
+    const handler = (event, payload) => callback(payload);
+    ipcRenderer.on('pty:data', handler);
+    // クリーンアップ用の関数を返す（必要に応じて）
+    return () => ipcRenderer.removeListener('pty:data', handler);
+  },
+  onTerminalExit: (callback) => ipcRenderer.on('pty:exit', (event, payload) => callback(payload)),
+  onRestoreState: (callback) => ipcRenderer.on('terminal:restore-state', (event, state) => callback(state)),
 
   // --- Editor & System APIs ---
-  // コマンド実行
-  executeCommand: (command, currentDir) => {
-    return ipcRenderer.invoke('execute-command', command, currentDir);
-  },
-  // カレントディレクトリ取得
-  getCurrentDirectory: () => {
-    return ipcRenderer.invoke('get-current-directory');
-  },
-  // 自動補完候補を取得
-  getCompletionCandidates: (prefix, currentDir) => {
-    return ipcRenderer.invoke('get-completion-candidates', prefix, currentDir);
-  },
+  executeCommand: (command, currentDir) => ipcRenderer.invoke('execute-command', command, currentDir),
+  getCurrentDirectory: () => ipcRenderer.invoke('get-current-directory'),
+  getCompletionCandidates: (prefix, currentDir) => ipcRenderer.invoke('get-completion-candidates', prefix, currentDir),
+  
   // Git operations
-  gitStatus: (repoPath) => {
-    return ipcRenderer.invoke('git-status', repoPath);
-  },
-  gitAdd: (repoPath, filepath) => {
-    return ipcRenderer.invoke('git-add', repoPath, filepath);
-  },
-  gitRemove: (repoPath, filepath) => {
-    return ipcRenderer.invoke('git-remove', repoPath, filepath);
-  },
-  gitCommit: (repoPath, message) => {
-    return ipcRenderer.invoke('git-commit', repoPath, message);
-  },
-  gitPush: (repoPath) => {
-    return ipcRenderer.invoke('git-push', repoPath);
-  },
-  gitPull: (repoPath) => {
-    return ipcRenderer.invoke('git-pull', repoPath);
-  },
+  gitStatus: (repoPath) => ipcRenderer.invoke('git-status', repoPath),
+  gitAdd: (repoPath, filepath) => ipcRenderer.invoke('git-add', repoPath, filepath),
+  gitRemove: (repoPath, filepath) => ipcRenderer.invoke('git-remove', repoPath, filepath),
+  gitCommit: (repoPath, message) => ipcRenderer.invoke('git-commit', repoPath, message),
+  gitPush: (repoPath) => ipcRenderer.invoke('git-push', repoPath),
+  gitPull: (repoPath) => ipcRenderer.invoke('git-pull', repoPath),
+  
   // File operations
-  saveFile: (filepath, content) => {
-    return ipcRenderer.invoke('save-file', filepath, content);
-  },
-  loadFile: (filepath) => {
-    return ipcRenderer.invoke('load-file', filepath);
-  },
-  listFiles: (dirPath) => {
-    return ipcRenderer.invoke('list-files', dirPath);
-  },
-  // ディレクトリ読み込み
-  readDirectory: (dirPath) => {
-    return ipcRenderer.invoke('read-directory', dirPath);
-  },
-  // ファイル削除
-  deleteFile: (filepath) => {
-    return ipcRenderer.invoke('delete-file', filepath);
-  },
-  // ディレクトリ作成
-  createDirectory: (dirPath) => {
-    return ipcRenderer.invoke('create-directory', dirPath);
-  },
-  // フォルダ選択ダイアログ
-  selectFolder: () => {
-    return ipcRenderer.invoke('select-folder');
-  },
-  // ウィンドウ操作用のAPI
+  saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
+  loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
+  listFiles: (dirPath) => ipcRenderer.invoke('list-files', dirPath),
+  readDirectory: (dirPath) => ipcRenderer.invoke('read-directory', dirPath),
+  deleteFile: (filepath) => ipcRenderer.invoke('delete-file', filepath),
+  createDirectory: (dirPath) => ipcRenderer.invoke('create-directory', dirPath),
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  
+  // Window operations
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
-  // PDF生成
-  generatePdf: (htmlContent) => {
-    return ipcRenderer.invoke('generate-pdf', htmlContent);
-  }
-});
+  
+  // PDF
+  generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
 
-console.log('Preload script loaded - electronAPI exposed');
+  // Settings
+  loadAppSettings: () => ipcRenderer.invoke('load-app-settings'),
+  saveAppSettings: (settings) => ipcRenderer.invoke('save-app-settings', settings),
 
-window.addEventListener('DOMContentLoaded', () => {
-  const replaceText = (selector, text) => {
-    const element = document.getElementById(selector)
-    if (element) element.innerText = text
-  }
+  // Context Menu Helper
+  showFileContextMenu: (filePath, isDirectory) => ipcRenderer.send('show-file-context-menu', filePath, isDirectory),
+  
+  // Open External Links (New)
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
-  for (const type of ['chrome', 'node', 'electron']) {
-    replaceText(`${type}-version`, process.versions[type])
-  }
-});
+  // Event Listeners
+  onInitiateRename: (callback) => ipcRenderer.on('initiate-rename', (_event, val) => callback(val)),
+  onFileDeleted: (callback) => ipcRenderer.on('file-deleted', (_event, val) => callback(val))
+};
+
+console.log('Preload script loaded - electronAPI exposed via window');
