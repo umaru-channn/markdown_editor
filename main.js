@@ -8,9 +8,13 @@ const os = require('os')
 const git = require('isomorphic-git')
 const http = require('isomorphic-git/http/node')
 const { terminalService } = require('./terminalService');
+const got = require('got'); // URLタイトル取得用
 
 // 各ウィンドウごとのカレントディレクトリを保持
 const workingDirectories = new Map();
+// ★追加: 各ウィンドウごとのファイルウォッチャーを保持
+const fileWatchers = new Map();
+
 let mainWindow = null;
 
 /**
@@ -122,13 +126,102 @@ function changeAllTerminalsDirectory(targetPath) {
   }
 }
 
+// ★追加: ディレクトリ監視を開始する関数
+function startFileWatcher(webContentsId, dirPath) {
+  // 既存のウォッチャーがあれば停止
+  if (fileWatchers.has(webContentsId)) {
+    try {
+      fileWatchers.get(webContentsId).close();
+    } catch (e) {
+      console.error('Error closing file watcher:', e);
+    }
+    fileWatchers.delete(webContentsId);
+  }
+
+  try {
+    if (!fs.existsSync(dirPath)) return;
+
+    // fs.watchを使ってディレクトリを監視 (recursive: true はWindows/macOSでサポート)
+    const watcher = fs.watch(dirPath, { recursive: true }, (eventType, filename) => {
+      if (filename) {
+        // .gitフォルダ内の変更は無視する（頻繁すぎるため）
+        if (filename.includes('.git') || filename.includes('node_modules')) return;
+        
+        // レンダラープロセスへ通知（デバウンスはレンダラー側で行うか、ここで行う）
+        // ここでは単純に送る
+        const window = BrowserWindow.fromId(webContentsId);
+        if (window && !window.isDestroyed()) {
+          window.webContents.send('file-system-changed', { eventType, filename });
+        }
+      }
+    });
+
+    watcher.on('error', (error) => {
+        console.error(`Watcher error: ${error}`);
+    });
+
+    fileWatchers.set(webContentsId, watcher);
+    console.log(`Started watching directory: ${dirPath}`);
+
+  } catch (error) {
+    console.error(`Failed to start file watcher for ${dirPath}:`, error);
+  }
+}
+
+// ★高速化ヘルパー: URLの先頭部分だけを取得する関数
+const fetchHtmlHead = (url) => {
+  return new Promise((resolve, reject) => {
+    // Stream APIを使用
+    const stream = got.stream(url, {
+      timeout: { request: 2000 }, // 2秒でタイムアウト（高速化）
+      retry: { limit: 0 }, // リトライなし
+      headers: {
+        // 一般的なブラウザのUAを偽装（ブロック回避・レスポンス向上）
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    const chunks = [];
+    let size = 0;
+    // 60KBもあれば通常headタグは含まれる
+    const MAX_SIZE = 60 * 1024; 
+
+    stream.on('data', (chunk) => {
+      chunks.push(chunk);
+      size += chunk.length;
+      const currentData = chunk.toString();
+
+      // サイズ制限超過、または </head> や <body> が見つかったら終了
+      if (size > MAX_SIZE || currentData.includes('</head>') || currentData.includes('<body')) {
+        stream.destroy(); // ストリームを破棄してダウンロードを中止
+        resolve(Buffer.concat(chunks).toString());
+      }
+    });
+
+    stream.on('end', () => {
+      resolve(Buffer.concat(chunks).toString());
+    });
+
+    stream.on('error', (err) => {
+      // destroy()による中断もエラーとして扱われる場合があるため、
+      // データが少しでも取れていれば成功とみなす
+      if (chunks.length > 0) {
+        resolve(Buffer.concat(chunks).toString());
+      } else {
+        // 本当のエラー（接続不可など）
+        resolve(''); // rejectせず空文字を返してフォールバックさせる
+      }
+    });
+  });
+};
+
 function createWindow() {
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    frame: false,           // ★追加: OS標準のフレーム(タイトルバーなど)を削除
-    autoHideMenuBar: true,  // ★追加: メニューバーを隠す
+    frame: false,           // OS標準のフレーム(タイトルバーなど)を削除
+    autoHideMenuBar: true,  // メニューバーを隠す
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
@@ -188,7 +281,7 @@ function createWindow() {
   // Create new terminal handler
   ipcMain.handle('terminal:create', (event, { profileName, cwd }) => {
     try {
-      // ★変更: cwdが指定されていない場合、現在開いている親フォルダを使用する
+      // cwdが指定されていない場合、現在開いている親フォルダを使用する
       let targetCwd = cwd;
       if (!targetCwd) {
         const webContentsId = event.sender.id;
@@ -268,12 +361,74 @@ function createWindow() {
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
 
-  // ★追加: 外部リンクを開くためのハンドラー
+  // 外部リンクを開くためのハンドラー
   ipcMain.handle('open-external', async (event, url) => {
     await shell.openExternal(url);
   });
 
-  // ★追加: ウィンドウ操作用のIPCハンドラー
+  // ★高速化: URLのメタデータ(OGP)を取得するハンドラー (Stream版)
+  ipcMain.handle('fetch-url-metadata', async (event, url) => {
+    try {
+      // 全文取得(await got)ではなく、先頭だけ取得する関数を使用
+      const body = await fetchHtmlHead(url);
+      
+      // 簡易的な正規表現でOGPタグを抽出
+      const getMetaContent = (prop) => {
+        const regex = new RegExp(`<meta\\s+(?:property|name)=["']${prop}["']\\s+content=["']([^"']+)["']`, 'i');
+        const match = body.match(regex);
+        return match ? match[1] : null;
+      };
+
+      const titleRegex = /<title>([^<]*)<\/title>/i;
+      const titleMatch = body.match(titleRegex);
+      
+      const metadata = {
+        title: getMetaContent('og:title') || (titleMatch ? titleMatch[1].trim() : url),
+        description: getMetaContent('og:description') || getMetaContent('description') || '',
+        image: getMetaContent('og:image') || '',
+        url: url,
+        domain: new URL(url).hostname
+      };
+
+      // HTMLエンティティの簡易デコード
+      const decodeEntities = (str) => {
+        if (!str) return str;
+        return str.replace(/&amp;/g, '&')
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"')
+                  .replace(/&#39;/g, "'");
+      };
+
+      metadata.title = decodeEntities(metadata.title);
+      metadata.description = decodeEntities(metadata.description);
+
+      return { success: true, data: metadata };
+    } catch (error) {
+      console.error('Failed to fetch URL metadata:', error.message);
+      return { 
+        success: false, 
+        error: error.message,
+        data: { title: url, description: '', image: '', url: url, domain: new URL(url).hostname } 
+      };
+    }
+  });
+
+  // ★高速化: URLのタイトルを取得するハンドラー (Stream版)
+  ipcMain.handle('fetch-url-title', async (event, url) => {
+    try {
+      const body = await fetchHtmlHead(url);
+      const match = body.match(/<title>([^<]*)<\/title>/i);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+      return url;
+    } catch (error) {
+      return url;
+    }
+  });
+
+  // ウィンドウ操作用のIPCハンドラー
   ipcMain.handle('window-minimize', () => {
     if(mainWindow) mainWindow.minimize();
   });
@@ -320,15 +475,19 @@ function createWindow() {
   // webContents IDを取得（ウィンドウ破棄前に保存）
   const webContentsId = mainWindow.webContents.id;
 
-  // ★変更: 初期状態で開きたいフォルダ（保管庫）のパスを指定
-  const initialFolderPath = 'C:\\Users\\it222184.TSITCL\\electron_app\\markdown_editor\\markdown_vault';
+  // 初期状態で開きたいフォルダ（保管庫）のパスを指定
+  const initialFolderPath = path.join(__dirname, 'markdown_vault');
 
   if (fs.existsSync(initialFolderPath)) {
     workingDirectories.set(webContentsId, initialFolderPath);
+    // ★追加: 初期フォルダの監視開始
+    startFileWatcher(webContentsId, initialFolderPath);
   } else {
     // 指定したパスが無い場合はホームディレクトリにする（安全策）
-    // console.log('指定されたフォルダが見つかりません。ホームディレクトリを使用します。');
-    workingDirectories.set(webContentsId, os.homedir());
+    const homeDir = os.homedir();
+    workingDirectories.set(webContentsId, homeDir);
+    // ★追加: ホームディレクトリの監視開始
+    startFileWatcher(webContentsId, homeDir);
   }
 
   // Save state periodically
@@ -344,6 +503,15 @@ function createWindow() {
   mainWindow.on('closed', () => {
     clearInterval(saveInterval);
     workingDirectories.delete(webContentsId);
+    
+    // ★追加: ウォッチャーのクリーンアップ
+    if (fileWatchers.has(webContentsId)) {
+        try {
+            fileWatchers.get(webContentsId).close();
+        } catch (e) { /* ignore */ }
+        fileWatchers.delete(webContentsId);
+    }
+    
     mainWindow = null;
   });
 }
@@ -450,8 +618,11 @@ ipcMain.handle('execute-command', async (event, command, currentDir) => {
         if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
           workingDirectories.set(webContentsId, newPath);
           
-          // ★追加: 内部コマンドでCDが実行された場合もターミナルを同期
+          // 内部コマンドでCDが実行された場合もターミナルを同期
           changeAllTerminalsDirectory(newPath);
+          
+          // ★追加: 新しいディレクトリの監視を開始
+          startFileWatcher(webContentsId, newPath);
 
           resolve({
             success: true,
@@ -663,6 +834,53 @@ ipcMain.handle('save-file', async (event, filepath, content) => {
   }
 });
 
+// リネーム処理
+ipcMain.handle('rename-file', async (event, oldPath, newName) => {
+  try {
+    const dir = path.dirname(oldPath);
+    const ext = path.extname(oldPath);
+    
+    // 新しい名前が拡張子を含んでいない場合、元の拡張子を維持する
+    // newNameに拡張子があるかどうかをチェック
+    let newFilename = newName;
+    if (!path.extname(newName) && ext) {
+        newFilename += ext;
+    }
+    
+    const newPath = path.join(dir, newFilename);
+    
+    // 同じ名前なら何もしない
+    if (oldPath === newPath) return { success: true, path: oldPath };
+    
+    // 移動先に同名ファイルがある場合はエラー
+    if (fs.existsSync(newPath)) {
+        return { success: false, error: '同名のファイルが既に存在します。' };
+    }
+
+    fs.renameSync(oldPath, newPath);
+    return { success: true, path: newPath };
+  } catch (error) {
+    console.error('Failed to rename file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ★追加: 移動処理
+ipcMain.handle('move-file', async (event, oldPath, newPath) => {
+  try {
+    // 移動先に同名ファイルがある場合はエラー
+    if (fs.existsSync(newPath)) {
+      return { success: false, error: '移動先に同名のファイルまたはフォルダが存在します。' };
+    }
+
+    fs.renameSync(oldPath, newPath);
+    return { success: true, path: newPath };
+  } catch (error) {
+    console.error('Failed to move file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('load-file', async (event, filepath) => {
   try {
     const content = fs.readFileSync(filepath, 'utf8');
@@ -697,7 +915,7 @@ ipcMain.handle('read-directory', async (event, dirPath) => {
 ipcMain.handle('delete-file', async (event, filepath) => {
   try {
     if (fs.existsSync(filepath)) {
-      // ★変更: ファイルだけでなくフォルダも再帰的に削除できるように変更
+      // ファイルだけでなくフォルダも再帰的に削除できるように変更
       fs.rmSync(filepath, { recursive: true, force: true });
       return true;
     }
@@ -745,8 +963,11 @@ ipcMain.handle('select-folder', async (event) => {
       const webContentsId = event.sender.id;
       workingDirectories.set(webContentsId, selectedPath);
       
-      // ★追加: フォルダ変更時に全ターミナルのディレクトリを同期
+      // フォルダ変更時に全ターミナルのディレクトリを同期
       changeAllTerminalsDirectory(selectedPath);
+      
+      // ★追加: 新しいフォルダの監視を開始
+      startFileWatcher(webContentsId, selectedPath);
 
       return { success: true, path: selectedPath };
     } else {
@@ -758,7 +979,7 @@ ipcMain.handle('select-folder', async (event) => {
   }
 });
 
-// PDF生成のIPC ハンドラー
+// PDF生成 (プレビュー用 - Base64返し) のIPC ハンドラー
 ipcMain.handle('generate-pdf', async (event, htmlContent) => {
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
@@ -776,14 +997,94 @@ ipcMain.handle('generate-pdf', async (event, htmlContent) => {
     });
 
     // Load HTML content
-    const htmlTemplate = `
+    const htmlTemplate = getPdfHtmlTemplate(htmlContent);
+
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
+
+    // Generate PDF
+    const pdfData = await pdfWindow.webContents.printToPDF({
+      marginsType: 1,
+      pageSize: 'A4',
+      printBackground: true,
+      printSelectionOnly: false
+    });
+
+    // Close the temporary window
+    pdfWindow.close();
+
+    // Return PDF as base64
+    return pdfData.toString('base64');
+  } catch (error) {
+    console.error('Failed to generate PDF:', error);
+    throw error;
+  }
+});
+
+// ★追加: PDFエクスポート（ファイル保存）のIPCハンドラー
+ipcMain.handle('export-pdf', async (event, htmlContent) => {
+  try {
+    const mainWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!mainWindow) {
+      throw new Error('Main window not found');
+    }
+
+    // 保存先ダイアログを開く
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title: 'PDFとしてエクスポート',
+      defaultPath: 'document.pdf',
+      filters: [
+        { name: 'PDF Files', extensions: ['pdf'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (canceled || !filePath) {
+      return { success: false, canceled: true };
+    }
+
+    // 一時ウィンドウでレンダリング
+    const pdfWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    const htmlTemplate = getPdfHtmlTemplate(htmlContent);
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
+
+    // PDF生成
+    const pdfData = await pdfWindow.webContents.printToPDF({
+      marginsType: 1,
+      pageSize: 'A4',
+      printBackground: true,
+      printSelectionOnly: false
+    });
+
+    pdfWindow.close();
+
+    // ファイルに保存
+    fs.writeFileSync(filePath, pdfData);
+
+    return { success: true, path: filePath };
+
+  } catch (error) {
+    console.error('Failed to export PDF:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// HTMLテンプレートを生成するヘルパー関数
+function getPdfHtmlTemplate(htmlContent) {
+  return `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8">
           <style>
             body {
-              font-family: Arial, sans-serif;
+              font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
               padding: 40px;
               line-height: 1.6;
               color: #333;
@@ -832,6 +1133,18 @@ ipcMain.handle('generate-pdf', async (event, htmlContent) => {
               background-color: #f6f8fa;
               font-weight: 600;
             }
+            img {
+              max-width: 100%;
+            }
+            /* 改ページ用スタイル */
+            .page-break {
+              page-break-after: always;
+              break-after: page;
+              display: block;
+              height: 0;
+              margin: 0;
+              border: none;
+            }
           </style>
         </head>
         <body>
@@ -839,27 +1152,7 @@ ipcMain.handle('generate-pdf', async (event, htmlContent) => {
         </body>
       </html>
     `;
-
-    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
-
-    // Generate PDF
-    const pdfData = await pdfWindow.webContents.printToPDF({
-      marginsType: 1,
-      pageSize: 'A4',
-      printBackground: true,
-      printSelectionOnly: false
-    });
-
-    // Close the temporary window
-    pdfWindow.close();
-
-    // Return PDF as base64
-    return pdfData.toString('base64');
-  } catch (error) {
-    console.error('Failed to generate PDF:', error);
-    throw error;
-  }
-});
+}
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

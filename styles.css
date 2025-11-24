@@ -42,11 +42,15 @@ html, body {
     --cb-header-bg: #f6f8fa;
     --cb-body-bg: #f6f8fa;
     --cb-radius: 6px;
+    --cb-gutter-width: 3em; /* コードブロック行番号エリアの幅 */
 
     /* Editor Settings */
     --editor-font-size: 16px;
     --editor-font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
     --line-height: 1.6em; 
+    
+    /* List Settings */
+    --list-indent-width: 2em; /* タブ幅相当（約4文字分）のインデント */
 }
 
 /* Dark Theme Overrides */
@@ -425,6 +429,14 @@ body[data-theme="dark"] .header-btn:hover {
     overflow-y: auto;
     padding: 5px 0;
     font-size: 13px;
+    outline: none; /* デフォルトのフォーカス枠を消してカスタムスタイルを適用 */
+}
+
+/* ファイルエクスプローラーのフォーカススタイル */
+/* ファイルが選択されていない（.selectedクラスを持つ要素がない）場合のみ枠を表示 */
+#content-files:focus:not(:has(.tree-item.selected)) {
+    outline: 1px solid #007acc;
+    outline-offset: -1px; /* 枠線を内側に */
 }
 
 #content-git, #content-outline {
@@ -459,6 +471,12 @@ body[data-theme="dark"] .tree-item:hover {
     background-color: rgba(255,255,255,0.05);
 }
 
+/* ドラッグ&ドロップ用スタイル */
+.tree-item.drag-over {
+    background-color: rgba(0, 122, 204, 0.2) !important;
+    border: 1px dashed #007acc;
+}
+
 .tree-item.selected {
     background-color: #007acc !important;
     color: white !important;
@@ -485,11 +503,28 @@ body[data-theme="dark"] .tree-item:hover {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    pointer-events: none; /* ドラッグイベントの邪魔にならないように */
 }
 
 .tree-children {
     margin-left: 10px;
     border-left: 1px solid var(--sidebar-border);
+}
+
+/* リネーム用の入力フィールド */
+.rename-input {
+    flex: 1;
+    background-color: var(--main-bg);
+    color: var(--text-color);
+    border: 1px solid #007acc;
+    padding: 1px 4px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    margin-left: 5px;
+    border-radius: 2px;
+    min-width: 0;
+    height: 20px; /* tree-itemの高さに合わせる */
 }
 
 /* Outline */
@@ -585,6 +620,43 @@ body[data-theme="dark"] .outline-item:hover {
     transition: margin-bottom 0.2s ease;
 }
 
+/* File Title Bar (Obsidian-like) */
+.file-title-bar {
+    padding: 10px 40px 0 40px; /* エディタのパディングに合わせる */
+    background-color: var(--main-bg);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.file-title-bar.hidden {
+    display: none;
+}
+
+.file-title-input {
+    width: 100%;
+    max-width: 900px; /* エディタのmax-widthに合わせる */
+    font-size: 1.5em;
+    font-weight: bold;
+    border: none;
+    background: transparent;
+    color: var(--text-color);
+    outline: none;
+    padding: 5px 0;
+    text-align: center;
+    transition: border-bottom 0.2s;
+    border-bottom: 2px solid transparent;
+}
+
+.file-title-input:focus {
+    border-bottom: 2px solid #007acc;
+}
+
+.file-title-input:hover {
+    border-bottom: 2px solid var(--sidebar-border);
+}
+
 /* Toolbar */
 .toolbar {
     padding: 4px 8px;
@@ -609,7 +681,7 @@ body[data-theme="dark"] .outline-item:hover {
 
 .toolbar-left {
     flex: 1;
-    overflow: hidden;
+    overflow: visible;
     padding-right: 10px;
     flex-wrap: nowrap;
     white-space: nowrap;
@@ -833,7 +905,7 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
 .cm-live-h3 { font-size: 1.318em; }
 .cm-live-h4 { font-size: 1.188em; }
 .cm-live-h5 { font-size: 1.076em; }
-.cm-live-h6 { font-size: 1em; }
+.cm-live-h6 { font-size: 1.0em; }
 
 .cm-live-quote {
     background: var(--cb-body-bg);
@@ -873,15 +945,18 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
     color: transparent;
 }
 
+/* 箇条書きリスト */
 .cm-live-li {
     position: relative;
-    padding-left: 1.5em !important;
+    /* 1.5em(基本) + (インデントレベル * タブ幅) */
+    padding-left: calc(1.5em + (var(--indent-level, 0) * var(--list-indent-width))) !important;
 }
 
 .cm-live-li::before {
     content: '•';
     position: absolute;
-    left: 0.5em;
+    /* 0.5em(基本) + (インデントレベル * タブ幅) */
+    left: calc(0.5em + (var(--indent-level, 0) * var(--list-indent-width)));
     width: 1em;
     text-align: center;
     color: var(--text-color);
@@ -890,14 +965,17 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
     z-index: 5;
 }
 
+/* タスクリスト */
 .cm-live-task {
     position: relative;
-    padding-left: 2em !important;
+    /* 2em(基本) + (インデントレベル * タブ幅) */
+    padding-left: calc(2em + (var(--indent-level, 0) * var(--list-indent-width))) !important;
 }
 
 .cm-live-checkbox-wrapper {
     position: absolute;
-    left: 0.5em;
+    /* 0.5em(基本) + (インデントレベル * タブ幅) */
+    left: calc(0.5em + (var(--indent-level, 0) * var(--list-indent-width)));
     top: -2px;
     display: inline-block;
     vertical-align: middle;
@@ -914,18 +992,26 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
     vertical-align: middle;
 }
 
+/* 番号付きリスト */
 .cm-live-ol {
     position: relative;
+    /* 箇条書きと同じベースパディング(1.5em)を追加 */
+    padding-left: calc(1.5em + (var(--indent-level, 0) * var(--list-indent-width))) !important;
 }
 
 .cm-live-ol-marker {
     font-weight: bold;
     color: #005cc5;
+    /* ハンギングインデント化 */
+    position: absolute;
+    left: calc(var(--indent-level, 0) * var(--list-indent-width));
+    width: 1.5em;
+    text-align: center;
+    display: inline-block;
 }
 body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 
-/* ★★★ Code Block Styles (Updated) ★★★ */
-/* Marginを完全に削除し、エディタの行計算を狂わせない */
+/* ★★★ Code Block Styles (Updated with Line Numbers) ★★★ */
 
 /* 共通設定 */
 .cm-code-block, 
@@ -934,9 +1020,38 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     background-color: var(--cb-body-bg);
     font-family: var(--editor-font-family-mono, monospace);
     box-sizing: border-box;
-    /* paddingで横幅を調整し、marginは使わない */
-    padding-left: 12px !important;
     margin: 0 !important;
+    position: relative; /* 行番号配置用 */
+}
+
+/* コードブロックの中身（行番号エリア分パディング確保） */
+.cm-code-block {
+    padding-left: calc(var(--cb-gutter-width) + 12px) !important;
+}
+
+/* ヘッダーとフッターはパディングなしで通常の配置（ただし境界線を合わせる） */
+.cm-code-header, 
+.cm-code-footer {
+    padding-left: 12px !important;
+}
+
+/* 行番号の表示 (疑似要素) */
+.cm-code-with-linenum::before {
+    content: attr(data-code-line);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: var(--cb-gutter-width);
+    height: 100%;
+    text-align: right;
+    padding-right: 8px;
+    color: #888; /* 行番号の色 */
+    background-color: var(--cb-body-bg); /* 背景色（本体と同じ） */
+    border-right: 1px solid var(--cb-border-color); /* 境界線 */
+    box-sizing: border-box;
+    pointer-events: none; /* 選択不可 */
+    font-size: 0.9em;
+    opacity: 0.7;
 }
 
 /* 編集モード（カーソルあり） */
@@ -974,8 +1089,6 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     display: flex !important;
     justify-content: flex-end !important;
     align-items: center;
-    
-    /* マージン削除でズレ解消 */
 }
 
 /* プレビューモード（カーソルなし）のフッター */
@@ -986,8 +1099,6 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     border-right: 1px solid var(--cb-border-color);
     border-bottom-left-radius: var(--cb-radius);
     border-bottom-right-radius: var(--cb-radius);
-    
-    /* マージン削除でズレ解消 */
 }
 
 /* テキスト透明化（高さを維持するためdisplay:noneは不可） */
@@ -1404,7 +1515,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
 }
 
 .modal-btn {
-    padding: 5px 10px;
+    /* padding: 5px 10px; */
     border: 1px solid var(--sidebar-border);
     background: var(--sidebar-bg);
     color: var(--text-color);
@@ -1505,4 +1616,226 @@ body.is-resizing-col .toolbar,
 body.is-resizing-col .center-pane,
 body.is-resizing-row .bottom-pane {
     transition: none !important;
+}
+
+/* ★追加: 通知トースト */
+.notification-container {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none; /* クリックを透過 */
+}
+
+.notification-toast {
+    background-color: #333;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    font-size: 14px;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 250px;
+    border-left: 4px solid #007acc;
+}
+
+.notification-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.notification-toast.error {
+    border-left-color: #e81123;
+}
+
+.notification-toast.success {
+    border-left-color: #4caf50;
+}
+
+/* ダークモード対応は現状の配色(#333)でOKだが、ライトモード用に調整 */
+body:not([data-theme="dark"]) .notification-toast {
+    background-color: #fff;
+    color: #333;
+    border: 1px solid #ddd;
+    border-left-width: 4px;
+}
+
+/* ★追加: ページブレイクウィジェットのスタイル */
+/* 改ページ行を通常のテキスト行の高さに合わせる */
+.cm-page-break-widget {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0; /* 余白なし */
+    padding: 0; /* パディングなし */
+    color: #888;
+    font-size: 0.75em; /* 少し小さくして行内に収める */
+    font-weight: normal;
+    user-select: none;
+    height: var(--line-height); /* エディタの行高に合わせる */
+    box-sizing: border-box;
+}
+
+.cm-page-break-widget::before,
+.cm-page-break-widget::after {
+    content: "";
+    flex: 1;
+    border-bottom: 1px dashed #ccc; /* 点線 */
+    margin: 0 10px;
+    opacity: 0.5;
+    position: relative;
+    top: -1px; /* 垂直位置の微調整 */
+}
+
+body[data-theme="dark"] .cm-page-break-widget {
+    color: #666;
+}
+
+body[data-theme="dark"] .cm-page-break-widget::before,
+body[data-theme="dark"] .cm-page-break-widget::after {
+    border-bottom-color: #444;
+}
+
+/* ★追加: Notion風ブックマークカードのスタイル */
+.cm-bookmark-widget {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    height: 120px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 0.5em 0;
+    background-color: #ffffff;
+    transition: background-color 0.2s;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    user-select: none;
+}
+
+.cm-bookmark-widget:hover {
+    background-color: #f9fafb;
+}
+
+body[data-theme="dark"] .cm-bookmark-widget {
+    background-color: #1e1e1e;
+    border-color: #444;
+}
+
+body[data-theme="dark"] .cm-bookmark-widget:hover {
+    background-color: #2d2d2d;
+}
+
+.cm-bookmark-content {
+    flex: 1;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.cm-bookmark-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0 0 4px 0;
+    line-height: 1.4;
+}
+
+body[data-theme="dark"] .cm-bookmark-title {
+    color: #e5e7eb;
+}
+
+.cm-bookmark-desc {
+    font-size: 12px;
+    color: #6b7280;
+    display: -webkit-box;
+    /* -webkit-line-clamp: 2; */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.5;
+    margin: 0;
+}
+
+body[data-theme="dark"] .cm-bookmark-desc {
+    color: #9ca3af;
+}
+
+.cm-bookmark-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+body[data-theme="dark"] .cm-bookmark-meta {
+    color: #9ca3af;
+}
+
+.cm-bookmark-favicon {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+}
+
+.cm-bookmark-domain {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-bookmark-cover {
+    width: 33%;
+    max-width: 240px;
+    min-width: 120px;
+    height: 100%;
+    border-left: 1px solid #f3f4f6;
+    position: relative;
+}
+
+body[data-theme="dark"] .cm-bookmark-cover {
+    border-left-color: #444;
+}
+
+.cm-bookmark-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Loading State */
+.cm-bookmark-loading {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .5; }
+}
+
+.skeleton-box {
+    background-color: #e5e7eb;
+    border-radius: 4px;
+}
+
+body[data-theme="dark"] .skeleton-box {
+    background-color: #374151;
 }

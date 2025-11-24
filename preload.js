@@ -38,6 +38,8 @@ window.electronAPI = {
   // File operations
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
+  renameFile: (oldPath, newName) => ipcRenderer.invoke('rename-file', oldPath, newName),
+  moveFile: (srcPath, destPath) => ipcRenderer.invoke('move-file', srcPath, destPath), // ★追加
   listFiles: (dirPath) => ipcRenderer.invoke('list-files', dirPath),
   readDirectory: (dirPath) => ipcRenderer.invoke('read-directory', dirPath),
   deleteFile: (filepath) => ipcRenderer.invoke('delete-file', filepath),
@@ -51,6 +53,11 @@ window.electronAPI = {
   
   // PDF
   generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
+  exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent), // ★追加
+
+  // Utility
+  fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url), // ★追加: URLタイトル取得
+  fetchUrlMetadata: (url) => ipcRenderer.invoke('fetch-url-metadata', url), // ★追加: URLメタデータ(OGP)取得
 
   // Settings
   loadAppSettings: () => ipcRenderer.invoke('load-app-settings'),
@@ -64,7 +71,14 @@ window.electronAPI = {
 
   // Event Listeners
   onInitiateRename: (callback) => ipcRenderer.on('initiate-rename', (_event, val) => callback(val)),
-  onFileDeleted: (callback) => ipcRenderer.on('file-deleted', (_event, val) => callback(val))
+  onFileDeleted: (callback) => ipcRenderer.on('file-deleted', (_event, val) => callback(val)),
+  
+  // ★追加: ファイルシステムの変更を監視するイベントリスナー
+  onFileSystemChanged: (callback) => {
+    const handler = (event, payload) => callback(payload);
+    ipcRenderer.on('file-system-changed', handler);
+    return () => ipcRenderer.removeListener('file-system-changed', handler);
+  }
 };
 
 console.log('Preload script loaded - electronAPI exposed via window');

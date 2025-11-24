@@ -88,8 +88,8 @@
                     </div>
                 </div>
 
-                <!-- ファイルエクスプローラー -->
-                <div class="left-pane-content" id="content-files">
+                <!-- ファイルエクスプローラー (tabindexを追加) -->
+                <div class="left-pane-content" id="content-files" tabindex="0">
                     <div class="file-tree" id="file-tree-container">
                         <div class="tree-item expanded" data-path=".">
                             <span class="tree-toggle">▼</span>
@@ -127,13 +127,21 @@
 
             <!-- 中央ペイン（エディタ） -->
             <div class="center-pane" id="center-pane">
+                <!-- ファイルタイトル入力バー -->
+                <div class="file-title-bar hidden" id="file-title-bar">
+                    <input type="text" id="file-title-input" class="file-title-input" placeholder="ファイル名"
+                        spellcheck="false">
+                </div>
+
                 <!-- 拡張ツールバー -->
                 <div class="toolbar">
                     <div class="toolbar-left" id="toolbar-left">
                         <!-- 保存 -->
                         <button id="btn-save" title="保存 (Ctrl+S)">💾</button>
+                        <!-- PDFエクスポート -->
+                        <button id="btn-export-pdf" title="PDFとしてエクスポート">📤</button>
                         <span class="separator">|</span>
-                        
+
                         <!-- Undo/Redo -->
                         <button id="toolbar-undo" title="元に戻す (Ctrl+Z)">↩</button>
                         <button id="toolbar-redo" title="やり直し (Ctrl+Y)">↪</button>
@@ -157,11 +165,11 @@
                         <button id="bold-btn" title="太字 (Ctrl+B)"><b>B</b></button>
                         <button id="italic-btn" title="斜体 (Ctrl+I)"><i>I</i></button>
                         <button id="strike-btn" title="取り消し線"><s>S</s></button>
-                        
+
                         <!-- リンク・画像 -->
                         <button id="link-btn" title="リンク挿入">Link</button>
                         <button id="image-btn" title="画像挿入">Img</button>
-                        
+
                         <span class="separator">|</span>
 
                         <!-- ブロック要素 -->
@@ -169,7 +177,16 @@
                         <button id="quote-btn" title="引用">”</button>
                         <button id="code-btn" title="コードブロック">Code</button>
                         <button id="hr-btn" title="区切り線">—</button>
-                        
+                        <!-- 改ページボタン (アイコン変更: 背中合わせ形状へ) -->
+                        <button id="btn-page-break" title="改ページ (Page Break)">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                                stroke-width="1.3" style="transform: scale(1.0);">
+                                <path d="M4 2 V5 H12 V2" />
+                                <path d="M4 14 V11 H12 V14" />
+                                <path d="M3 8 H13" stroke-dasharray="2 2" stroke-width="1.2" />
+                            </svg>
+                        </button>
+
                         <!-- リスト -->
                         <div class="toolbar-dropdown-container">
                             <button id="btn-list-menu" title="リスト">≡ ▼</button>
@@ -183,7 +200,7 @@
                         <!-- オーバーフロー用「もっと見る」ボタン -->
                         <button id="btn-toolbar-more" class="hidden" title="さらに表示" style="font-weight: bold;">»</button>
                     </div>
-                    
+
                     <div class="toolbar-right">
                         <!-- ゴミ箱（ファイルを閉じる） -->
                         <button id="btn-close-file-toolbar" title="現在のファイルを閉じる" style="color: #d9534f;">🗑</button>
@@ -215,7 +232,8 @@
                     <div class="setting-item">
                         <label for="font-family">フォント (Font Family)</label>
                         <select id="font-family">
-                            <option value='"Segoe UI", "Helvetica Neue", Arial, sans-serif' selected>Default (Segoe UI / Helvetica)</option>
+                            <option value='"Segoe UI", "Helvetica Neue", Arial, sans-serif' selected>Default (Segoe UI /
+                                Helvetica)</option>
                             <option value='"Consolas", "Monaco", monospace'>Monospace (Consolas / Monaco)</option>
                             <option value='"Meiryo", "Yu Gothic", sans-serif'>Japanese (Meiryo / Yu Gothic)</option>
                             <option value='"Times New Roman", Times, serif'>Serif (Times New Roman)</option>
@@ -291,6 +309,9 @@
         </div>
     </div>
 
+    <!-- ★追加: 通知用コンテナ -->
+    <div id="notification-container" class="notification-container"></div>
+
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
@@ -309,4 +330,5 @@
     </script>
     <script src="./renderer.js"></script>
 </body>
+
 </html>
