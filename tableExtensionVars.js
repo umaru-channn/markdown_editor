@@ -833,21 +833,17 @@ class TableWidget extends WidgetType {
                 // キャレットをコンテンツスパン内の末尾に配置
                 // ドラッグハンドルやリサイザーではなく、実際のテキストコンテンツ内にキャレットを置く
                 const contentSpan = target.querySelector('.cm-cell-content');
-                if (contentSpan) {
+                // コンテンツスパンがあればその中に、なければセル全体にキャレットを配置
+                const focusTarget = contentSpan || (target.firstChild || target.textContent ? target : null);
+                if (focusTarget) {
                     const s = window.getSelection();
-                    const r = document.createRange();
-                    r.selectNodeContents(contentSpan);
-                    r.collapse(false); // 末尾に移動
-                    s?.removeAllRanges();
-                    s?.addRange(r);
-                } else if (target.firstChild || target.textContent) {
-                    // フォールバック: コンテンツスパンがない場合
-                    const s = window.getSelection();
-                    const r = document.createRange();
-                    r.selectNodeContents(target);
-                    r.collapse(false);
-                    s?.removeAllRanges();
-                    s?.addRange(r);
+                    if (s) {
+                        const r = document.createRange();
+                        r.selectNodeContents(focusTarget);
+                        r.collapse(false); // 末尾に移動
+                        s.removeAllRanges();
+                        s.addRange(r);
+                    }
                 }
                 target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
                 return true;
