@@ -5,6 +5,40 @@ const { RangeSetBuilder } = require("@codemirror/state");
 
 /* ========== Helper Functions & Widgets ========== */
 
+// 言語リスト
+const LANGUAGE_LIST = [
+    { label: "Plain Text", value: "" },
+    { label: "JavaScript", value: "javascript" },
+    { label: "TypeScript", value: "typescript" },
+    { label: "HTML", value: "html" },
+    { label: "CSS", value: "css" },
+    { label: "Python", value: "python" },
+    { label: "Java", value: "java" },
+    { label: "C", value: "c" },
+    { label: "C++", value: "cpp" },
+    { label: "C#", value: "csharp" },
+    { label: "Go", value: "go" },
+    { label: "Rust", value: "rust" },
+    { label: "PHP", value: "php" },
+    { label: "Ruby", value: "ruby" },
+    { label: "Swift", value: "swift" },
+    { label: "Kotlin", value: "kotlin" },
+    { label: "SQL", value: "sql" },
+    { label: "JSON", value: "json" },
+    { label: "XML", value: "xml" },
+    { label: "YAML", value: "yaml" },
+    { label: "Markdown", value: "markdown" },
+    { label: "Bash / Shell", value: "bash" },
+    { label: "PowerShell", value: "powershell" },
+    { label: "Dockerfile", value: "dockerfile" },
+    { label: "Diff", value: "diff" },
+    { label: "Lua", value: "lua" },
+    { label: "Perl", value: "perl" },
+    { label: "R", value: "r" },
+    { label: "Dart", value: "dart" },
+    { label: "Scala", value: "scala" }
+];
+
 function findLinkText(node, state) {
     let textStart = 0;
     let textEnd = 0;
@@ -26,27 +60,28 @@ function findLinkText(node, state) {
 
 // 言語名を適切にフォーマットする関数
 function formatLanguageName(lang) {
-    if (!lang) return "";
+    if (!lang) return "Plain Text";
     const l = lang.toLowerCase();
+    
+    // LANGUAGE_LISTから検索
+    const found = LANGUAGE_LIST.find(item => item.value === l);
+    if (found) return found.label;
+
+    // マップにない場合のフォールバック（一般的な別名対応）
     const map = {
-        "js": "JavaScript", "javascript": "JavaScript", "node": "Node.js",
-        "ts": "TypeScript", "typescript": "TypeScript",
-        "py": "Python", "python": "Python",
-        "md": "Markdown", "markdown": "Markdown",
-        "html": "HTML", "htm": "HTML",
-        "css": "CSS",
-        "java": "Java",
-        "cpp": "C++", "c++": "C++", "c": "C",
-        "cs": "C#", "csharp": "C#",
+        "js": "JavaScript", "node": "JavaScript", "jsx": "JavaScript",
+        "ts": "TypeScript", "tsx": "TypeScript",
+        "py": "Python",
+        "md": "Markdown",
+        "htm": "HTML",
+        "cs": "C#",
+        "rs": "Rust",
+        "sh": "Bash / Shell", "zsh": "Bash / Shell",
+        "yml": "YAML",
+        "rb": "Ruby",
         "go": "Go",
-        "rs": "Rust", "rust": "Rust",
-        "sql": "SQL",
-        "json": "JSON",
-        "xml": "XML",
-        "sh": "Shell", "bash": "Bash", "zsh": "Zsh",
-        "yaml": "YAML", "yml": "YAML",
-        "rb": "Ruby", "ruby": "Ruby",
-        "php": "PHP"
+        "ps1": "PowerShell",
+        "docker": "Dockerfile"
     };
     return map[l] || (l.charAt(0).toUpperCase() + l.slice(1));
 }
@@ -101,24 +136,211 @@ class CheckboxWidget extends WidgetType {
     ignoreEvent() { return true; }
 }
 
-/* --- Code Block Language Label Widget --- */
+/* --- Code Block Language Label Widget (Dropdown) --- */
 class CodeBlockLanguageWidget extends WidgetType {
     constructor(lang) { super(); this.lang = lang; }
     eq(other) { return other.lang === this.lang; }
-    toDOM() {
-        const container = document.createElement("span");
-        container.className = "cm-language-widget";
+    
+    toDOM(view) {
+        const container = document.createElement("div");
+        container.className = "cm-language-widget-container";
+
+        // 言語選択ボタン（ドロップダウンのトリガー）
+        const selectBtn = document.createElement("button");
+        selectBtn.className = "cm-language-select-btn";
+        selectBtn.innerHTML = `<span>${formatLanguageName(this.lang)}</span> <span class="arrow">▼</span>`;
+        selectBtn.title = "言語を選択";
         
-        if (this.lang) {
-            const btn = document.createElement("button");
-            btn.className = "cm-code-copy-btn";
-            btn.textContent = formatLanguageName(this.lang);
-            btn.title = "コードをコピー";
-            container.appendChild(btn);
-        }
+        selectBtn.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // エディタのフォーカス喪失を防ぐ
+            this.showDropdown(view, selectBtn);
+        });
+
+        // コピーボタン
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "cm-code-copy-btn";
+        copyBtn.textContent = "コピー";
+        copyBtn.title = "コードをクリップボードにコピー";
+        
+        // Widget内での直接イベントハンドリングに変更
+        copyBtn.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.copyCode(view, container, copyBtn);
+        });
+
+        container.appendChild(selectBtn);
+        container.appendChild(copyBtn);
         return container;
     }
-    ignoreEvent() { return false; } 
+
+    // コピー処理の実装
+    copyCode(view, container, btn) {
+        const pos = view.posAtDOM(container);
+        if (pos === null) return;
+
+        let node = syntaxTree(view.state).resolveInner(pos, 1);
+        while (node && node.name !== "FencedCode") {
+            node = node.parent;
+        }
+
+        if (node && node.name === "FencedCode") {
+            const startLine = view.state.doc.lineAt(node.from);
+            const endLine = view.state.doc.lineAt(node.to);
+            const codeStart = startLine.to + 1;
+            const codeEnd = endLine.from;
+            
+            if (codeStart < codeEnd) {
+                const codeText = view.state.sliceDoc(codeStart, codeEnd);
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(codeText).then(() => {
+                        const originalText = btn.textContent;
+                        btn.textContent = "Copied!";
+                        btn.classList.add("copied");
+                        setTimeout(() => {
+                            btn.textContent = originalText;
+                            btn.classList.remove("copied");
+                        }, 2000);
+                    }).catch(err => console.error(err));
+                }
+            }
+        }
+    }
+
+    showDropdown(view, targetBtn) {
+        // 既存のドロップダウンがあれば閉じる
+        const existingDropdown = document.querySelector(".cm-language-dropdown-portal");
+        if (existingDropdown) existingDropdown.remove();
+
+        const dropdown = document.createElement("div");
+        dropdown.className = "cm-language-dropdown-portal";
+        
+        const searchInput = document.createElement("input");
+        searchInput.type = "text";
+        searchInput.className = "cm-language-search";
+        searchInput.placeholder = "言語を検索...";
+        searchInput.spellcheck = false;
+        
+        const listContainer = document.createElement("div");
+        listContainer.className = "cm-language-list";
+
+        const performChange = (newLang) => {
+            const pos = view.posAtDOM(targetBtn);
+            if (pos === null) return;
+
+            // 構文木から FencedCode ノードを探す
+            let node = syntaxTree(view.state).resolveInner(pos, 1);
+            while (node && node.name !== "FencedCode") {
+                node = node.parent;
+            }
+
+            if (node && node.name === "FencedCode") {
+                // コードブロックの先頭行を取得
+                const line = view.state.doc.lineAt(node.from);
+                const lineText = line.text;
+                
+                // 正規表現で ```lang の部分を特定して置換
+                const match = lineText.match(/^(\s*`{3,})([\w-]*)/);
+                if (match) {
+                    const prefix = match[1]; // "```"
+                    const currentLang = match[2]; // "javascript"
+                    
+                    // 言語指定部分の開始位置と終了位置
+                    const start = line.from + prefix.length;
+                    const end = start + currentLang.length;
+                    
+                    view.dispatch({
+                        changes: { from: start, to: end, insert: newLang }
+                    });
+                }
+            }
+        };
+
+        const renderList = (filterText = "") => {
+            listContainer.innerHTML = "";
+            const lowerFilter = filterText.toLowerCase();
+            
+            LANGUAGE_LIST.forEach(item => {
+                if (filterText && !item.label.toLowerCase().includes(lowerFilter) && !item.value.toLowerCase().includes(lowerFilter)) {
+                    return;
+                }
+
+                const listItem = document.createElement("div");
+                listItem.className = "cm-language-item";
+                const isSelected = (this.lang || "").toLowerCase() === item.value;
+                if (isSelected) listItem.classList.add("selected");
+                
+                listItem.innerHTML = `
+                    <span class="label">${item.label}</span>
+                    ${isSelected ? '<span class="check">✓</span>' : ''}
+                `;
+
+                listItem.addEventListener("mousedown", (e) => { // clickだとblurが先に走る可能性があるためmousedown
+                    e.preventDefault();
+                    performChange(item.value);
+                    dropdown.remove();
+                    document.removeEventListener("mousedown", outsideClickListener);
+                });
+
+                listContainer.appendChild(listItem);
+            });
+
+            if (listContainer.children.length === 0) {
+                const emptyItem = document.createElement("div");
+                emptyItem.className = "cm-language-item empty";
+                emptyItem.textContent = "見つかりません";
+                listContainer.appendChild(emptyItem);
+            }
+        };
+
+        renderList();
+
+        searchInput.addEventListener("input", (e) => {
+            renderList(e.target.value);
+        });
+
+        // 検索ボックスでのEnterキー対応
+        searchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                // 最初の候補を選択
+                const firstItem = listContainer.querySelector(".cm-language-item:not(.empty)");
+                if (firstItem) {
+                    const evt = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+                    firstItem.dispatchEvent(evt);
+                }
+            }
+        });
+
+        dropdown.appendChild(searchInput);
+        dropdown.appendChild(listContainer);
+        document.body.appendChild(dropdown);
+
+        const rect = targetBtn.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 4}px`;
+        
+        // 右端揃えにするか左揃えにするか（画面からはみ出さないように）
+        const dropdownWidth = 220; // CSSと合わせる
+        if (rect.left + dropdownWidth > window.innerWidth - 20) {
+            dropdown.style.left = `${rect.right - dropdownWidth}px`;
+        } else {
+            dropdown.style.left = `${rect.left}px`;
+        }
+
+        searchInput.focus();
+
+        const outsideClickListener = (e) => {
+            if (!dropdown.contains(e.target) && e.target !== targetBtn && !targetBtn.contains(e.target)) {
+                dropdown.remove();
+                document.removeEventListener("mousedown", outsideClickListener);
+            }
+        };
+        
+        setTimeout(() => {
+            document.addEventListener("mousedown", outsideClickListener);
+        }, 0);
+    }
+
+    ignoreEvent() { return true; } 
 }
 
 /* --- 改ページ (Page Break) Widget --- */
@@ -132,7 +354,7 @@ class PageBreakWidget extends WidgetType {
     ignoreEvent() { return true; }
 }
 
-/* --- ★追加: Bookmark (Link Card) Widget --- */
+/* --- Bookmark (Link Card) Widget --- */
 // キャッシュ用マップ（同じURLの再フェッチを防ぐ）
 const bookmarkCache = new Map();
 
@@ -157,7 +379,7 @@ class BookmarkWidget extends WidgetType {
         // スケルトンUI (ローディング中)
         const content = document.createElement("div");
         content.className = "cm-bookmark-content";
-        
+
         const titleSkeleton = document.createElement("div");
         titleSkeleton.className = "skeleton-box";
         titleSkeleton.style.width = "70%";
@@ -204,11 +426,11 @@ class BookmarkWidget extends WidgetType {
                 // ここではとりあえずスケルトンを消してURLを表示
                 container.classList.remove("cm-bookmark-loading");
                 container.innerHTML = `
-                    <div class="cm-bookmark-content">
-                        <div class="cm-bookmark-title">${this.url}</div>
-                        <div class="cm-bookmark-desc">No preview available</div>
-                    </div>
-                `;
+                        <div class="cm-bookmark-content">
+                            <div class="cm-bookmark-title">${this.url}</div>
+                            <div class="cm-bookmark-desc">No preview available</div>
+                        </div>
+                    `;
             }
         } catch (e) {
             console.error("Failed to load bookmark data", e);
@@ -233,7 +455,7 @@ class BookmarkWidget extends WidgetType {
 
         const metaDiv = document.createElement("div");
         metaDiv.className = "cm-bookmark-meta";
-        
+
         // ファビコン (Googleのサービスを利用)
         const faviconUrl = `https://www.google.com/s2/favicons?domain=${data.domain}&sz=32`;
         const favicon = document.createElement("img");
@@ -258,12 +480,12 @@ class BookmarkWidget extends WidgetType {
         if (data.image) {
             const coverDiv = document.createElement("div");
             coverDiv.className = "cm-bookmark-cover";
-            
+
             const img = document.createElement("img");
             img.className = "cm-bookmark-image";
             img.src = data.image;
             img.alt = "Cover";
-            
+
             // 画像読み込みエラー時の処理
             img.onerror = () => {
                 coverDiv.style.display = "none";
@@ -289,7 +511,7 @@ function buildDecorations(view) {
         // 1. まず各行のテキストベースでのチェック（改ページ検出、ブックマーク検出など）
         for (let pos = from; pos < to;) {
             const line = state.doc.lineAt(pos);
-            
+
             // 既に処理済みの行はスキップ
             if (processedLines.has(line.from)) {
                 pos = line.to + 1;
@@ -311,18 +533,16 @@ function buildDecorations(view) {
                     });
                     processedLines.add(line.from);
                     pos = line.to + 1;
-                    continue; 
+                    continue;
                 }
             }
 
-            // ★修正: "@card URL" の形式の行をブックマークカード化する
-            // 通常のURLと区別するため、明示的なマーカー(@card)を使用
+            // "@card URL" の形式の行をブックマークカード化する
             const bookmarkRegex = /^@card\s+(https?:\/\/[^\s]+)$/;
             const bookmarkMatch = lineText.trim().match(bookmarkRegex);
-            
+
             if (bookmarkMatch) {
                 if (!isCursorOnLine) {
-                    // match[1] にURLが入っている
                     collectedDecos.push({
                         from: line.from,
                         to: line.to,
@@ -332,10 +552,41 @@ function buildDecorations(view) {
                     processedLines.add(line.from);
                     pos = line.to + 1;
                     continue;
-                } else {
-                    // カーソルがある行は "@card " の部分だけ隠して URLは見せる（編集用）
-                    // もしくは全体を表示する。ここではシンプルに全体表示にしておくか、
-                    // @card だけ薄くするなどの処理も可能だが、一旦標準のテキスト表示に戻す。
+                }
+            }
+
+            // ハイライト (==text==) の検出
+            const highlightRegex = /==([^=]+)==/g;
+            let match;
+            while ((match = highlightRegex.exec(lineText)) !== null) {
+                const start = line.from + match.index;
+                const end = start + match[0].length;
+                
+                // カーソルがハイライト内にあるか
+                const isCursorIn = (cursor >= start && cursor <= end);
+
+                if (!isCursorIn) {
+                    // マーカー (==) を隠す (開始)
+                    collectedDecos.push({
+                        from: start,
+                        to: start + 2,
+                        side: 0,
+                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                    });
+                    // テキスト部分を光らせる
+                    collectedDecos.push({
+                        from: start + 2,
+                        to: end - 2,
+                        side: 1,
+                        deco: Decoration.mark({ class: "cm-live-highlight" })
+                    });
+                    // マーカー (==) を隠す (終了)
+                    collectedDecos.push({
+                        from: end - 2,
+                        to: end,
+                        side: 0,
+                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                    });
                 }
             }
 
@@ -349,7 +600,7 @@ function buildDecorations(view) {
             enter: (node) => {
                 const n = node.node || node;
                 const line = state.doc.lineAt(node.from);
-                
+
                 const isCursorOnLine = (cursor >= line.from && cursor <= line.to);
                 const isCursorInNode = (cursor >= node.from && cursor <= node.to);
 
@@ -403,7 +654,7 @@ function buildDecorations(view) {
                     const lineText = state.doc.sliceString(line.from, line.to);
                     const validListRegex = /^\s*([-*+]|\d+\.)\s/;
                     if (!validListRegex.test(lineText)) { return false; }
-                    
+
                     const listMark = n.firstChild;
                     if (!listMark) return true;
 
@@ -424,7 +675,7 @@ function buildDecorations(view) {
                     } else if (isOrdered) {
                         collectedDecos.push({ from: line.from, to: line.from, side: -1, deco: Decoration.line({ class: "cm-live-ol", attributes: { style: indentStyle } }) });
                         collectedDecos.push({ from: listMark.from, to: listMark.to, side: 0, deco: Decoration.mark({ class: "cm-live-ol-marker" }) });
-                        
+
                         // 行頭の空白だけ隠す
                         const indentMatch = lineText.match(/^\s*/);
                         if (indentMatch && indentMatch[0].length > 0) {
@@ -467,57 +718,57 @@ function buildDecorations(view) {
                         if (isCursorInNode) {
                             if (isHeader) className += " cm-code-block-first-active";
                             if (isFooter) className += " cm-code-block-last-active";
-                            
-                            collectedDecos.push({ 
-                                from: lineObj.from, 
-                                to: lineObj.from, 
-                                side: -1, 
-                                deco: Decoration.line({ class: className, attributes: attrs }) 
+
+                            collectedDecos.push({
+                                from: lineObj.from,
+                                to: lineObj.from,
+                                side: -1,
+                                deco: Decoration.line({ class: className, attributes: attrs })
                             });
-                        } 
+                        }
                         else {
                             if (isHeader) {
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.from, 
-                                    side: -1, 
-                                    deco: Decoration.line({ class: "cm-code-header" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.from,
+                                    side: -1,
+                                    deco: Decoration.line({ class: "cm-code-header" })
                                 });
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.to, 
-                                    side: 0, 
-                                    deco: Decoration.mark({ class: "cm-transparent-text" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.to,
+                                    side: 0,
+                                    deco: Decoration.mark({ class: "cm-transparent-text" })
                                 });
-                                const match = lineObj.text.match(/^(\s*`{3,})(\w+)?/);
+                                const match = lineObj.text.match(/^(\s*`{3,})([\w-]+)?/);
                                 const lang = match && match[2] ? match[2] : "";
-                                collectedDecos.push({ 
-                                    from: lineObj.to, 
-                                    to: lineObj.to, 
-                                    side: 1, 
-                                    deco: Decoration.widget({ widget: new CodeBlockLanguageWidget(lang), side: 1 }) 
+                                collectedDecos.push({
+                                    from: lineObj.to,
+                                    to: lineObj.to,
+                                    side: 1,
+                                    deco: Decoration.widget({ widget: new CodeBlockLanguageWidget(lang), side: 1 })
                                 });
                             }
                             else if (isFooter) {
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.from, 
-                                    side: -1, 
-                                    deco: Decoration.line({ class: "cm-code-footer" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.from,
+                                    side: -1,
+                                    deco: Decoration.line({ class: "cm-code-footer" })
                                 });
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.to, 
-                                    side: 0, 
-                                    deco: Decoration.mark({ class: "cm-transparent-text" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.to,
+                                    side: 0,
+                                    deco: Decoration.mark({ class: "cm-transparent-text" })
                                 });
                             }
                             else {
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.from, 
-                                    side: -1, 
-                                    deco: Decoration.line({ class: className, attributes: attrs }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.from,
+                                    side: -1,
+                                    deco: Decoration.line({ class: className, attributes: attrs })
                                 });
                             }
                         }
@@ -565,7 +816,7 @@ function buildDecorations(view) {
                 if (cursor >= node.from && cursor <= node.to) { return; }
                 const n = node.node || node;
                 let startMark, endMark;
-                
+
                 if (node.name === "Strikethrough") {
                     startMark = (typeof n.getChild === "function") ? n.getChild("StrikethroughMark") : null;
                     endMark = n.lastChild;
@@ -641,42 +892,13 @@ const plugin = ViewPlugin.define(
                     if (match) {
                         const prefixLen = match[1].length;
                         const markerStart = line.from + prefixLen;
-                        const markerEnd = markerStart + 3; 
+                        const markerEnd = markerStart + 3;
                         const currentMarker = match[2];
                         const isChecked = currentMarker.toLowerCase().includes("x");
                         const newText = isChecked ? "[ ]" : "[x]";
                         view.dispatch({ changes: { from: markerStart, to: markerEnd, insert: newText } });
                         return true;
                     }
-                }
-                if (target.classList.contains("cm-code-copy-btn")) {
-                    e.preventDefault();
-                    const pos = view.posAtDOM(target);
-                    let node = syntaxTree(view.state).resolveInner(pos, 1);
-                    while (node && node.name !== "FencedCode") {
-                        node = node.parent;
-                    }
-                    if (node && node.name === "FencedCode") {
-                        const startLine = view.state.doc.lineAt(node.from);
-                        const endLine = view.state.doc.lineAt(node.to);
-                        const codeStart = startLine.to + 1;
-                        const codeEnd = endLine.from;
-                        if (codeStart < codeEnd) {
-                            const codeText = view.state.sliceDoc(codeStart, codeEnd);
-                            if (navigator.clipboard) {
-                                navigator.clipboard.writeText(codeText).then(() => {
-                                    const originalText = target.textContent;
-                                    target.textContent = "Copied!"; 
-                                    target.classList.add("copied");
-                                    setTimeout(() => {
-                                        target.textContent = originalText;
-                                        target.classList.remove("copied");
-                                    }, 2000);
-                                }).catch(err => console.error(err));
-                            }
-                        }
-                    }
-                    return true;
                 }
                 const linkElement = target.closest(".cm-live-link");
                 if (linkElement) {
@@ -688,11 +910,9 @@ const plugin = ViewPlugin.define(
                         }
                     }
                 }
-                // ★追加: ブックマークカードのクリック処理
+                // ブックマークカードのクリック処理
                 const bookmarkElement = target.closest(".cm-bookmark-widget");
                 if (bookmarkElement) {
-                    // デフォルトのリンク動作（target="_blank"）をElectronで正しく開くため
-                    // 内部ブラウザ遷移を防ぎ、外部ブラウザで開く
                     e.preventDefault();
                     const url = bookmarkElement.getAttribute("href");
                     if (url && window.electronAPI && window.electronAPI.openExternal) {
