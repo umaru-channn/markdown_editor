@@ -92,7 +92,7 @@ function changeAllTerminalsDirectory(targetPath) {
       if (!term.isDisposed) {
         const shellName = (term.shellName || '').toLowerCase();
         let cmd = '';
-        
+
         // プラットフォームとシェルに応じてコマンドを生成
         if (process.platform === 'win32') {
           // Windowsの場合
@@ -146,7 +146,7 @@ function startFileWatcher(webContentsId, dirPath) {
       if (filename) {
         // .gitフォルダ内の変更は無視する（頻繁すぎるため）
         if (filename.includes('.git') || filename.includes('node_modules')) return;
-        
+
         // レンダラープロセスへ通知（デバウンスはレンダラー側で行うか、ここで行う）
         // ここでは単純に送る
         const window = BrowserWindow.fromId(webContentsId);
@@ -157,7 +157,7 @@ function startFileWatcher(webContentsId, dirPath) {
     });
 
     watcher.on('error', (error) => {
-        console.error(`Watcher error: ${error}`);
+      console.error(`Watcher error: ${error}`);
     });
 
     fileWatchers.set(webContentsId, watcher);
@@ -184,7 +184,7 @@ const fetchHtmlHead = (url) => {
     const chunks = [];
     let size = 0;
     // 60KBもあれば通常headタグは含まれる
-    const MAX_SIZE = 60 * 1024; 
+    const MAX_SIZE = 60 * 1024;
 
     stream.on('data', (chunk) => {
       chunks.push(chunk);
@@ -242,7 +242,7 @@ function createWindow() {
   })
 
   // --- Integrated Terminal Setup with TerminalService ---
-  
+
   // Set up terminal service event handlers
   terminalService.on('terminal-data', ({ terminalId, data }) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -338,10 +338,10 @@ function createWindow() {
     try {
       console.log(`IPC: Closing terminal ${terminalId}`);
       const result = terminalService.closeTerminal(terminalId);
-      
+
       // Wait a bit for the process to fully clean up
       await new Promise(resolve => setTimeout(resolve, 100));
-      
+
       console.log(`IPC: Terminal ${terminalId} close completed`);
       return result;
     } catch (error) {
@@ -355,7 +355,7 @@ function createWindow() {
     saveTerminalState();
     return true;
   });
-  
+
   // --- End of Terminal Setup ---
 
   // and load the index.html of the app.
@@ -371,7 +371,7 @@ function createWindow() {
     try {
       // 全文取得(await got)ではなく、先頭だけ取得する関数を使用
       const body = await fetchHtmlHead(url);
-      
+
       // 簡易的な正規表現でOGPタグを抽出
       const getMetaContent = (prop) => {
         const regex = new RegExp(`<meta\\s+(?:property|name)=["']${prop}["']\\s+content=["']([^"']+)["']`, 'i');
@@ -381,7 +381,7 @@ function createWindow() {
 
       const titleRegex = /<title>([^<]*)<\/title>/i;
       const titleMatch = body.match(titleRegex);
-      
+
       const metadata = {
         title: getMetaContent('og:title') || (titleMatch ? titleMatch[1].trim() : url),
         description: getMetaContent('og:description') || getMetaContent('description') || '',
@@ -394,10 +394,10 @@ function createWindow() {
       const decodeEntities = (str) => {
         if (!str) return str;
         return str.replace(/&amp;/g, '&')
-                  .replace(/&lt;/g, '<')
-                  .replace(/&gt;/g, '>')
-                  .replace(/&quot;/g, '"')
-                  .replace(/&#39;/g, "'");
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
       };
 
       metadata.title = decodeEntities(metadata.title);
@@ -406,10 +406,10 @@ function createWindow() {
       return { success: true, data: metadata };
     } catch (error) {
       console.error('Failed to fetch URL metadata:', error.message);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
-        data: { title: url, description: '', image: '', url: url, domain: new URL(url).hostname } 
+        data: { title: url, description: '', image: '', url: url, domain: new URL(url).hostname }
       };
     }
   });
@@ -430,21 +430,21 @@ function createWindow() {
 
   // ウィンドウ操作用のIPCハンドラー
   ipcMain.handle('window-minimize', () => {
-    if(mainWindow) mainWindow.minimize();
+    if (mainWindow) mainWindow.minimize();
   });
 
   ipcMain.handle('window-maximize', () => {
-    if(mainWindow) {
-        if (mainWindow.isMaximized()) {
+    if (mainWindow) {
+      if (mainWindow.isMaximized()) {
         mainWindow.unmaximize();
-        } else {
+      } else {
         mainWindow.maximize();
-        }
+      }
     }
   });
 
   ipcMain.handle('window-close', () => {
-    if(mainWindow) mainWindow.close();
+    if (mainWindow) mainWindow.close();
   });
 
   // Settings Handlers
@@ -503,15 +503,15 @@ function createWindow() {
   mainWindow.on('closed', () => {
     clearInterval(saveInterval);
     workingDirectories.delete(webContentsId);
-    
+
     // ★追加: ウォッチャーのクリーンアップ
     if (fileWatchers.has(webContentsId)) {
-        try {
-            fileWatchers.get(webContentsId).close();
-        } catch (e) { /* ignore */ }
-        fileWatchers.delete(webContentsId);
+      try {
+        fileWatchers.get(webContentsId).close();
+      } catch (e) { /* ignore */ }
+      fileWatchers.delete(webContentsId);
     }
-    
+
     mainWindow = null;
   });
 }
@@ -617,10 +617,10 @@ ipcMain.handle('execute-command', async (event, command, currentDir) => {
       try {
         if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
           workingDirectories.set(webContentsId, newPath);
-          
+
           // 内部コマンドでCDが実行された場合もターミナルを同期
           changeAllTerminalsDirectory(newPath);
-          
+
           // ★追加: 新しいディレクトリの監視を開始
           startFileWatcher(webContentsId, newPath);
 
@@ -839,22 +839,22 @@ ipcMain.handle('rename-file', async (event, oldPath, newName) => {
   try {
     const dir = path.dirname(oldPath);
     const ext = path.extname(oldPath);
-    
+
     // 新しい名前が拡張子を含んでいない場合、元の拡張子を維持する
     // newNameに拡張子があるかどうかをチェック
     let newFilename = newName;
     if (!path.extname(newName) && ext) {
-        newFilename += ext;
+      newFilename += ext;
     }
-    
+
     const newPath = path.join(dir, newFilename);
-    
+
     // 同じ名前なら何もしない
     if (oldPath === newPath) return { success: true, path: oldPath };
-    
+
     // 移動先に同名ファイルがある場合はエラー
     if (fs.existsSync(newPath)) {
-        return { success: false, error: '同名のファイルが既に存在します。' };
+      return { success: false, error: '同名のファイルが既に存在します。' };
     }
 
     fs.renameSync(oldPath, newPath);
@@ -962,10 +962,10 @@ ipcMain.handle('select-folder', async (event) => {
       // カレントディレクトリを更新
       const webContentsId = event.sender.id;
       workingDirectories.set(webContentsId, selectedPath);
-      
+
       // フォルダ変更時に全ターミナルのディレクトリを同期
       changeAllTerminalsDirectory(selectedPath);
-      
+
       // ★追加: 新しいフォルダの監視を開始
       startFileWatcher(webContentsId, selectedPath);
 
@@ -1119,6 +1119,41 @@ function getPdfHtmlTemplate(htmlContent) {
               color: #666;
               margin: 16px 0;
             }
+            /* List Styling */
+            ul, ol {
+              padding-left: 2em;
+              margin-bottom: 1em;
+            }
+            ol ol, ul ol, ol ul, ul ul {
+                margin-bottom: 0;
+            }
+            li {
+              margin-bottom: 0.2em; /* 0.5em から変更 */
+              white-space: pre-wrap; /* リストのネストのインデント用スペースを保持 */
+            }
+            /* リスト内の段落マージンを削除して隙間を詰める */
+            li > p {
+              margin-top: 0;
+              margin-bottom: 0;
+            }
+            /* Task List (Checklist) Styling */
+            li:has(input[type="checkbox"]) {
+              list-style-type: none;
+              position: relative;
+            }
+            input[type="checkbox"] {
+              margin-right: 0.5em;
+              vertical-align: middle;
+            }
+            
+            /* Mark styling for ==highlight== */
+            mark {
+              background-color: #fff700;
+              color: black;
+              padding: 0 2px;
+              border-radius: 2px;
+            }
+
             table {
               border-collapse: collapse;
               width: 100%;
@@ -1144,6 +1179,77 @@ function getPdfHtmlTemplate(htmlContent) {
               height: 0;
               margin: 0;
               border: none;
+            }
+            /* ★追加: ブックマークカード用スタイル */
+            .cm-bookmark-widget {
+                display: flex;
+                width: 100%;
+                max-width: 100%;
+                height: 120px;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                overflow: hidden;
+                margin: 16px 0;
+                background-color: #ffffff;
+                text-decoration: none;
+                color: inherit;
+                page-break-inside: avoid;
+            }
+            .cm-bookmark-content {
+                flex: 1;
+                padding: 12px 16px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                overflow: hidden;
+                min-width: 0;
+            }
+            .cm-bookmark-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #111827;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-bottom: 4px;
+                line-height: 1.4;
+            }
+            .cm-bookmark-desc {
+                font-size: 12px;
+                color: #6b7280;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                line-height: 1.5;
+                margin: 0;
+            }
+            .cm-bookmark-meta {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                margin-top: 8px;
+                font-size: 12px;
+                color: #6b7280;
+            }
+            .cm-bookmark-favicon {
+                width: 16px;
+                height: 16px;
+                object-fit: contain;
+            }
+            .cm-bookmark-cover {
+                width: 33%;
+                max-width: 240px;
+                min-width: 120px;
+                height: 100%;
+                border-left: 1px solid #f3f4f6;
+                position: relative;
+            }
+            .cm-bookmark-image {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
             }
           </style>
         </head>
@@ -1173,7 +1279,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', function () {
   // Save terminal state before quitting
   saveTerminalState();
-  
+
   // Dispose all terminals
   terminalService.dispose();
 

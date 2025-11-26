@@ -3,6 +3,7 @@
  * Integrated layout with full Markdown functionality (CodeMirror 6) and Terminal Support
  */
 
+const path = require('path'); // ★追加: パス操作用
 const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
@@ -11,6 +12,7 @@ const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUn
 const { javascript } = require("@codemirror/lang-javascript");
 const { oneDark } = require("@codemirror/theme-one-dark");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
+const { tablePlugin } = require("./tablePlugin.js");
 
 // プログラムによる変更を識別するためのアノテーション
 const ExternalChange = Annotation.define();
@@ -160,14 +162,6 @@ function switchMainView(targetId) {
     } else {
         if (fileTitleBar) fileTitleBar.classList.add('hidden');
     }
-
-    // 5. エディタへの自動フォーカスを削除
-    // ファイルを開いたときに勝手にエディタへカーソルが移動するのを防ぐため削除しました。
-    /*
-    if (targetId === 'content-readme' && globalEditorView) {
-        globalEditorView.focus();
-    }
-    */
 }
 
 // ========== 設定関連の関数 ==========
@@ -304,52 +298,85 @@ const codeLanguages = (info) => {
     return null;
 };
 
-const startDoc = `# マークダウン記法の使い方
+const startDoc = `# Markdown IDE の使い方
 
-Markdown（マークダウン）は、手軽に文章の構造や装飾を書くための記法です。
-左側に書くと、右側にプレビューが表示されます。
+このエディタは、Markdown記法をリアルタイムでプレビューしながら記述できるIDEです。
+上部のツールバーを使って、簡単に装飾や要素を挿入できます。
 
-## 見出し
-# H1 見出し
-## H2 見出し
-### H3 見出し
-#### H4 見出し
-##### H5 見出し
-###### H6 見出し
+## 🛠 ツールバー機能
 
-## テキストの装飾
-**太字** や *斜体* 、~~取り消し線~~ が使えます。
+### 基本操作
+- 💾 **保存**: \`Ctrl + S\`
+- 📤 **PDFエクスポート**: 記述した内容をPDFとして保存します。
+- ↩/↪ **元に戻す/やり直し**: \`Ctrl + Z\` / \`Ctrl + Y\`
 
-## リスト
-- リスト項目1
-- リスト項目2
-    - ネストされた項目
+### テキスト装飾
+ツールバーのボタンで以下の装飾が可能です。
+- **太字**: \`**Bold**\`
+- *斜体*: \`*Italic*\`
+- ~~取り消し線~~: \`~~Strike~~\`
+- ==ハイライト==: \`==Highlight==\`
 
+### 見出し
+\`H2\`, \`H3\` ボタンで素早く見出しを作成できます。\`Hn ▼\` から他のレベルも選択可能です。
+
+### リスト
+- 箇条書きリスト
 1. 番号付きリスト
-2. 番号付きリスト
-    1-1. ネストされた番号付きリスト
+- [ ] チェックリスト（タスクリスト）
 
-## コード
-インラインの \`code\` や、コードブロックが書けます：
+### 挿入機能
+- **リンク**: \`[タイトル](URL)\`
+- **画像**: \`![alt](画像URL)\`
+- **引用**: \`> 引用テキスト\`
+- **コード**: インライン \` \`code\` \` やコードブロック
+- **区切り線**: \`---\`
+
+## ✨ 高度な機能
+
+### テーブル（表）
+ツールバーの \`Table\` ボタンで挿入できます。
+作成されたテーブルは、マウス操作で**列幅の変更**や**行・列の追加/削除**が可能です。
+
+| 機能 | 説明 | 対応 |
+| :--- | :--- | :---: |
+| リサイズ | 列の境界線をドラッグ | ✅ |
+| 編集 | セルを直接編集 | ✅ |
+| 右クリック | 行・列の操作メニュー | ✅ |
+
+### 改ページ (Page Break)
+PDFエクスポート時の改ページ位置を指定できます。ツールバーの改ページボタンを押すと挿入されます。
+
+<div class="page-break"></div>
+
+（↑ここに改ページが入っています）
+
+### ブックマークカード (URL貼り付け)
+URLをエディタに貼り付けると、メニューが表示され「ブックマーク」を選択するとリッチなカード形式で表示されます。
+
+@card https://www.electronjs.org/
+
+### コードブロック
+言語を指定してシンタックスハイライトが可能です。
 
 \`\`\`javascript
-console.log('Hello, Markdown!');
-const x = 10;
+function hello() {
+    console.log("Hello, Markdown IDE!");
+}
 \`\`\`
+
+## ⌨️ ショートカットキー
+- \`Ctrl + S\`: 保存
+- \`Ctrl + B\`: 太字
+- \`Ctrl + I\`: 斜体
+- \`Ctrl + Z\`: 元に戻す
 `;
 
 // ========== リスト操作ロジック (Custom List Handling) ==========
 
-// 正規表現: ハイフン区切りの番号 (1-1. や 2-1-1. など) に対応
-const LIST_RE = /^(\s*)((?:[-*+]|\d+(?:-\d+)*\.)|(- \[[ xX]\]))\s+/;
-// 番号部分だけを抽出する正規表現 (例: "1-1." -> "1-1")
+const LIST_RE = /^(\s*)((- \[[ xX]\])|(?:[-*+]|\d+(?:-\d+)*\.))\s+/;
 const ORDERED_RE = /^(\s*)(\d+(?:-\d+)*)\.\s/;
 
-/**
- * 次の連番文字列を生成する関数
- * @param {string} currentNum - 現在の番号文字列 (例: "1", "1-1", "2-1")
- * @returns {string} 次の番号文字列 (例: "2", "1-2", "2-2")
- */
 function incrementOrderedNumber(currentNum) {
     const parts = currentNum.split('-');
     const lastPart = parts.pop();
@@ -360,9 +387,6 @@ function incrementOrderedNumber(currentNum) {
     return currentNum; // Fallback
 }
 
-/**
- * Enterキー: リストの継続と連番処理
- */
 const handleListNewline = (view) => {
     const { state, dispatch } = view;
     const { from, to, empty } = state.selection.main;
@@ -370,9 +394,6 @@ const handleListNewline = (view) => {
 
     const line = state.doc.lineAt(from);
     const text = line.text;
-    // カーソルが行末にあるか（または行末までの空白のみか）簡易チェック
-    // 厳密にはカーソルより後ろに文字がないことを確認すべきだが、
-    // リスト継続は通常行末でEnterを押したときに発動する
 
     const match = text.match(LIST_RE);
     if (!match) return false;
@@ -381,25 +402,20 @@ const handleListNewline = (view) => {
     const indent = match[1];
     const marker = match[2];
 
-    // カーソルが行頭のマーカー部分にある場合は通常の改行
     if (from < line.from + fullMatch.length) return false;
 
-    // コンテンツが空の場合 (マーカーのみの行でEnter) -> リスト解除
     if (text.trim().length === fullMatch.trim().length) {
         dispatch({ changes: { from: line.from, to: line.to, insert: "" } });
         return true;
     }
 
-    // コンテンツがある場合 -> 次の項目を作成
     let nextMarker = marker;
 
-    // 番号付きリストの場合、番号をインクリメント
     const orderedMatch = text.match(ORDERED_RE);
     if (orderedMatch) {
-        const currentNum = orderedMatch[2]; // "1" or "1-1"
+        const currentNum = orderedMatch[2];
         nextMarker = incrementOrderedNumber(currentNum) + ".";
     } else if (marker.startsWith("- [")) {
-        // タスクリストは未チェック状態で継続
         nextMarker = "- [ ]";
     }
 
@@ -408,14 +424,10 @@ const handleListNewline = (view) => {
     return true;
 };
 
-/**
- * Tabキー: インデントと番号のネスト化 (例: 1. -> 1-1.)
- */
 const handleListIndent = (view) => {
     const { state, dispatch } = view;
     const { from, empty } = state.selection.main;
 
-    // 範囲選択時は通常のインデント
     if (!empty && state.selection.ranges.some(r => !r.empty)) {
         return indentMore(view);
     }
@@ -425,45 +437,9 @@ const handleListIndent = (view) => {
     const match = text.match(ORDERED_RE);
 
     if (match) {
-        // 番号付きリストの場合
         const currentIndent = match[1];
-        const currentNum = match[2]; // "2" とか "1-2"
+        const currentNum = match[2];
 
-        // 1つ上の行を探して、親となる番号を取得する
-        let parentNum = null;
-        if (line.number > 1) {
-            for (let i = line.number - 1; i >= 1; i--) {
-                const prevLine = state.doc.line(i);
-                const prevMatch = prevLine.text.match(ORDERED_RE);
-                if (prevMatch) {
-                    const prevIndent = prevMatch[1];
-                    // インデントが現在の行と同じか少ない行を見つける
-                    // ネストする場合、親は「同じインデントレベル」の直前の項目であることが多い
-                    // あるいは Markdownの構造的には、親はインデントが少ないはずだが、
-                    // ユーザーの要望「1-1」を作るには、「直前の 1.」の子にしたい。
-                    // 直前の行がリストなら、それを親とするのが自然。
-                    if (prevIndent.length === currentIndent.length) {
-                        parentNum = prevMatch[2];
-                        break;
-                    }
-                    if (prevIndent.length < currentIndent.length) {
-                        // インデントが浅いものが見つかったらそれが親の可能性が高い
-                        parentNum = prevMatch[2];
-                        break;
-                    }
-                } else if (prevLine.text.trim() !== "") {
-                    // 空行以外でリストでない行に当たったら探索終了
-                    break;
-                }
-            }
-        }
-
-        // 親番号が見つかったら "親番号-1." にする。見つからなければ "1." にする（あるいは "1-1." にする？）
-        // ユーザー要望: ネスト -> 1-1. 
-        // 通常、1. の下でTabしたら 1-1. になってほしい。
-        // つまり直前の行の番号 + "-1"
-
-        // 直前の行を見る（単純化）
         let prevLineNumStr = "";
         if (line.number > 1) {
             const prevLine = state.doc.line(line.number - 1);
@@ -476,24 +452,19 @@ const handleListIndent = (view) => {
         const newNum = prevLineNumStr ? `${prevLineNumStr}-1` : `${currentNum}-1`;
         const newMarker = `${newNum}.`;
 
-        // インデントを追加し、マーカーを置換
-        const indentUnitText = "    "; // 4スペース
+        const indentUnitText = "    ";
         const changes = [
-            { from: line.from, insert: indentUnitText }, // インデント追加
-            { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker } // マーカー置換
+            { from: line.from, insert: indentUnitText },
+            { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker }
         ];
 
         dispatch({ changes });
         return true;
     }
 
-    // その他のリストや通常テキストは通常のインデント動作
     return indentMore(view);
 };
 
-/**
- * Shift-Tabキー: インデント解除と親連番の再開 (例: 1-1. -> 2.)
- */
 const handleListDedent = (view) => {
     const { state, dispatch } = view;
     const { from, empty } = state.selection.main;
@@ -508,16 +479,10 @@ const handleListDedent = (view) => {
 
     if (match) {
         const currentIndent = match[1];
-        // インデントがない場合は何もしない（これ以上解除できない）
         if (currentIndent.length === 0) return indentLess(view);
 
-        // インデントを減らした後、そのレベルでの「続きの番号」を探す
-        // つまり、上方向に探索し、(現在のインデント - 1単位) と同じインデントを持つ行を探す
-
-        let targetIndentLen = Math.max(0, currentIndent.length - 4); // 4スペース減らすと仮定
-        // タブ文字混在などを考慮すると厳密には難しいが、簡易的に長さを比較
-
-        let nextNum = "1"; // デフォルト
+        let targetIndentLen = Math.max(0, currentIndent.length - 4);
+        let nextNum = "1";
 
         for (let i = line.number - 1; i >= 1; i--) {
             const prevLine = state.doc.line(i);
@@ -525,9 +490,7 @@ const handleListDedent = (view) => {
 
             if (prevMatch) {
                 const prevIndent = prevMatch[1];
-                // ターゲットと同じインデントレベルの行が見つかった
                 if (prevIndent.length <= targetIndentLen) {
-                    // その番号をインクリメント
                     nextNum = incrementOrderedNumber(prevMatch[2]);
                     break;
                 }
@@ -536,17 +499,15 @@ const handleListDedent = (view) => {
 
         const newMarker = `${nextNum}.`;
 
-        // インデントを削除し、マーカーを置換
-        // インデント削除: 先頭から4文字（またはタブ1つ）削除
         let deleteLen = 0;
         if (text.startsWith("\t")) deleteLen = 1;
         else if (text.startsWith("    ")) deleteLen = 4;
-        else if (text.startsWith(" ")) deleteLen = currentIndent.length; // インデント全削除フォールバック
+        else if (text.startsWith(" ")) deleteLen = currentIndent.length;
 
         if (deleteLen > 0) {
             const changes = [
-                { from: line.from, to: line.from + deleteLen, insert: "" }, // インデント削除
-                { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker } // マーカー置換
+                { from: line.from, to: line.from + deleteLen, insert: "" },
+                { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker }
             ];
             dispatch({ changes });
             return true;
@@ -556,7 +517,6 @@ const handleListDedent = (view) => {
     return indentLess(view);
 };
 
-// Obsidian風リスト操作キーマップ (カスタマイズ版)
 const obsidianLikeListKeymap = [
     {
         key: "Enter",
@@ -574,7 +534,6 @@ const obsidianLikeListKeymap = [
 
 // ========== ペースト処理（URL貼り付け時のモーダル表示） ==========
 function showPasteOptionModal(url, view) {
-    // 既存のモーダルがあれば削除
     const existingModal = document.querySelector('.modal-overlay');
     if (existingModal) existingModal.remove();
 
@@ -583,7 +542,7 @@ function showPasteOptionModal(url, view) {
 
     const content = document.createElement('div');
     content.className = 'modal-content';
-    content.style.width = '400px'; // 幅を少し広げる
+    content.style.width = '400px';
 
     const message = document.createElement('div');
     message.className = 'modal-message';
@@ -594,22 +553,18 @@ function showPasteOptionModal(url, view) {
     const buttons = document.createElement('div');
     buttons.className = 'modal-buttons';
 
-    // キャンセルボタン
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'modal-btn';
     cancelBtn.textContent = 'キャンセル';
 
-    // 通常のURLとして貼り付けボタン
     const plainBtn = document.createElement('button');
     plainBtn.className = 'modal-btn';
     plainBtn.textContent = '通常のURL';
 
-    // リンク
     const linkBtn = document.createElement('button');
     linkBtn.className = 'modal-btn';
     linkBtn.textContent = 'リンク';
 
-    // ブックマーク - Primary
     const bookmarkBtn = document.createElement('button');
     bookmarkBtn.className = 'modal-btn primary';
     bookmarkBtn.textContent = 'ブックマーク';
@@ -632,51 +587,44 @@ function showPasteOptionModal(url, view) {
     cancelBtn.addEventListener('click', closeModal);
 
     plainBtn.addEventListener('click', () => {
-        // カーソル位置にURLを挿入
         view.dispatch(view.state.replaceSelection(url));
         closeModal();
     });
 
     linkBtn.addEventListener('click', async () => {
-        // UIフィードバック: 取得中...
         linkBtn.disabled = true;
         linkBtn.textContent = '取得中...';
-        
+
         try {
             let title = url;
             if (window.electronAPI && window.electronAPI.fetchUrlTitle) {
                 title = await window.electronAPI.fetchUrlTitle(url);
             }
-            // リンク形式で挿入 [Title](URL)
             view.dispatch(view.state.replaceSelection(`[${title}](${url})`));
             showNotification('リンクを作成しました', 'success');
         } catch (e) {
             console.error('Failed to fetch title', e);
-            // 失敗時はURLをタイトルとして挿入
             view.dispatch(view.state.replaceSelection(`[${url}](${url})`));
             showNotification('タイトルの取得に失敗しました', 'error');
         }
         closeModal();
     });
 
-    // ブックマーク: @card を付けて挿入 (プラグインがこれを検知してカード化する)
     bookmarkBtn.addEventListener('click', () => {
         const state = view.state;
         const doc = state.doc;
         const selection = state.selection.main;
-        
-        // 前後の改行判定
+
         const hasNewlineBefore = selection.from === 0 || doc.sliceString(selection.from - 1, selection.from) === '\n';
         const hasNewlineAfter = selection.to === doc.length || doc.sliceString(selection.to, selection.to + 1) === '\n';
-        
-        // @card 識別子を付与
+
         let insertText = `@card ${url}`;
-        
+
         if (!hasNewlineBefore) insertText = '\n' + insertText;
         if (!hasNewlineAfter) insertText = insertText + '\n';
-        
+
         view.dispatch(view.state.replaceSelection(insertText));
-        
+
         showNotification('ブックマークを作成しました', 'success');
         closeModal();
     });
@@ -689,7 +637,6 @@ function showPasteOptionModal(url, view) {
 const pasteHandler = EditorView.domEventHandlers({
     paste(event, view) {
         const text = event.clipboardData.getData("text/plain");
-        // 簡易的なURLチェック (http/httpsで始まり、空白を含まない)
         const urlRegex = /^(http|https):\/\/[^ "]+$/;
 
         if (urlRegex.test(text)) {
@@ -724,9 +671,7 @@ function initEditor() {
             themeCompartment.of(initialTheme),
             editorStyleCompartment.of(initialStyle),
             indentUnit.of("    "),
-            // カスタムキーマップを最高優先度で登録
             Prec.highest(keymap.of(obsidianLikeListKeymap)),
-            // ペーストイベントハンドラを追加
             pasteHandler,
             history(),
             keymap.of([
@@ -737,14 +682,13 @@ function initEditor() {
             syntaxHighlighting(defaultHighlightStyle),
             markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
             livePreviewPlugin,
+            tablePlugin,
             EditorView.lineWrapping,
             highlightActiveLine(),
             lineNumbers(),
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
-                    // 変更がプログラムによるもの（ExternalChange）か判定
                     const isExternal = update.transactions.some(tr => tr.annotation(ExternalChange));
-                    // 外部変更（読み込み時など）の場合は未保存マークを付けない (false)
                     onEditorInput(!isExternal);
                 }
             })
@@ -763,34 +707,27 @@ function toggleLinePrefix(view, prefix) {
     const { state, dispatch } = view;
     const { from } = state.selection.main;
     const line = state.doc.lineAt(from);
-    const match = line.text.match(/^\s*(#+\s*|>\s*)/); // 引用(>)も対象に追加
+    const match = line.text.match(/^\s*(#+\s*|>\s*)/);
 
     let changes;
     let newCursorPos;
 
-    // すでに同じプレフィックスがある場合は削除、ない場合は追加
     if (match && match[1].trim() === prefix.trim()) {
         const matchLen = match[0].length;
         changes = { from: line.from, to: line.from + matchLen, insert: "" };
-        // 変更後の行末 = 元の行末 - 削除した文字数
         newCursorPos = line.to - matchLen;
     } else {
         const insertText = prefix.endsWith(' ') ? prefix : prefix + ' ';
         if (match) {
-            // 置換
             const matchLen = match[0].length;
             changes = { from: line.from, to: line.from + matchLen, insert: insertText };
-            // 変更後の行末 = 元の行末 - 削除文字数 + 挿入文字数
             newCursorPos = line.to - matchLen + insertText.length;
         } else {
-            // 追加
             changes = { from: line.from, to: line.from, insert: insertText };
-            // 変更後の行末 = 元の行末 + 挿入文字数
             newCursorPos = line.to + insertText.length;
         }
     }
 
-    // 変更を適用し、カーソルを「変更後の行の末尾」に移動させる
     dispatch({
         changes: changes,
         selection: { anchor: newCursorPos, head: newCursorPos }
@@ -806,7 +743,6 @@ function toggleMark(view, mark) {
     const extendedFrom = Math.max(0, from - mark.length);
     const extendedTo = Math.min(state.doc.length, to + mark.length);
 
-    // 解除ロジック
     if (extendedFrom >= 0 && extendedTo <= state.doc.length) {
         const surroundingText = state.sliceDoc(extendedFrom, extendedTo);
         if (surroundingText.startsWith(mark) && surroundingText.endsWith(mark)) {
@@ -818,11 +754,8 @@ function toggleMark(view, mark) {
         }
     }
 
-    // 適用ロジック
     dispatch({
         changes: { from: from, to: to, insert: `${mark}${selectedText}${mark}` },
-        // 選択範囲なしの場合: マーカーの中間にカーソルを置く
-        // 選択範囲ありの場合: マーカーの後ろにカーソルを置く
         selection: empty
             ? { anchor: from + mark.length, head: from + mark.length }
             : { anchor: to + mark.length * 2, head: to + mark.length * 2 }
@@ -837,20 +770,20 @@ function toggleList(view, type) {
     const startLine = state.doc.lineAt(from);
     const endLine = state.doc.lineAt(to);
     let changes = [];
-    let totalChangeLength = 0; // 累積文字数変化量
+    let totalChangeLength = 0;
 
     for (let i = startLine.number; i <= endLine.number; i++) {
         const line = state.doc.line(i);
         const text = line.text;
         const bulletMatch = text.match(/^(\s*)([-*+] )\s*/);
-        const orderedMatch = text.match(/^(\s*)(\d+(?:-\d+)*\. )\s*/); // ハイフン付き番号も考慮
+        const orderedMatch = text.match(/^(\s*)(\d+(?:-\d+)*\. )\s*/);
         const checkMatch = text.match(/^(\s*)(- \[[ x]\] )\s*/);
 
         let diff = 0;
 
         if (type === 'ul') {
             if (bulletMatch) {
-                const delLen = bulletMatch[0].length - bulletMatch[1].length; // インデント以外の部分の長さ
+                const delLen = bulletMatch[0].length - bulletMatch[1].length;
                 changes.push({ from: line.from + bulletMatch[1].length, to: line.from + bulletMatch[0].length, insert: "" });
                 diff = -delLen;
             } else {
@@ -879,7 +812,6 @@ function toggleList(view, type) {
         totalChangeLength += diff;
     }
 
-    // カーソルを最終行の末尾に移動
     const newHead = endLine.to + totalChangeLength;
 
     dispatch({
@@ -905,10 +837,32 @@ function insertImage(view) {
     const { from, to } = state.selection.main;
     const selectedText = state.sliceDoc(from, to);
     const text = selectedText || "Image";
-    // 画像記法 ![alt](url) を挿入し、url部分を選択状態にする
     dispatch({
         changes: { from: from, to: to, insert: `![${text}](url)` },
         selection: { anchor: from + 2 + text.length + 2, head: from + 2 + text.length + 5 }
+    });
+    view.focus();
+}
+
+function insertTable(view) {
+    if (!view) return;
+    const { state, dispatch } = view;
+    const { from, to } = state.selection.main;
+
+    const table =
+        `| Col 1 | Col 2 | Col 3 |
+| :--- | :--- | :--- |
+|  |  |  |
+|  |  |  |
+`;
+
+    const lineStart = state.doc.lineAt(from).from;
+    const needsNewline = from !== lineStart;
+    const insertText = (needsNewline ? "\n" : "") + table;
+
+    dispatch({
+        changes: { from: from, to: to, insert: insertText },
+        selection: { anchor: from + (needsNewline ? 1 : 0) + 2 }
     });
     view.focus();
 }
@@ -918,9 +872,7 @@ function insertHorizontalRule(view) {
     const { state, dispatch } = view;
     const { from } = state.selection.main;
     const line = state.doc.lineAt(from);
-    // 現在行の最後に改行して水平線を挿入
     const insert = `\n---\n`;
-    // 挿入後のカーソル位置（水平線の次の行）
     const newPos = line.to + insert.length;
     dispatch({
         changes: { from: line.to, insert: insert },
@@ -929,17 +881,15 @@ function insertHorizontalRule(view) {
     view.focus();
 }
 
-// ★追加: 改ページを挿入する関数
 function insertPageBreak(view) {
     if (!view) return;
     const { state, dispatch } = view;
     const { from } = state.selection.main;
     const line = state.doc.lineAt(from);
-    
-    // 現在行の最後に改行して改ページ用タグを挿入
+
     const insert = `\n<div class="page-break"></div>\n`;
     const newPos = line.to + insert.length;
-    
+
     dispatch({
         changes: { from: line.to, insert: insert },
         selection: { anchor: newPos, head: newPos }
@@ -957,10 +907,6 @@ function insertCodeBlock(view) {
 
     dispatch({
         changes: { from: from, to: to, insert: insert },
-        // コードブロック内（1行目の `` ` の次）にカーソルを置くのが親切だが、
-        // 「後ろから始めてほしい」という要望なので、ブロックの後に置くか、
-        // 少なくともバッククォートの前（行頭）には置かない。
-        // ここではブロックの中（書き始めの位置）に置く。
         selection: { anchor: from + 4, head: from + 4 }
     });
     view.focus();
@@ -985,13 +931,16 @@ document.querySelectorAll('.dropdown-item[data-action^="h"]').forEach(item => {
 document.getElementById('bold-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "**"));
 document.getElementById('italic-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "*"));
 document.getElementById('strike-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "~~"));
+document.getElementById('highlight-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "=="));
+
 document.getElementById('link-btn')?.addEventListener('click', () => insertLink(globalEditorView));
 document.getElementById('image-btn')?.addEventListener('click', () => insertImage(globalEditorView));
+document.getElementById('btn-table')?.addEventListener('click', () => insertTable(globalEditorView));
+
 document.getElementById('code-btn')?.addEventListener('click', () => insertCodeBlock(globalEditorView));
-document.getElementById('inline-code-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "`")); // インラインコード追加
+document.getElementById('inline-code-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "`"));
 document.getElementById('quote-btn')?.addEventListener('click', () => toggleLinePrefix(globalEditorView, ">"));
 document.getElementById('hr-btn')?.addEventListener('click', () => insertHorizontalRule(globalEditorView));
-// ★追加: 改ページボタンのイベントリスナー
 document.getElementById('btn-page-break')?.addEventListener('click', () => insertPageBreak(globalEditorView));
 
 if (btnBulletList) btnBulletList.addEventListener('click', () => toggleList(globalEditorView, 'ul'));
@@ -1005,7 +954,6 @@ document.getElementById('btn-close-file-toolbar')?.addEventListener('click', () 
     }
 });
 
-// ★変更: PDFエクスポートボタンのイベントリスナー (alert -> showNotification)
 const btnExportPdf = document.getElementById('btn-export-pdf');
 if (btnExportPdf) {
     btnExportPdf.addEventListener('click', async () => {
@@ -1018,7 +966,9 @@ if (btnExportPdf) {
         }
 
         try {
-            const htmlContent = marked.parse(markdownContent);
+            const processedMarkdown = await processMarkdownForExport(markdownContent);
+            const htmlContent = marked.parse(processedMarkdown, { breaks: true, gfm: true });
+
             if (typeof window.electronAPI?.exportPdf === 'function') {
                 const result = await window.electronAPI.exportPdf(htmlContent);
                 if (result.success) {
@@ -1043,38 +993,30 @@ const toolbarOverflowMenu = document.getElementById('toolbar-overflow-menu');
 
 let originalToolbarItems = [];
 
-// 初期化時に元のアイテムリストを保存（Moreボタン以外）
 function initToolbarOverflow() {
     if (!toolbarLeft || !toolbarMoreBtn) return;
 
-    // Moreボタン以外の要素を配列として保存
     originalToolbarItems = Array.from(toolbarLeft.children).filter(el => el !== toolbarMoreBtn);
 
-    // ResizeObserverでツールバーのサイズ変更を監視
     const resizeObserver = new ResizeObserver(() => {
-        // デバウンス（setTimeout）を削除し、アニメーションフレームで即座に処理
         requestAnimationFrame(() => {
             handleToolbarResize();
         });
     });
     resizeObserver.observe(toolbarLeft);
 
-    // Moreボタンのクリックイベント
     toolbarMoreBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         toolbarOverflowMenu.classList.toggle('hidden');
 
-        // メニューの位置調整 (ボタンの下、右端合わせ)
         const rect = toolbarMoreBtn.getBoundingClientRect();
         const toolbarRect = toolbarLeft.parentElement.getBoundingClientRect();
 
-        // 右端を合わせる
         const rightOffset = toolbarRect.right - rect.right;
         toolbarOverflowMenu.style.right = rightOffset + 'px';
         toolbarOverflowMenu.style.left = 'auto';
     });
 
-    // メニュー外クリックで閉じる
     document.addEventListener('click', (e) => {
         if (!toolbarOverflowMenu.contains(e.target) && e.target !== toolbarMoreBtn) {
             toolbarOverflowMenu.classList.add('hidden');
@@ -1085,16 +1027,13 @@ function initToolbarOverflow() {
 function handleToolbarResize() {
     if (!toolbarLeft || originalToolbarItems.length === 0) return;
 
-    // 一旦すべてのアイテムをツールバーに戻す（これが重い場合は最適化が必要だが、ボタン数なら許容範囲）
     const currentChildren = Array.from(toolbarLeft.children);
     const itemsInMenu = Array.from(toolbarOverflowMenu.children);
 
-    // メニューにあるアイテムをツールバーに戻す
     itemsInMenu.forEach(item => {
         toolbarLeft.insertBefore(item, toolbarMoreBtn);
     });
 
-    // 順番を元に戻す（これがないと並び順が狂う）
     originalToolbarItems.forEach(item => {
         if (item.parentElement !== toolbarLeft) {
             toolbarLeft.insertBefore(item, toolbarMoreBtn);
@@ -1103,23 +1042,16 @@ function handleToolbarResize() {
 
     toolbarMoreBtn.classList.add('hidden');
 
-    // コンテナの利用可能な幅を取得
     const containerWidth = toolbarLeft.clientWidth;
-
-    // Moreボタンの幅（スタイルから推測、または固定値）
     const moreBtnWidth = 32;
 
     let currentWidth = 0;
     let overflowStartIndex = -1;
 
-    // 各アイテムの幅を積算し、あふれる位置を特定
     for (let i = 0; i < originalToolbarItems.length; i++) {
         const item = originalToolbarItems[i];
+        const itemWidth = item.offsetWidth + 4;
 
-        // offsetWidthを使って高速化（getBoundingClientRectより軽い）
-        const itemWidth = item.offsetWidth + 4; // gap考慮 (CSSのgap: 4pxと一致させる)
-
-        // 次のアイテムを追加したときに、Moreボタンを表示するスペースも含めて収まるか確認
         if (currentWidth + itemWidth > containerWidth - moreBtnWidth - 10) {
             overflowStartIndex = i;
             break;
@@ -1127,11 +1059,9 @@ function handleToolbarResize() {
         currentWidth += itemWidth;
     }
 
-    // あふれるアイテムがある場合、メニューに移動
     if (overflowStartIndex !== -1) {
         toolbarMoreBtn.classList.remove('hidden');
 
-        // あふれたアイテムをメニューに移動
         const fragment = document.createDocumentFragment();
         for (let i = overflowStartIndex; i < originalToolbarItems.length; i++) {
             fragment.appendChild(originalToolbarItems[i]);
@@ -1141,12 +1071,7 @@ function handleToolbarResize() {
 }
 
 // ========== 基本機能 ==========
-/**
- * エディタの内容が変更されたときに呼ばれる処理
- * @param {boolean} markAsDirty - 未保存マーク（●）をつけるかどうか。ファイル読み込み時はfalseにする。
- */
 function onEditorInput(markAsDirty = true) {
-    // 未保存マークの処理（markAsDirtyがtrueの場合のみ実行）
     if (markAsDirty && currentFilePath && currentFilePath !== 'README.md') {
         fileModificationState.set(currentFilePath, true);
         const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
@@ -1155,14 +1080,12 @@ function onEditorInput(markAsDirty = true) {
         }
     }
 
-    // アウトライン更新（デバウンス）
     if (window.outlineUpdateTimeout) clearTimeout(window.outlineUpdateTimeout);
     window.outlineUpdateTimeout = setTimeout(() => {
         updateOutline();
         syncOutlineWithCursor();
     }, 500);
 
-    // PDFプレビュー更新
     if (isPdfPreviewVisible) {
         if (window.pdfUpdateTimeout) clearTimeout(window.pdfUpdateTimeout);
         window.pdfUpdateTimeout = setTimeout(() => {
@@ -1209,11 +1132,9 @@ async function initializeTerminal() {
             e.stopPropagation();
             const rect = newToggle.getBoundingClientRect();
             if (shellDropdown) {
-                // 上下配置に関わらず、常にボタンの下（または上）にドロップダウンを表示し、右端を合わせる
                 shellDropdown.style.top = `${rect.bottom + 2}px`;
                 shellDropdown.style.bottom = 'auto';
 
-                // 画面右端からの距離を計算して、ドロップダウンの右端をボタンの右側に合わせる
                 const rightGap = window.innerWidth - rect.right;
                 shellDropdown.style.right = `${Math.max(0, rightGap)}px`;
                 shellDropdown.style.left = 'auto';
@@ -1459,12 +1380,9 @@ function updateTerminalVisibility() {
     const showTerminalRight = isTerminalVisible && isPositionRight;
     const needRightPane = (showPdf || showTerminalRight) && isRightActivityBarVisible;
 
-    // 右アクティビティバーの幅を計算（表示なら幅分、非表示なら0）
     const barWidth = isRightActivityBarVisible ? rightActivityBarWidth : 0;
-    // CSS変数にセットして、styles.css側で利用できるようにする
-    document.documentElement.style.setProperty('--right-activity-offset', barWidth + 'px');
+    document.documentElement.style.setProperty('--right-activity-offset,', barWidth + 'px');
 
-    // レイアウト変更開始フラグを立てる
     document.body.classList.add('is-layout-changing');
 
     if (needRightPane) {
@@ -1505,7 +1423,6 @@ function updateTerminalVisibility() {
             resizerBottom.style.top = `calc(100vh - 200px - 24px)`;
         }
 
-        // メインコンテンツ全体ではなく、センターペイン（エディタ部分）のみ底上げする
         const currentHeight = bottomPane.style.height || '200px';
         const heightVal = parseInt(currentHeight);
 
@@ -1515,7 +1432,6 @@ function updateTerminalVisibility() {
         bottomPane.classList.add('hidden');
         if (resizerBottom) resizerBottom.classList.add('hidden');
 
-        // ステータスバーがFlexboxに入ったため、通常時は0pxでOK
         if (!isTerminalVisible || isPositionRight) {
             centerPane.style.marginBottom = '0px';
         }
@@ -1551,11 +1467,9 @@ function updateTerminalVisibility() {
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
 
-    // アニメーション終了後にレイアウト計算を行うためのリスナー設定
     const transitionTarget = mainContent;
 
     const handleTransitionEnd = (e) => {
-        // アニメーションが完了したら
         if ((e.target === mainContent && e.propertyName === 'margin-right') ||
             (e.target === centerPane && e.propertyName === 'margin-bottom')) {
 
@@ -1569,17 +1483,15 @@ function updateTerminalVisibility() {
         }
     };
 
-    // 毎回追加削除するのは面倒なので、transitionendは一度だけ発火するように調整するか、フォールバックに頼る
     mainContent.addEventListener('transitionend', handleTransitionEnd, { once: true });
     centerPane.addEventListener('transitionend', handleTransitionEnd, { once: true });
 
-    // フォールバック: トランジションが発生しない場合やイベントが発火しない場合のため
     setTimeout(() => {
         if (document.body.classList.contains('is-layout-changing')) {
             document.body.classList.remove('is-layout-changing');
             if (isTerminalVisible && activeTerminalId) fitTerminal(activeTerminalId);
         }
-    }, 300); // CSSのtransition時間より少し長く
+    }, 300);
 
     if (isTerminalVisible) {
         if (terminals.size === 0) {
@@ -1590,7 +1502,6 @@ function updateTerminalVisibility() {
             if (term && term.element.parentElement !== targetContainer) {
                 targetContainer.appendChild(term.element);
             }
-            // fitTerminalはtransitionend後に呼ばれるのでここでは最低限の表示のみ
         }
     }
 }
@@ -1616,7 +1527,6 @@ function switchHeaderButtons(targetId) {
 
 // ========== イベントリスナー設定 ==========
 
-// ターミナル開閉
 if (btnTerminalRight) {
     btnTerminalRight.addEventListener('click', () => {
         if (isTerminalVisible) {
@@ -1629,7 +1539,6 @@ if (btnTerminalRight) {
     });
 }
 
-// ターミナル位置切り替え
 if (btnTogglePosition) {
     btnTogglePosition.addEventListener('click', () => {
         isPositionRight = !isPositionRight;
@@ -1639,12 +1548,10 @@ if (btnTogglePosition) {
     });
 }
 
-// 左ペイン表示/非表示
 if (btnToggleLeftPane) {
     btnToggleLeftPane.addEventListener('click', () => {
         const willHide = !leftPane.classList.contains('hidden');
 
-        // アニメーション開始フラグ
         document.body.classList.add('is-layout-changing');
 
         leftPane.classList.toggle('hidden', willHide);
@@ -1660,14 +1567,12 @@ if (btnToggleLeftPane) {
             }
         }, { once: true });
 
-        // フォールバック
         setTimeout(() => {
             document.body.classList.remove('is-layout-changing');
         }, 300);
     });
 }
 
-// 左ペイン内容切り替え
 topSideSwitchButtons.forEach(btn => {
     btn.addEventListener('click', () => {
         const targetId = btn.dataset.target;
@@ -1704,7 +1609,6 @@ topSideSwitchButtons.forEach(btn => {
     });
 });
 
-// Zenモード
 if (btnZen) {
     btnZen.addEventListener('click', () => {
         const enteringZenMode = !ideContainer.classList.contains('zen-mode-active');
@@ -1721,7 +1625,6 @@ if (btnZen) {
     });
 }
 
-// PDFプレビュー
 if (btnPdfPreview) {
     btnPdfPreview.addEventListener('click', () => {
         togglePdfPreview();
@@ -1753,7 +1656,8 @@ async function generatePdfPreview() {
             return;
         }
 
-        const htmlContent = marked.parse(markdownContent);
+        const processedMarkdown = await processMarkdownForExport(markdownContent);
+        const htmlContent = marked.parse(processedMarkdown, { breaks: true, gfm: true });
 
         if (typeof window.electronAPI?.generatePdf === 'function') {
             await renderHtmlToPdf(htmlContent);
@@ -1766,6 +1670,72 @@ async function generatePdfPreview() {
     } catch (error) {
         console.error('Failed to generate PDF preview:', error);
     }
+}
+
+async function processMarkdownForExport(markdown) {
+    let processed = markdown.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+
+    processed = processed.replace(/^(\s+)(\d+(?:-\d+)+\.)/gm, (match, indent, marker) => {
+        return '&nbsp;'.repeat(indent.length) + marker;
+    });
+
+    const bookmarkRegex = /^@card\s+(https?:\/\/[^\s]+)$/gm;
+    const matches = [...processed.matchAll(bookmarkRegex)];
+
+    if (matches.length === 0) return processed;
+
+    const replacements = await Promise.all(matches.map(async (match) => {
+        const url = match[1];
+        let data = null;
+
+        if (!window.pdfMetadataCache) window.pdfMetadataCache = new Map();
+
+        if (window.pdfMetadataCache.has(url)) {
+            data = window.pdfMetadataCache.get(url);
+        } else {
+            try {
+                const result = await window.electronAPI.fetchUrlMetadata(url);
+                if (result.success) {
+                    data = result.data;
+                    window.pdfMetadataCache.set(url, data);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        if (!data) {
+            return {
+                original: match[0],
+                replacement: `<div class="cm-bookmark-widget"><div class="cm-bookmark-content"><div class="cm-bookmark-title"><a href="${url}">${url}</a></div></div></div>`
+            };
+        }
+
+        const faviconUrl = `https://www.google.com/s2/favicons?domain=${data.domain}&sz=32`;
+
+        const html = `<a href="${data.url}" class="cm-bookmark-widget" target="_blank" rel="noopener noreferrer">
+    <div class="cm-bookmark-content">
+        <div class="cm-bookmark-title">${data.title}</div>
+        <div class="cm-bookmark-desc">${data.description}</div>
+        <div class="cm-bookmark-meta">
+            <img src="${faviconUrl}" class="cm-bookmark-favicon">
+            <span class="cm-bookmark-domain">${data.domain}</span>
+        </div>
+    </div>
+    ${data.image ? `<div class="cm-bookmark-cover"><img src="${data.image}" class="cm-bookmark-image"></div>` : ''}
+</a>`;
+
+        return {
+            original: match[0],
+            replacement: html
+        };
+    }));
+
+    for (const item of replacements) {
+        processed = processed.replaceAll(item.original, item.replacement);
+    }
+
+    return processed;
 }
 
 async function renderHtmlToPdf(htmlContent) {
@@ -1888,14 +1858,12 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-// 設定タブ
 if (btnSettings) {
     btnSettings.addEventListener('click', () => {
         openSettingsTab();
     });
 }
 
-// 右アクティビティバー表示/非表示
 if (btnToggleRightActivity) {
     btnToggleRightActivity.addEventListener('click', () => {
         isRightActivityBarVisible = !isRightActivityBarVisible;
@@ -1903,7 +1871,6 @@ if (btnToggleRightActivity) {
     });
 }
 
-// ウィンドウコントロール
 if (btnMinimize) {
     btnMinimize.addEventListener('click', () => {
         window.electronAPI.minimizeWindow();
@@ -1936,7 +1903,6 @@ if (btnClose) {
     });
 }
 
-// ========== ファイルエクスプローラーボタン処理 ==========
 const btnSortAsc = document.getElementById('btn-sort-asc');
 const btnSortDesc = document.getElementById('btn-sort-desc');
 
@@ -1954,7 +1920,6 @@ if (btnSortDesc) {
     });
 }
 
-// ========== Git用ボタン処理 (未実装部分はログ出力) ==========
 const btnGitStage = document.getElementById('btn-git-stage');
 const btnGitUnstage = document.getElementById('btn-git-unstage');
 const btnGitRefresh = document.getElementById('btn-git-refresh');
@@ -1977,7 +1942,6 @@ if (btnGitRefresh) {
     });
 }
 
-// ========== アウトライン機能の実装 ==========
 const outlineTree = document.getElementById('outline-tree');
 const btnOutlineCollapse = document.getElementById('btn-outline-collapse');
 const btnOutlineExpand = document.getElementById('btn-outline-expand');
@@ -2088,7 +2052,6 @@ if (btnOutlineExpand) {
     });
 }
 
-// ========== リサイザー機能 ==========
 const resizerRight = document.getElementById('resizer-right');
 const resizerBottom = document.getElementById('resizer-bottom');
 let isResizingRight = false;
@@ -2119,7 +2082,6 @@ document.addEventListener('mousemove', (e) => {
             rightPane.style.width = newWidth + 'px';
             resizerRight.style.right = (newWidth + rightActivityBarWidth) + 'px';
             document.documentElement.style.setProperty('--right-pane-width', newWidth + 'px');
-            // ここはmainContentのままでOK
             const mainContent = centerPane.parentElement;
             mainContent.style.marginRight = (newWidth + rightActivityBarWidth) + 'px';
 
@@ -2136,8 +2098,6 @@ document.addEventListener('mousemove', (e) => {
             bottomPane.style.height = newHeight + 'px';
             resizerBottom.style.top = (window.innerHeight - newHeight - 24) + 'px';
 
-            // mainContentではなくcenterPaneの下マージンを更新する
-            // これによりエディタだけが押し上げられ、サイドバーは影響を受けない
             centerPane.style.marginBottom = newHeight + 'px';
 
             if (activeTerminalId) {
@@ -2162,12 +2122,11 @@ document.addEventListener('mouseup', () => {
     }
 });
 
-// ========== ファイル名変更処理 ==========
 if (fileTitleInput) {
     fileTitleInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-            fileTitleInput.blur(); // フォーカスを外して変更を確定させる
+            fileTitleInput.blur();
         }
     });
 
@@ -2176,13 +2135,11 @@ if (fileTitleInput) {
 
         if (!newName || !currentFilePath) return;
 
-        // パスからファイル名（拡張子なし）を抽出して比較
         const separator = currentFilePath.includes('\\') ? '\\' : '/';
         const currentFileName = currentFilePath.split(separator).pop();
         const currentExt = currentFileName.includes('.') ? '.' + currentFileName.split('.').pop() : '';
         const currentNameWithoutExt = currentFileName.replace(currentExt, '');
 
-        // 変更がない場合は何もしない
         if (newName === currentNameWithoutExt) return;
 
         try {
@@ -2190,12 +2147,10 @@ if (fileTitleInput) {
                 const result = await window.electronAPI.renameFile(currentFilePath, newName);
 
                 if (result.success) {
-                    // リネーム後のタブ更新処理（共通化のため関数化推奨だがここではインライン展開）
                     const oldPath = currentFilePath;
                     const newPath = result.path;
                     const newFileName = newPath.split(separator).pop();
 
-                    // 内部状態の更新
                     const fileData = openedFiles.get(oldPath);
                     if (fileData) {
                         fileData.fileName = newFileName;
@@ -2203,7 +2158,6 @@ if (fileTitleInput) {
                         openedFiles.delete(oldPath);
                     }
 
-                    // 変更状態の移行
                     if (fileModificationState.has(oldPath)) {
                         fileModificationState.set(newPath, fileModificationState.get(oldPath));
                         fileModificationState.delete(oldPath);
@@ -2212,7 +2166,6 @@ if (fileTitleInput) {
                     currentFilePath = newPath;
                     document.title = `${newFileName} - Markdown IDE`;
 
-                    // タブの更新
                     const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
                     if (tab) {
                         tab.dataset.filepath = newPath;
@@ -2224,14 +2177,12 @@ if (fileTitleInput) {
                         tab.innerHTML = `${newFileName} ${isDirty ? '● ' : ''}<span class="close-tab" data-filepath="${newPath}">×</span>`;
                     }
 
-                    // ファイルツリーの更新
                     initializeFileTreeWithState();
 
                     console.log(`Renamed ${oldPath} to ${newPath}`);
                 } else {
                     console.error('Rename failed:', result.error);
                     alert(`ファイル名の変更に失敗しました: ${result.error}`);
-                    // 入力を元に戻す
                     fileTitleInput.value = currentNameWithoutExt;
                 }
             }
@@ -2242,28 +2193,23 @@ if (fileTitleInput) {
     });
 }
 
-// タブや内部状態を更新するヘルパー関数（ツリーからのリネーム用）
 function updateTabsAfterRename(oldPath, newPath, newName) {
-    // 内部状態の更新
     const fileData = openedFiles.get(oldPath);
     if (fileData) {
-        fileData.fileName = newName; // ファイル名だけを更新（拡張子込み）
+        fileData.fileName = newName;
         openedFiles.set(newPath, fileData);
         openedFiles.delete(oldPath);
     }
 
-    // 変更状態の移行
     if (fileModificationState.has(oldPath)) {
         fileModificationState.set(newPath, fileModificationState.get(oldPath));
         fileModificationState.delete(oldPath);
     }
 
-    // カレントファイルなら更新
     if (currentFilePath === oldPath) {
         currentFilePath = newPath;
         document.title = `${newName} - Markdown IDE`;
 
-        // タイトルバー入力欄の更新
         if (fileTitleInput) {
             const extIndex = newName.lastIndexOf('.');
             const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
@@ -2271,7 +2217,6 @@ function updateTabsAfterRename(oldPath, newPath, newName) {
         }
     }
 
-    // タブの更新
     const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
     if (tab) {
         tab.dataset.filepath = newPath;
@@ -2280,15 +2225,11 @@ function updateTabsAfterRename(oldPath, newPath, newName) {
             closeBtn.dataset.filepath = newPath;
         }
 
-        // ファイル名表示更新
         const isDirty = tab.innerHTML.includes('●');
-        // ファイル名が長すぎる場合の考慮が必要ならここで行うが、簡易的にそのまま
-        // タブ内のHTML構造を維持
         tab.childNodes[0].textContent = newName + ' ';
     }
 }
 
-// ツリーアイテムのリネーム開始関数
 function startRenaming(treeItem) {
     const labelSpan = treeItem.querySelector('.tree-label');
     if (!labelSpan) return;
@@ -2296,20 +2237,16 @@ function startRenaming(treeItem) {
     const originalName = treeItem.dataset.name;
     const originalPath = treeItem.dataset.path;
 
-    // 既存のラベルを非表示に
     labelSpan.style.display = 'none';
 
-    // 入力フィールド作成
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'rename-input'; // cssでスタイル定義
+    input.className = 'rename-input';
     input.value = originalName;
 
-    // 挿入
     treeItem.appendChild(input);
     input.focus();
 
-    // 拡張子を除いて選択状態にする（ファイルの場合）
     const lastDotIndex = originalName.lastIndexOf('.');
     if (lastDotIndex > 0) {
         input.setSelectionRange(0, lastDotIndex);
@@ -2320,35 +2257,23 @@ function startRenaming(treeItem) {
     let isCommitted = false;
 
     const finish = async (shouldCommit) => {
-        if (isCommitted) return; // 二重実行防止
+        if (isCommitted) return;
         isCommitted = true;
 
         const newName = input.value.trim();
 
-        // 入力欄を削除してラベルを戻す（成功したらあとでツリーリロードされるが、失敗時やキャンセルのために戻す処理は必要）
         input.remove();
         labelSpan.style.display = '';
 
         if (shouldCommit && newName && newName !== originalName) {
             try {
                 if (typeof window.electronAPI?.renameFile === 'function') {
-                    // renameFileは拡張子なしの名前を受け取る仕様になっている箇所があるか確認が必要だが、
-                    // main.jsの実装を見る限り、拡張子がない場合に補完するロジックが入っている。
-                    // ここではフルネーム（拡張子込み）を渡すことを想定して main.js 側が動くはず。
-                    // ただし、renderer.jsの既存のrenameFile呼び出し（タイトルバー）は拡張子を除いて渡している。
-                    // ここでは入力されたまま（拡張子込み）を渡すのが自然。
-                    // main.jsの `rename-file` は `newName` に拡張子がない場合のみ補完するので、
-                    // 拡張子付きで渡せばそのまま使われるはず。
-
                     const result = await window.electronAPI.renameFile(originalPath, newName);
                     if (result.success) {
                         showNotification(`名前を変更しました: ${newName}`, 'success');
 
-                        // タブなどの関連UI更新
                         updateTabsAfterRename(originalPath, result.path, newName);
 
-                        // ツリーをリロードして整合性を保つ
-                        // ファイルシステム監視が動いているなら自動更新されるが、即時反映のため呼ぶ
                         initializeFileTreeWithState();
                     } else {
                         showNotification(`名前の変更に失敗しました: ${result.error}`, 'error');
@@ -2374,15 +2299,14 @@ function startRenaming(treeItem) {
     });
 
     input.addEventListener('blur', () => {
-        finish(true); // フォーカス外れたら確定
+        finish(true);
     });
 
-    input.addEventListener('click', (e) => e.stopPropagation()); // ツリーのクリックイベント（開閉）を防止
+    input.addEventListener('click', (e) => e.stopPropagation());
     input.addEventListener('dblclick', (e) => e.stopPropagation());
-    input.addEventListener('dragstart', (e) => e.stopPropagation()); // ドラッグ防止
+    input.addEventListener('dragstart', (e) => e.stopPropagation());
 }
 
-// ========== ★追加: トースト通知機能 ==========
 function showNotification(message, type = 'info') {
     const container = document.getElementById('notification-container');
     if (!container) return;
@@ -2393,12 +2317,10 @@ function showNotification(message, type = 'info') {
 
     container.appendChild(toast);
 
-    // アニメーション用
     requestAnimationFrame(() => {
         toast.classList.add('show');
     });
 
-    // 自動削除 (3秒後)
     setTimeout(() => {
         toast.classList.remove('show');
         toast.addEventListener('transitionend', () => {
@@ -2407,19 +2329,15 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// ========== ファイルエクスプローラのイベント設定（新規） ==========
 function setupFileExplorerEvents() {
     const fileContentContainer = document.getElementById('content-files');
     if (fileContentContainer) {
         fileContentContainer.addEventListener('click', (e) => {
-            // ツリーアイテムがクリックされた場合は何もしない（アイテムのリスナーで処理）
             if (e.target.closest('.tree-item')) return;
 
-            // 空き領域がクリックされた場合
             const container = document.getElementById('content-files');
             if (container) {
                 container.focus();
-                // 既存の選択状態を解除
                 const selectedItems = container.querySelectorAll('.tree-item.selected');
                 selectedItems.forEach(el => el.classList.remove('selected'));
             }
@@ -2427,21 +2345,19 @@ function setupFileExplorerEvents() {
     }
 }
 
-// ========== 初期化 ==========
 window.addEventListener('load', async () => {
     console.log('Markdown IDE loaded');
 
-    // 設定を読み込む
     await loadSettings();
     setupSettingsListeners();
 
     initEditor();
     showWelcomeReadme();
     initializeFileTree();
-    setupFileExplorerEvents(); // ★追加: 空き領域クリックイベントの設定
+    setupFileExplorerEvents();
     updateOutline();
     updateLeftPaneWidthVariable();
-    initToolbarOverflow(); // ツールバーのレスポンシブ初期化
+    initToolbarOverflow();
 
     if (isTerminalVisible) {
         initializeTerminal();
@@ -2452,32 +2368,41 @@ window.addEventListener('load', async () => {
         switchHeaderButtons(document.querySelector('.side-switch.active').dataset.target);
     }
 
-    // ★追加: ファイルシステム変更通知のリスナー
     if (typeof window.electronAPI?.onFileSystemChanged === 'function') {
         window.electronAPI.onFileSystemChanged((payload) => {
             console.log('File system change detected:', payload);
-            // デバウンス処理
             if (window.fileTreeUpdateTimeout) clearTimeout(window.fileTreeUpdateTimeout);
             window.fileTreeUpdateTimeout = setTimeout(() => {
                 initializeFileTreeWithState();
-            }, 500); // 頻繁な更新を防ぐため0.5秒待つ
+            }, 500);
         });
     }
 });
 
 // ========== ファイルシステム操作 ==========
 
-// ファイルを開く
 async function openFile(filePath, fileName) {
+    // パスを正規化して統一（区切り文字の違いや相対パスの問題を解消）
+    const normalizedPath = path.resolve(filePath);
+
     try {
         if (openedFiles.has('README.md')) {
             closeWelcomeReadme();
         }
 
+        // 既に開いているかチェック（正規化されたパスを使用）
+        let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
+        
+        // 既にタブがある場合は、ファイル読み込みをスキップして切り替えるだけにする
+        if (tab) {
+            switchToFile(normalizedPath);
+            return;
+        }
+
         let fileContent = '';
         if (typeof window.electronAPI?.loadFile === 'function') {
             try {
-                fileContent = await window.electronAPI.loadFile(filePath);
+                fileContent = await window.electronAPI.loadFile(normalizedPath);
             } catch (error) {
                 console.error('Failed to load file content:', error);
                 fileContent = `ファイルを読み込めません: ${error.message}`;
@@ -2486,17 +2411,16 @@ async function openFile(filePath, fileName) {
             fileContent = `ファイル: ${fileName}\n(内容は読み込めません)`;
         }
 
-        let tab = document.querySelector(`[data-filepath="${CSS.escape(filePath)}"]`);
         if (!tab) {
             tab = document.createElement('div');
             tab.className = 'tab';
-            tab.dataset.filepath = filePath;
-            tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${filePath}">×</span>`;
+            tab.dataset.filepath = normalizedPath;
+            tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
             editorTabsContainer.appendChild(tab);
-            openedFiles.set(filePath, { content: fileContent, fileName: fileName });
+            openedFiles.set(normalizedPath, { content: fileContent, fileName: fileName });
         }
 
-        switchToFile(filePath);
+        switchToFile(normalizedPath);
     } catch (error) {
         console.error('Failed to open file:', error);
     }
@@ -2540,23 +2464,19 @@ function switchToFile(filePath) {
     const fileContent = fileData ? fileData.content : '';
 
     if (globalEditorView) {
-        // ファイル切り替え時は ExternalChange アノテーションを付けて dispatch
         globalEditorView.dispatch({
             changes: { from: 0, to: globalEditorView.state.doc.length, insert: fileContent },
-            annotations: ExternalChange.of(true) // プログラムによる変更であることを明示
+            annotations: ExternalChange.of(true)
         });
     }
 
-    // ファイル名入力欄の更新
     if (fileTitleInput) {
         const fileName = fileData ? fileData.fileName : filePath.split(/[\/\\]/).pop();
-        // 拡張子を除く
         const extIndex = fileName.lastIndexOf('.');
         const fileNameWithoutExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
         fileTitleInput.value = fileNameWithoutExt;
     }
 
-    // ビューの同期
     switchMainView('content-readme');
 
     updateOutline();
@@ -2573,17 +2493,13 @@ function switchToFile(filePath) {
 }
 
 function closeTab(element, isSettings = false) {
-    // 要素削除
     if (element) element.remove();
 
     if (isSettings) {
-        // 設定タブを閉じた場合、直近のファイルに戻る
         switchToLastFileOrReadme();
     } else {
-        // ファイルタブを閉じた場合
         const filePath = element.dataset.filepath;
 
-        // READMEは特別扱いせず閉じる
         if (filePath) {
             openedFiles.delete(filePath);
             fileModificationState.delete(filePath);
@@ -2591,7 +2507,6 @@ function closeTab(element, isSettings = false) {
             if (currentFilePath === filePath) {
                 currentFilePath = null;
                 if (globalEditorView) {
-                    // タブを閉じてエディタをクリアする際も ExternalChange を付与
                     globalEditorView.dispatch({
                         changes: { from: 0, to: globalEditorView.state.doc.length, insert: "" },
                         annotations: ExternalChange.of(true)
@@ -2648,7 +2563,6 @@ async function saveCurrentFile(isSaveAs = false) {
     }
 }
 
-// ========== タブ管理：イベント委譲 ==========
 if (editorTabsContainer) {
     editorTabsContainer.addEventListener('click', (e) => {
         const closeBtn = e.target.closest('.close-tab');
@@ -2673,46 +2587,32 @@ if (editorTabsContainer) {
 
 // ========== ファイルツリー操作 ==========
 
-// ★追加: 展開状態を保存しながらファイルツリーを更新する関数
 async function initializeFileTreeWithState() {
     const fileTreeContainer = document.getElementById('file-tree-container');
     if (!fileTreeContainer) return;
 
-    // 現在開いているフォルダのパスを保存
     const expandedPaths = new Set();
     const items = fileTreeContainer.querySelectorAll('.tree-item');
     items.forEach(item => {
         const toggle = item.querySelector('.tree-toggle');
-        // トグルが「▶」ではなく「▼」になっており、かつ子要素が表示されているものを保存
         if (toggle && toggle.textContent === '▼' && item.nextElementSibling && item.nextElementSibling.style.display !== 'none') {
             expandedPaths.add(item.dataset.path);
         }
     });
-    // ルートディレクトリは常に展開対象
     if (currentDirectoryPath) expandedPaths.add(currentDirectoryPath);
 
-    // ツリーの再構築
     await initializeFileTree();
 
-    // 展開状態の復元
-    // 注: DOMが再構築されるため、新しいDOMに対して操作する必要がある
-    // initializeFileTreeは非同期でルート直下のみ読み込むため、深層のフォルダを開くには再帰的な処理が必要
-    // ここでは簡易的に、保存されたパスのリストを使って順番に開いていく
-
-    // パスの深さ順にソート（親フォルダから順に開くため）
     const sortedPaths = Array.from(expandedPaths).sort((a, b) => a.length - b.length);
 
-    // 新しいコンテナを取得（initializeFileTreeで置換されているため）
     const newContainer = document.getElementById('file-tree-container');
     if (!newContainer) return;
 
     for (const path of sortedPaths) {
-        // パスに対応する要素を探す
         const item = newContainer.querySelector(`.tree-item[data-path="${CSS.escape(path)}"]`);
         if (item) {
             const toggle = item.querySelector('.tree-toggle');
             if (toggle && toggle.textContent === '▶') {
-                // まだ開いていない場合は開く
                 await toggleFolder(item);
             }
         }
@@ -2746,28 +2646,22 @@ async function initializeFileTree() {
             if (rootChildren) rootChildren.innerHTML = '';
             await loadDirectoryTreeContents(rootItem, currentDirectoryPath);
 
-            // ★追加: ルートアイテムにもドラッグ＆ドロップイベントを追加
             rootItem.addEventListener('dragover', handleDragOver);
             rootItem.addEventListener('dragleave', handleDragLeave);
             rootItem.addEventListener('drop', handleDrop);
         }
 
-        // ★追加: コンテナ全体（余白含む）へのドロップ対応
         newFileTreeContainer.addEventListener('dragover', handleDragOver);
         newFileTreeContainer.addEventListener('drop', handleDrop);
 
-        // クリックイベント委譲
         newFileTreeContainer.addEventListener('click', (e) => {
             const item = e.target.closest('.tree-item');
 
-            // ★修正: アイテム以外（空き領域）のクリックはここでは無視し、親(#content-files)のリスナーに任せる
-            // stopPropagationしなければ親まで伝播する
             if (!item) {
                 return;
             }
 
             if (item.classList.contains('creation-mode')) return;
-            // リネーム用input内でのクリックは無視
             if (e.target.tagName.toLowerCase() === 'input') return;
 
             e.stopPropagation();
@@ -2782,12 +2676,10 @@ async function initializeFileTree() {
             }
         });
 
-        // コンテキストメニューイベント委譲
         newFileTreeContainer.addEventListener('contextmenu', (e) => {
             const item = e.target.closest('.tree-item');
             if (!item) return;
             if (item.classList.contains('creation-mode')) return;
-            // リネーム中はメニューを出さない
             if (item.querySelector('input')) return;
 
             e.preventDefault();
@@ -2847,10 +2739,7 @@ async function toggleFolder(folderElement) {
 
         childrenContainer.style.display = 'block';
 
-        // 常に最新の内容をロードするように変更（ファイル監視と同期しやすくするため）
-        // if (childrenContainer.children.length === 0) { 
         await loadDirectoryTreeContents(folderElement, folderPath);
-        // }
     }
 }
 
@@ -2915,27 +2804,22 @@ function getFileIconData(filename) {
 function handleDragStart(e) {
     const item = e.target.closest('.tree-item');
 
-    // ルートアイテム（pathがcurrentDirectoryPathと同じ）はドラッグ不可にする
     if (!item || !item.dataset.path || item.dataset.path === currentDirectoryPath) {
         e.preventDefault();
         return;
     }
 
-    // ドラッグするファイルのパスを設定
     e.dataTransfer.setData('text/plain', item.dataset.path);
     e.dataTransfer.effectAllowed = 'move';
-    e.stopPropagation(); // イベントバブリング防止
+    e.stopPropagation();
 }
 
 function handleDragOver(e) {
-    e.preventDefault(); // ドロップを許可するために必須
-    e.stopPropagation(); // イベントバブリング防止
+    e.preventDefault();
+    e.stopPropagation();
 
     const targetItem = e.target.closest('.tree-item');
     if (targetItem) {
-        // フォルダの上にある場合のみハイライト（ファイルの上にはドロップできないようにする...が、
-        // 親フォルダへのドロップとして扱うならファイル上でもOKかもしれない。
-        // ここではシンプルにフォルダのみをターゲットとする）
         if (!targetItem.classList.contains('file')) {
             targetItem.classList.add('drag-over');
             e.dataTransfer.dropEffect = 'move';
@@ -2943,7 +2827,6 @@ function handleDragOver(e) {
             e.dataTransfer.dropEffect = 'none';
         }
     } else {
-        // 余白（ルート）へのドロップを許可
         e.dataTransfer.dropEffect = 'move';
     }
 }
@@ -2957,7 +2840,7 @@ function handleDragLeave(e) {
 
 async function handleDrop(e) {
     e.preventDefault();
-    e.stopPropagation(); // イベントバブリング防止（これが二重実行防止の鍵）
+    e.stopPropagation();
 
     const targetItem = e.target.closest('.tree-item');
     if (targetItem) targetItem.classList.remove('drag-over');
@@ -2968,41 +2851,32 @@ async function handleDrop(e) {
     let destFolderPath;
 
     if (targetItem) {
-        // 移動先がフォルダでない場合はキャンセル（ファイルへのドロップは無視）
         if (targetItem.classList.contains('file')) return;
         destFolderPath = targetItem.dataset.path;
     } else {
-        // ターゲットがない（余白へのドロップ）場合、ルートディレクトリを移動先とする
         destFolderPath = currentDirectoryPath;
     }
 
     if (!destFolderPath) return;
 
-    // 自分自身やその子孫への移動を禁止するためのチェックはメインプロセスで行うか、ここで行う
-    if (srcPath === destFolderPath) return; // 自分自身へのドロップ
+    if (srcPath === destFolderPath) return;
 
-    // ファイル名を抽出 (区切り文字は / または \)
     const fileName = srcPath.split(/[/\\]/).pop();
 
-    // 移動先の区切り文字を推測 (destFolderPathに含まれるもの、なければ /)
     const destSep = destFolderPath.includes('\\') ? '\\' : '/';
 
-    // 移動先パスを作成 (重複するセパレータを防ぐ)
     let destPath = destFolderPath;
     if (!destPath.endsWith(destSep)) {
         destPath += destSep;
     }
     destPath += fileName;
 
-    // 移動実行
     if (srcPath !== destPath) {
         try {
             if (typeof window.electronAPI?.moveFile === 'function') {
                 const result = await window.electronAPI.moveFile(srcPath, destPath);
                 if (result.success) {
                     showNotification(`移動しました: ${fileName}`, 'success');
-                    // ファイルツリーの更新は onFileSystemChanged で行われるためここでは何もしない
-                    // 必要なら即時反映ロジックを追加
                 } else {
                     showNotification(`移動に失敗しました: ${result.error}`, 'error');
                 }
@@ -3015,9 +2889,6 @@ async function handleDrop(e) {
 }
 
 function createTreeElement(item, parentPath) {
-    // ★修正: item.path (フルパス) があればそれを優先して dataset.path に設定する
-    // メインプロセスから返ってくる item.path は既に path.join で正しく処理されているため
-    // 手動結合によるパス区切り文字の不整合を防ぐ
     const itemPath = item.path || `${parentPath}/${item.name}`;
 
     const container = document.createElement('div');
@@ -3025,7 +2896,6 @@ function createTreeElement(item, parentPath) {
     container.dataset.path = itemPath;
     container.dataset.name = item.name;
 
-    // ドラッグ&ドロップ属性とイベントリスナーを追加
     container.draggable = true;
     container.addEventListener('dragstart', handleDragStart);
     container.addEventListener('dragover', handleDragOver);
@@ -3141,8 +3011,8 @@ async function showCreationInput(isFolder) {
             return;
         }
 
-        const separator = (targetPath.endsWith('/') || targetPath.endsWith('\\')) ? '' : '/';
-        const newPath = targetPath + separator + name;
+        // path.joinを使用してパスを正しく結合
+        const newPath = path.join(targetPath, name);
 
         try {
             if (isFolder) {
@@ -3156,11 +3026,10 @@ async function showCreationInput(isFolder) {
             }
 
             safeRemove();
-            // ★修正: 自動リロードに任せるため、ここでの手動リロードは必須ではないが、
-            // 即時フィードバックのため残しておく（ただし、ウォッチャーとの競合はデバウンスで吸収）
             await reloadContainer(targetContainer, targetPath);
 
             if (!isFolder) {
+                // 新規作成したファイルを開く（正規化されたパスが渡される）
                 openFile(newPath, name);
             }
 
@@ -3323,16 +3192,9 @@ async function confirmAndDelete(path) {
             const success = await window.electronAPI.deleteFile(path);
 
             if (success) {
-                // 削除成功時、開いているタブを確認して閉じる処理
-                // path は削除されたファイルまたはフォルダのパス
-
-                // 削除対象に含まれる開いているファイルを探す
                 const tabsToClose = [];
 
                 for (const [filePath, _] of openedFiles) {
-                    // 完全一致（ファイル削除）または前方一致（フォルダ削除でその中身）
-                    // 区切り文字を含めてチェックすることで、類似名の別ファイルを誤検知するのを防ぐ
-                    // 例: "test" フォルダ削除で "test-file.md" が消えないように
                     if (filePath === path ||
                         filePath.startsWith(path + '\\') ||
                         filePath.startsWith(path + '/')) {
@@ -3340,11 +3202,9 @@ async function confirmAndDelete(path) {
                     }
                 }
 
-                // 該当するタブを閉じる
                 tabsToClose.forEach(filePath => {
                     const tab = document.querySelector(`[data-filepath="${CSS.escape(filePath)}"]`);
                     if (tab) {
-                        // closeTab(element, isSettings)
                         closeTab(tab, false);
                     }
                 });
@@ -3370,7 +3230,6 @@ function showContextMenu(x, y, path, name) {
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
 
-    // ★追加: 名前の変更
     const renameOption = document.createElement('div');
     renameOption.className = 'context-menu-item';
     renameOption.textContent = '名前の変更';

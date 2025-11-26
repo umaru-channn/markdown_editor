@@ -921,6 +921,21 @@ body[data-theme="dark"] .cm-live-quote { color: #8b949e; }
 .cm-live-em { font-style: italic; }
 .cm-live-s { text-decoration: line-through; color: #6a737d; }
 
+/* ★追加: ハイライト (==) */
+.cm-live-highlight {
+    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.7) 0); /* 蛍光マーカー風 */
+    /* または単色背景 */
+    /* background-color: rgba(255, 255, 0, 0.4); */
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+body[data-theme="dark"] .cm-live-highlight {
+    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.5) 0);
+    /* ダークモードでの可読性を考慮 */
+    color: inherit;
+}
+
 .cm-live-code {
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
     background: var(--sidebar-bg);
@@ -953,7 +968,7 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 }
 
 .cm-live-li::before {
-    content: '•';
+    content: "\2022";
     position: absolute;
     /* 0.5em(基本) + (インデントレベル * タブ幅) */
     left: calc(0.5em + (var(--indent-level, 0) * var(--list-indent-width)));

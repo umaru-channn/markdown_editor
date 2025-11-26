@@ -108,7 +108,7 @@ class CodeBlockLanguageWidget extends WidgetType {
     toDOM() {
         const container = document.createElement("span");
         container.className = "cm-language-widget";
-        
+
         if (this.lang) {
             const btn = document.createElement("button");
             btn.className = "cm-code-copy-btn";
@@ -118,7 +118,7 @@ class CodeBlockLanguageWidget extends WidgetType {
         }
         return container;
     }
-    ignoreEvent() { return false; } 
+    ignoreEvent() { return false; }
 }
 
 /* --- 改ページ (Page Break) Widget --- */
@@ -157,7 +157,7 @@ class BookmarkWidget extends WidgetType {
         // スケルトンUI (ローディング中)
         const content = document.createElement("div");
         content.className = "cm-bookmark-content";
-        
+
         const titleSkeleton = document.createElement("div");
         titleSkeleton.className = "skeleton-box";
         titleSkeleton.style.width = "70%";
@@ -204,11 +204,11 @@ class BookmarkWidget extends WidgetType {
                 // ここではとりあえずスケルトンを消してURLを表示
                 container.classList.remove("cm-bookmark-loading");
                 container.innerHTML = `
-                    <div class="cm-bookmark-content">
-                        <div class="cm-bookmark-title">${this.url}</div>
-                        <div class="cm-bookmark-desc">No preview available</div>
-                    </div>
-                `;
+                        <div class="cm-bookmark-content">
+                            <div class="cm-bookmark-title">${this.url}</div>
+                            <div class="cm-bookmark-desc">No preview available</div>
+                        </div>
+                    `;
             }
         } catch (e) {
             console.error("Failed to load bookmark data", e);
@@ -233,7 +233,7 @@ class BookmarkWidget extends WidgetType {
 
         const metaDiv = document.createElement("div");
         metaDiv.className = "cm-bookmark-meta";
-        
+
         // ファビコン (Googleのサービスを利用)
         const faviconUrl = `https://www.google.com/s2/favicons?domain=${data.domain}&sz=32`;
         const favicon = document.createElement("img");
@@ -258,12 +258,12 @@ class BookmarkWidget extends WidgetType {
         if (data.image) {
             const coverDiv = document.createElement("div");
             coverDiv.className = "cm-bookmark-cover";
-            
+
             const img = document.createElement("img");
             img.className = "cm-bookmark-image";
             img.src = data.image;
             img.alt = "Cover";
-            
+
             // 画像読み込みエラー時の処理
             img.onerror = () => {
                 coverDiv.style.display = "none";
@@ -289,7 +289,7 @@ function buildDecorations(view) {
         // 1. まず各行のテキストベースでのチェック（改ページ検出、ブックマーク検出など）
         for (let pos = from; pos < to;) {
             const line = state.doc.lineAt(pos);
-            
+
             // 既に処理済みの行はスキップ
             if (processedLines.has(line.from)) {
                 pos = line.to + 1;
@@ -311,18 +311,16 @@ function buildDecorations(view) {
                     });
                     processedLines.add(line.from);
                     pos = line.to + 1;
-                    continue; 
+                    continue;
                 }
             }
 
-            // ★修正: "@card URL" の形式の行をブックマークカード化する
-            // 通常のURLと区別するため、明示的なマーカー(@card)を使用
+            // "@card URL" の形式の行をブックマークカード化する
             const bookmarkRegex = /^@card\s+(https?:\/\/[^\s]+)$/;
             const bookmarkMatch = lineText.trim().match(bookmarkRegex);
-            
+
             if (bookmarkMatch) {
                 if (!isCursorOnLine) {
-                    // match[1] にURLが入っている
                     collectedDecos.push({
                         from: line.from,
                         to: line.to,
@@ -332,10 +330,46 @@ function buildDecorations(view) {
                     processedLines.add(line.from);
                     pos = line.to + 1;
                     continue;
-                } else {
-                    // カーソルがある行は "@card " の部分だけ隠して URLは見せる（編集用）
-                    // もしくは全体を表示する。ここではシンプルに全体表示にしておくか、
-                    // @card だけ薄くするなどの処理も可能だが、一旦標準のテキスト表示に戻す。
+                }
+            }
+
+            // ★追加: ハイライト (==text==) の検出
+            // 既存の処理済行でない場合のみ実行
+            // コードブロック内などの判定は processedLines に依存（構文木処理で後から追加される）
+            // ここでは簡易的に「行全体が特定のウィジェットでない場合」に処理する
+
+            const highlightRegex = /==([^=]+)==/g;
+            let match;
+            while ((match = highlightRegex.exec(lineText)) !== null) {
+                const start = line.from + match.index;
+                const end = start + match[0].length;
+                const textLen = match[1].length;
+
+                // カーソルがハイライト内にあるか
+                const isCursorIn = (cursor >= start && cursor <= end);
+
+                if (!isCursorIn) {
+                    // マーカー (==) を隠す (開始)
+                    collectedDecos.push({
+                        from: start,
+                        to: start + 2,
+                        side: 0,
+                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                    });
+                    // テキスト部分を光らせる
+                    collectedDecos.push({
+                        from: start + 2,
+                        to: end - 2,
+                        side: 1,
+                        deco: Decoration.mark({ class: "cm-live-highlight" })
+                    });
+                    // マーカー (==) を隠す (終了)
+                    collectedDecos.push({
+                        from: end - 2,
+                        to: end,
+                        side: 0,
+                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                    });
                 }
             }
 
@@ -349,7 +383,7 @@ function buildDecorations(view) {
             enter: (node) => {
                 const n = node.node || node;
                 const line = state.doc.lineAt(node.from);
-                
+
                 const isCursorOnLine = (cursor >= line.from && cursor <= line.to);
                 const isCursorInNode = (cursor >= node.from && cursor <= node.to);
 
@@ -403,7 +437,7 @@ function buildDecorations(view) {
                     const lineText = state.doc.sliceString(line.from, line.to);
                     const validListRegex = /^\s*([-*+]|\d+\.)\s/;
                     if (!validListRegex.test(lineText)) { return false; }
-                    
+
                     const listMark = n.firstChild;
                     if (!listMark) return true;
 
@@ -424,7 +458,7 @@ function buildDecorations(view) {
                     } else if (isOrdered) {
                         collectedDecos.push({ from: line.from, to: line.from, side: -1, deco: Decoration.line({ class: "cm-live-ol", attributes: { style: indentStyle } }) });
                         collectedDecos.push({ from: listMark.from, to: listMark.to, side: 0, deco: Decoration.mark({ class: "cm-live-ol-marker" }) });
-                        
+
                         // 行頭の空白だけ隠す
                         const indentMatch = lineText.match(/^\s*/);
                         if (indentMatch && indentMatch[0].length > 0) {
@@ -467,57 +501,57 @@ function buildDecorations(view) {
                         if (isCursorInNode) {
                             if (isHeader) className += " cm-code-block-first-active";
                             if (isFooter) className += " cm-code-block-last-active";
-                            
-                            collectedDecos.push({ 
-                                from: lineObj.from, 
-                                to: lineObj.from, 
-                                side: -1, 
-                                deco: Decoration.line({ class: className, attributes: attrs }) 
+
+                            collectedDecos.push({
+                                from: lineObj.from,
+                                to: lineObj.from,
+                                side: -1,
+                                deco: Decoration.line({ class: className, attributes: attrs })
                             });
-                        } 
+                        }
                         else {
                             if (isHeader) {
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.from, 
-                                    side: -1, 
-                                    deco: Decoration.line({ class: "cm-code-header" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.from,
+                                    side: -1,
+                                    deco: Decoration.line({ class: "cm-code-header" })
                                 });
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.to, 
-                                    side: 0, 
-                                    deco: Decoration.mark({ class: "cm-transparent-text" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.to,
+                                    side: 0,
+                                    deco: Decoration.mark({ class: "cm-transparent-text" })
                                 });
                                 const match = lineObj.text.match(/^(\s*`{3,})(\w+)?/);
                                 const lang = match && match[2] ? match[2] : "";
-                                collectedDecos.push({ 
-                                    from: lineObj.to, 
-                                    to: lineObj.to, 
-                                    side: 1, 
-                                    deco: Decoration.widget({ widget: new CodeBlockLanguageWidget(lang), side: 1 }) 
+                                collectedDecos.push({
+                                    from: lineObj.to,
+                                    to: lineObj.to,
+                                    side: 1,
+                                    deco: Decoration.widget({ widget: new CodeBlockLanguageWidget(lang), side: 1 })
                                 });
                             }
                             else if (isFooter) {
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.from, 
-                                    side: -1, 
-                                    deco: Decoration.line({ class: "cm-code-footer" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.from,
+                                    side: -1,
+                                    deco: Decoration.line({ class: "cm-code-footer" })
                                 });
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.to, 
-                                    side: 0, 
-                                    deco: Decoration.mark({ class: "cm-transparent-text" }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.to,
+                                    side: 0,
+                                    deco: Decoration.mark({ class: "cm-transparent-text" })
                                 });
                             }
                             else {
-                                collectedDecos.push({ 
-                                    from: lineObj.from, 
-                                    to: lineObj.from, 
-                                    side: -1, 
-                                    deco: Decoration.line({ class: className, attributes: attrs }) 
+                                collectedDecos.push({
+                                    from: lineObj.from,
+                                    to: lineObj.from,
+                                    side: -1,
+                                    deco: Decoration.line({ class: className, attributes: attrs })
                                 });
                             }
                         }
@@ -565,7 +599,7 @@ function buildDecorations(view) {
                 if (cursor >= node.from && cursor <= node.to) { return; }
                 const n = node.node || node;
                 let startMark, endMark;
-                
+
                 if (node.name === "Strikethrough") {
                     startMark = (typeof n.getChild === "function") ? n.getChild("StrikethroughMark") : null;
                     endMark = n.lastChild;
@@ -641,7 +675,7 @@ const plugin = ViewPlugin.define(
                     if (match) {
                         const prefixLen = match[1].length;
                         const markerStart = line.from + prefixLen;
-                        const markerEnd = markerStart + 3; 
+                        const markerEnd = markerStart + 3;
                         const currentMarker = match[2];
                         const isChecked = currentMarker.toLowerCase().includes("x");
                         const newText = isChecked ? "[ ]" : "[x]";
@@ -666,7 +700,7 @@ const plugin = ViewPlugin.define(
                             if (navigator.clipboard) {
                                 navigator.clipboard.writeText(codeText).then(() => {
                                     const originalText = target.textContent;
-                                    target.textContent = "Copied!"; 
+                                    target.textContent = "Copied!";
                                     target.classList.add("copied");
                                     setTimeout(() => {
                                         target.textContent = originalText;
@@ -688,7 +722,7 @@ const plugin = ViewPlugin.define(
                         }
                     }
                 }
-                // ★追加: ブックマークカードのクリック処理
+                // ブックマークカードのクリック処理
                 const bookmarkElement = target.closest(".cm-bookmark-widget");
                 if (bookmarkElement) {
                     // デフォルトのリンク動作（target="_blank"）をElectronで正しく開くため

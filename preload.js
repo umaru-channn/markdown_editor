@@ -12,7 +12,7 @@ window.electronAPI = {
   writeToTerminal: (terminalId, data) => ipcRenderer.send('pty:write', { terminalId, data }),
   resizeTerminal: (terminalId, cols, rows) => ipcRenderer.send('pty:resize', { terminalId, cols, rows }),
   saveTerminalState: () => ipcRenderer.invoke('terminal:save-state'),
-  
+
   onTerminalData: (callback) => {
     const handler = (event, payload) => callback(payload);
     ipcRenderer.on('pty:data', handler);
@@ -26,7 +26,7 @@ window.electronAPI = {
   executeCommand: (command, currentDir) => ipcRenderer.invoke('execute-command', command, currentDir),
   getCurrentDirectory: () => ipcRenderer.invoke('get-current-directory'),
   getCompletionCandidates: (prefix, currentDir) => ipcRenderer.invoke('get-completion-candidates', prefix, currentDir),
-  
+
   // Git operations
   gitStatus: (repoPath) => ipcRenderer.invoke('git-status', repoPath),
   gitAdd: (repoPath, filepath) => ipcRenderer.invoke('git-add', repoPath, filepath),
@@ -34,7 +34,7 @@ window.electronAPI = {
   gitCommit: (repoPath, message) => ipcRenderer.invoke('git-commit', repoPath, message),
   gitPush: (repoPath) => ipcRenderer.invoke('git-push', repoPath),
   gitPull: (repoPath) => ipcRenderer.invoke('git-pull', repoPath),
-  
+
   // File operations
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
@@ -45,12 +45,12 @@ window.electronAPI = {
   deleteFile: (filepath) => ipcRenderer.invoke('delete-file', filepath),
   createDirectory: (dirPath) => ipcRenderer.invoke('create-directory', dirPath),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
-  
+
   // Window operations
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
-  
+
   // PDF
   generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
   exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent), // ★追加
@@ -65,14 +65,14 @@ window.electronAPI = {
 
   // Context Menu Helper
   showFileContextMenu: (filePath, isDirectory) => ipcRenderer.send('show-file-context-menu', filePath, isDirectory),
-  
+
   // Open External Links (New)
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
   // Event Listeners
   onInitiateRename: (callback) => ipcRenderer.on('initiate-rename', (_event, val) => callback(val)),
   onFileDeleted: (callback) => ipcRenderer.on('file-deleted', (_event, val) => callback(val)),
-  
+
   // ★追加: ファイルシステムの変更を監視するイベントリスナー
   onFileSystemChanged: (callback) => {
     const handler = (event, payload) => callback(payload);

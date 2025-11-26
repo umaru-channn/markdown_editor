@@ -24,7 +24,7 @@ function getDefaultShell() {
             shell: cmdPath,
             args: []
         };
-        
+
         // 旧ロジック: PowerShellを優先していた部分
         /*
         // Check for PowerShell 7+ (latest version)
