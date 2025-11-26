@@ -1,5 +1,5 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, ipcMain, dialog, session, shell } = require('electron') // shellを追加
+const { app, BrowserWindow, ipcMain, dialog, session, shell, Menu, MenuItem } = require('electron')
 const path = require('node:path')
 const fs = require('fs')
 const { exec } = require('child_process')
@@ -8,14 +8,67 @@ const os = require('os')
 const git = require('isomorphic-git')
 const http = require('isomorphic-git/http/node')
 const { terminalService } = require('./terminalService');
-const got = require('got'); // URLタイトル取得用
+const got = require('got');
+const crypto = require('crypto');
+
+// Cloud Sync Dependencies
+const { Dropbox } = require('dropbox');
+const { google } = require('googleapis');
+const httpModule = require('http'); // 認証用ローカルサーバー
+const urlModule = require('url');
+require('dotenv').config(); // 環境変数読み込み
+
+// ========== 【重要】APIキー設定エリア ==========
+// Dropbox用
+const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY;
+const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET;
+// Google Drive用
+const GDRIVE_CLIENT_ID = process.env.GDRIVE_CLIENT_ID;
+const GDRIVE_CLIENT_SECRET = process.env.GDRIVE_CLIENT_SECRET;
+// ===========================================
 
 // 各ウィンドウごとのカレントディレクトリを保持
 const workingDirectories = new Map();
-// ★追加: 各ウィンドウごとのファイルウォッチャーを保持
+// 各ウィンドウごとのファイルウォッチャーを保持
 const fileWatchers = new Map();
 
+// ========== Undo/Redo History Management ==========
+const fileHistory = {
+  undoStack: [],
+  redoStack: [],
+  // アプリケーションデータフォルダ内にバックアップ用ディレクトリを作成
+  backupDir: path.join(app.getPath('userData'), 'file_backups')
+};
+
+// バックアップディレクトリの初期化
+if (!fs.existsSync(fileHistory.backupDir)) {
+  fs.mkdirSync(fileHistory.backupDir, { recursive: true });
+}
+
+// ヘルパー: 一意なバックアップパスを生成
+function generateBackupPath(originalPath) {
+  const ext = path.extname(originalPath);
+  const hash = crypto.randomBytes(8).toString('hex');
+  return path.join(fileHistory.backupDir, `${path.basename(originalPath, ext)}_${hash}${ext}`);
+}
+
+// ヘルパー: 履歴に追加
+function addToHistory(op) {
+  fileHistory.undoStack.push({ ...op, timestamp: Date.now() });
+  fileHistory.redoStack = []; // 新しい操作をしたらRedoスタックはクリア
+
+  // 履歴制限 (50件)
+  if (fileHistory.undoStack.length > 50) {
+    const removed = fileHistory.undoStack.shift();
+    if (removed.backupPath && fs.existsSync(removed.backupPath)) {
+      try { fs.rmSync(removed.backupPath, { recursive: true, force: true }); } catch (e) { }
+    }
+  }
+}
+
 let mainWindow = null;
+
+// ========== 設定関連ヘルパー ==========
 
 /**
  * Load terminal state from disk
@@ -63,7 +116,12 @@ function loadAppSettings() {
     fontSize: '16px',
     fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
     theme: 'light',
-    autoSave: true
+    autoSave: true,
+    cloudSync: {
+      service: 'none',
+      dropbox: { accessToken: null, refreshToken: null },
+      gdrive: { tokens: null }
+    }
   };
 }
 
@@ -73,13 +131,669 @@ function loadAppSettings() {
 function saveAppSettings(settings) {
   const settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    // 既存の設定を読み込んでマージ（部分更新に対応するため）
+    let currentSettings = {};
+    if (fs.existsSync(settingsPath)) {
+      currentSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    }
+    const newSettings = { ...currentSettings, ...settings };
+
+    fs.writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2), 'utf8');
     return true;
   } catch (error) {
     console.error('Failed to save app settings:', error);
     return false;
   }
 }
+
+// Recent Files の読み書き
+function loadRecentFiles() {
+  const recentPath = path.join(app.getPath('userData'), 'recent-files.json');
+  try {
+    if (fs.existsSync(recentPath)) {
+      return JSON.parse(fs.readFileSync(recentPath, 'utf8'));
+    }
+  } catch (error) {
+    console.error('Failed to load recent files:', error);
+  }
+  return [];
+}
+
+function saveRecentFiles(files) {
+  const recentPath = path.join(app.getPath('userData'), 'recent-files.json');
+  try {
+    fs.writeFileSync(recentPath, JSON.stringify(files, null, 2), 'utf8');
+    return true;
+  } catch (error) {
+    console.error('Failed to save recent files:', error);
+    return false;
+  }
+}
+
+// ========== Cloud Sync Logic ==========
+
+// Dropbox Auth
+ipcMain.handle('sync:auth-dropbox', async (event) => {
+  // キーが未設定の場合のガード
+  if (DROPBOX_APP_KEY === 'YOUR_DROPBOX_APP_KEY') {
+    return { success: false, error: '開発者用APIキーがmain.jsに設定されていません。' };
+  }
+
+  try {
+    const REDIRECT_PORT = 3000;
+    const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/auth/dropbox`;
+
+    const dbx = new Dropbox({ clientId: DROPBOX_APP_KEY, clientSecret: DROPBOX_APP_SECRET });
+    const authUrl = await dbx.auth.getAuthenticationUrl(REDIRECT_URI, null, 'code', 'offline', null, 'none', false);
+
+    shell.openExternal(authUrl);
+
+    return new Promise((resolve) => {
+      const server = httpModule.createServer(async (req, res) => {
+        if (req.url.startsWith('/auth/dropbox')) {
+          const query = urlModule.parse(req.url, true).query;
+          const code = query.code;
+
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<h1>認証成功！</h1><p>このタブを閉じてアプリに戻ってください。</p>');
+
+          // レスポンスを返してから少し待って閉じる
+          setTimeout(() => {
+            server.close();
+          }, 1000);
+
+          try {
+            const response = await dbx.auth.getAccessTokenFromCode(REDIRECT_URI, code);
+            const tokens = response.result;
+
+            // 設定保存
+            const settings = loadAppSettings();
+            settings.cloudSync = settings.cloudSync || {};
+            settings.cloudSync.service = 'dropbox';
+            settings.cloudSync.dropbox = {
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token, // offline accessの場合
+              tokenExpiresAt: Date.now() + (tokens.expires_in * 1000)
+            };
+            saveAppSettings(settings);
+
+            resolve({ success: true });
+          } catch (err) {
+            resolve({ success: false, error: err.message });
+          }
+        }
+      });
+
+      // ★ポート競合エラーハンドリング
+      server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+          console.error('Port 3000 is already in use.');
+          try { server.close(); } catch (e) { } // 念のため
+          resolve({
+            success: false,
+            error: `ポート${REDIRECT_PORT}が既に使用されています。前回起動した認証プロセスが残っている可能性があります。タスクマネージャー等でNode.jsプロセスを終了してください。`
+          });
+        } else {
+          resolve({ success: false, error: e.message });
+        }
+      });
+
+      server.listen(REDIRECT_PORT);
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Google Drive Auth
+ipcMain.handle('sync:auth-gdrive', async (event) => {
+  if (GDRIVE_CLIENT_ID === 'YOUR_GDRIVE_CLIENT_ID') {
+    return { success: false, error: '開発者用Google Client IDがmain.jsに設定されていません。' };
+  }
+
+  try {
+    const REDIRECT_PORT = 3000;
+    const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/auth/gdrive`;
+
+    const oauth2Client = new google.auth.OAuth2(
+      GDRIVE_CLIENT_ID,
+      GDRIVE_CLIENT_SECRET,
+      REDIRECT_URI
+    );
+
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['https://www.googleapis.com/auth/drive.file']
+    });
+
+    shell.openExternal(authUrl);
+
+    return new Promise((resolve) => {
+      const server = httpModule.createServer(async (req, res) => {
+        if (req.url.startsWith('/auth/gdrive')) {
+          const query = urlModule.parse(req.url, true).query;
+          const code = query.code;
+
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<h1>認証成功！</h1><p>このタブを閉じてアプリに戻ってください。</p>');
+
+          setTimeout(() => {
+            server.close();
+          }, 1000);
+
+          try {
+            const { tokens } = await oauth2Client.getToken(code);
+
+            const settings = loadAppSettings();
+            settings.cloudSync = settings.cloudSync || {};
+            settings.cloudSync.service = 'gdrive';
+            settings.cloudSync.gdrive = {
+              tokens
+            };
+            saveAppSettings(settings);
+
+            resolve({ success: true });
+          } catch (err) {
+            resolve({ success: false, error: err.message });
+          }
+        }
+      });
+
+      // ★ポート競合エラーハンドリング
+      server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+          console.error('Port 3000 is already in use.');
+          try { server.close(); } catch (e) { }
+          resolve({
+            success: false,
+            error: `ポート${REDIRECT_PORT}が既に使用されています。`
+          });
+        } else {
+          resolve({ success: false, error: e.message });
+        }
+      });
+
+      server.listen(REDIRECT_PORT);
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 同期実行ハンドラ
+ipcMain.handle('sync:start', async (event) => {
+  const settings = loadAppSettings();
+  const webContentsId = event.sender.id;
+  const localRoot = workingDirectories.get(webContentsId);
+
+  if (!localRoot) return { success: false, error: '同期するフォルダが開かれていません。' };
+  if (!settings.cloudSync || settings.cloudSync.service === 'none') {
+    return { success: false, error: '同期サービスが設定されていません。設定画面を確認してください。' };
+  }
+
+  const sender = event.sender;
+  const sendStatus = (status) => sender.send('sync:status-change', status);
+
+  try {
+    sendStatus('syncing');
+
+    if (settings.cloudSync.service === 'dropbox') {
+      // 埋め込みキーを使用して同期
+      await performDropboxSync(
+        {
+          ...settings.cloudSync.dropbox,
+          clientId: DROPBOX_APP_KEY,
+          clientSecret: DROPBOX_APP_SECRET
+        },
+        localRoot,
+        sender
+      );
+    } else if (settings.cloudSync.service === 'gdrive') {
+      await performGDriveSync(
+        {
+          ...settings.cloudSync.gdrive,
+          clientId: GDRIVE_CLIENT_ID,
+          clientSecret: GDRIVE_CLIENT_SECRET
+        },
+        localRoot,
+        sender
+      );
+    }
+
+    sendStatus('idle');
+    return { success: true };
+  } catch (error) {
+    console.error('Sync failed:', error);
+    sendStatus('error');
+    return { success: false, error: error.message };
+  }
+});
+
+// --- Dropbox Sync Implementation ---
+async function performDropboxSync(config, localRoot, sender) {
+  if (!config.accessToken) throw new Error('Dropboxの認証情報がありません。再連携してください。');
+
+  const dbx = new Dropbox({
+    clientId: config.clientId,
+    clientSecret: config.clientSecret,
+    refreshToken: config.refreshToken
+  });
+
+  dbx.auth.setAccessToken(config.accessToken);
+
+  // 1. ローカルファイルリスト取得 (再帰的)
+  const getLocalFiles = (dir) => {
+    let results = [];
+    try {
+      const list = fs.readdirSync(dir);
+      list.forEach(file => {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+        if (stat && stat.isDirectory()) {
+          if (file !== '.git' && file !== 'node_modules') {
+            results = results.concat(getLocalFiles(fullPath));
+          }
+        } else {
+          results.push({
+            path: fullPath,
+            relPath: path.relative(localRoot, fullPath).replace(/\\/g, '/'),
+            mtime: stat.mtime
+          });
+        }
+      });
+    } catch (e) {
+      console.error('Local file scan error:', e);
+    }
+    return results;
+  };
+  const localFiles = getLocalFiles(localRoot);
+
+  // 2. クラウドファイルリスト取得
+  let cloudFiles = [];
+  try {
+    let hasMore = true;
+    let cursor = null;
+    while (hasMore) {
+      const res = cursor
+        ? await dbx.filesListFolderContinue({ cursor })
+        : await dbx.filesListFolder({ path: '', recursive: true });
+
+      cloudFiles = cloudFiles.concat(res.result.entries);
+      hasMore = res.result.has_more;
+      cursor = res.result.cursor;
+    }
+  } catch (e) {
+    // パスが見つからない場合は空フォルダとみなす
+    // "path/not_found/" エラーなどが返る可能性があるため
+    console.log('Dropbox list info:', e.message);
+  }
+
+  // 3. 比較と同期
+  const cloudMap = new Map();
+  cloudFiles.forEach(f => {
+    if (f['.tag'] === 'file') {
+      const relPath = f.path_display.substring(1); // remove leading slash
+      cloudMap.set(relPath, f);
+    }
+  });
+
+  for (const local of localFiles) {
+    const cloud = cloudMap.get(local.relPath);
+    const dbxPath = '/' + local.relPath;
+
+    if (!cloud) {
+      // クラウドにない -> アップロード
+      console.log(`Uploading ${local.relPath}`);
+      const contents = fs.readFileSync(local.path);
+      await dbx.filesUpload({ path: dbxPath, contents, mode: 'overwrite' });
+    } else {
+      // 両方ある -> 日時比較 (簡易: 2秒の誤差許容)
+      const cloudTime = new Date(cloud.client_modified).getTime();
+      const localTime = local.mtime.getTime();
+
+      if (localTime > cloudTime + 2000) {
+        console.log(`Updating Cloud ${local.relPath}`);
+        const contents = fs.readFileSync(local.path);
+        await dbx.filesUpload({ path: dbxPath, contents, mode: 'overwrite' });
+      } else if (cloudTime > localTime + 2000) {
+        console.log(`Updating Local ${local.relPath}`);
+        const { result } = await dbx.filesDownload({ path: dbxPath });
+        fs.writeFileSync(local.path, result.fileBinary);
+        fs.utimesSync(local.path, new Date(), new Date(cloud.client_modified));
+      }
+      cloudMap.delete(local.relPath); // 処理済み
+    }
+  }
+
+  // クラウドにしか存在しないファイル -> ダウンロード
+  for (const [relPath, cloud] of cloudMap) {
+    console.log(`Downloading new file ${relPath}`);
+    const localPath = path.join(localRoot, relPath);
+    const dir = path.dirname(localPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const { result } = await dbx.filesDownload({ path: cloud.path_lower });
+    fs.writeFileSync(localPath, result.fileBinary);
+    fs.utimesSync(localPath, new Date(), new Date(cloud.client_modified));
+  }
+}
+
+// --- Google Drive Sync Implementation ---
+
+/**
+ * Google Drive同期のメイン処理
+ */
+async function performGDriveSync(config, localRoot, sender) {
+  if (!config.tokens) throw new Error('Google Driveの認証情報がありません。再連携してください。');
+
+  // Google OAuth2クライアントの初期化
+  const oauth2Client = new google.auth.OAuth2(
+    config.clientId,
+    config.clientSecret
+  );
+  oauth2Client.setCredentials(config.tokens);
+
+  // トークンの自動更新をハンドリング（リフレッシュトークン等が更新された場合に保存）
+  oauth2Client.on('tokens', (tokens) => {
+    if (tokens.access_token || tokens.refresh_token) {
+      const settings = loadAppSettings();
+      if (settings.cloudSync && settings.cloudSync.gdrive) {
+        // 既存のトークン情報とマージして保存
+        settings.cloudSync.gdrive.tokens = { ...settings.cloudSync.gdrive.tokens, ...tokens };
+        saveAppSettings(settings);
+      }
+    }
+  });
+
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+  // 1. 同期ルートフォルダ「MarkdownIDE_Data」のIDを取得（存在しなければ作成）
+  const rootFolderId = await getOrCreateDriveFolder(drive, 'MarkdownIDE_Data');
+  console.log(`[GDrive] Root Folder ID: ${rootFolderId}`);
+
+  // 2. ローカルファイルスキャン（Dropbox版と同じロジック）
+  const getLocalFiles = (dir) => {
+    let results = [];
+    try {
+      const list = fs.readdirSync(dir);
+      list.forEach(file => {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+        if (stat && stat.isDirectory()) {
+          if (file !== '.git' && file !== 'node_modules') {
+            results = results.concat(getLocalFiles(fullPath));
+          }
+        } else {
+          results.push({
+            path: fullPath,
+            relPath: path.relative(localRoot, fullPath).replace(/\\/g, '/'), // Windowsパス区切りを統一
+            mtime: stat.mtime
+          });
+        }
+      });
+    } catch (e) {
+      console.error('Local file scan error:', e);
+    }
+    return results;
+  };
+  const localFiles = getLocalFiles(localRoot);
+
+  // 3. クラウドファイルスキャン（再帰的）
+  // ID, 名前, 更新日時, 相対パスを持つオブジェクトのリストを取得
+  let cloudFiles = await listDriveFilesRecursive(drive, rootFolderId);
+
+  // 4. 比較と同期実行
+  // 検索用にマップ化: relPath -> driveFileObj
+  const cloudMap = new Map();
+  cloudFiles.forEach(f => {
+    cloudMap.set(f.relPath, f);
+  });
+
+  // フォルダIDキャッシュ（アップロード時に何度も親フォルダを検索しないようにする）
+  // キー: 相対ディレクトリパス, 値: FolderID
+  const folderCache = new Map();
+  folderCache.set('', rootFolderId); // ルート
+
+  for (const local of localFiles) {
+    const cloud = cloudMap.get(local.relPath);
+
+    if (!cloud) {
+      // A. クラウドにない -> アップロード
+      console.log(`[GDrive] Uploading new file: ${local.relPath}`);
+      // 親フォルダのIDを特定・作成
+      const parentId = await ensureDriveDirectory(drive, rootFolderId, path.dirname(local.relPath), folderCache);
+      await uploadFileToDrive(drive, parentId, path.basename(local.relPath), local.path, local.mtime);
+    } else {
+      // B. 両方ある -> 日時比較 (2秒の誤差許容)
+      const cloudTime = new Date(cloud.modifiedTime).getTime();
+      const localTime = local.mtime.getTime();
+
+      if (localTime > cloudTime + 2000) {
+        // ローカルが新しい -> クラウドを更新
+        console.log(`[GDrive] Updating cloud file: ${local.relPath}`);
+        await updateDriveFile(drive, cloud.id, local.path, local.mtime);
+      } else if (cloudTime > localTime + 2000) {
+        // クラウドが新しい -> ローカルを更新
+        console.log(`[GDrive] Updating local file: ${local.relPath}`);
+        await downloadDriveFile(drive, cloud.id, local.path, cloud.modifiedTime);
+      }
+      // 処理済みとしてマップから削除
+      cloudMap.delete(local.relPath);
+    }
+  }
+
+  // C. クラウドにしか存在しないファイル -> ダウンロード
+  for (const [relPath, cloud] of cloudMap) {
+    console.log(`[GDrive] Downloading new file: ${relPath}`);
+    const localPath = path.join(localRoot, relPath);
+    const dir = path.dirname(localPath);
+    // ローカルフォルダがなければ作成
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    await downloadDriveFile(drive, cloud.id, localPath, cloud.modifiedTime);
+  }
+}
+
+// --- Google Drive Helper Functions ---
+
+/**
+ * 指定名のフォルダを取得、なければ作成してIDを返す
+ * @param {object} drive - google.drive instance
+ * @param {string} folderName - フォルダ名
+ * @param {string} parentId - 親フォルダID (default: 'root')
+ * @returns {string} Folder ID
+ */
+async function getOrCreateDriveFolder(drive, folderName, parentId = 'root') {
+  // ゴミ箱以外、かつ親が一致、かつフォルダタイプのものを検索
+  const q = `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and trashed = false`;
+  const res = await drive.files.list({
+    q: q,
+    fields: 'files(id, name)',
+    spaces: 'drive',
+  });
+
+  if (res.data.files.length > 0) {
+    return res.data.files[0].id;
+  } else {
+    // 作成
+    const fileMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId],
+    };
+    const file = await drive.files.create({
+      resource: fileMetadata,
+      fields: 'id',
+    });
+    return file.data.id;
+  }
+}
+
+/**
+ * 指定フォルダ以下の全ファイルを再帰的にリストアップする
+ * @param {string} folderId - 探索開始フォルダID
+ * @param {string} currentPath - 現在の相対パス (再帰用)
+ * @returns {Array} ファイル情報の配列
+ */
+async function listDriveFilesRecursive(drive, folderId, currentPath = '') {
+  let results = [];
+  let pageToken = null;
+
+  do {
+    // フォルダ直下の子要素を取得
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
+      spaces: 'drive',
+      pageToken: pageToken,
+      pageSize: 1000 // 一度の取得数を増やす
+    });
+
+    const files = res.data.files;
+    for (const file of files) {
+      // Windows環境でもパス区切り文字を '/' に統一して相対パスを構築
+      const relPath = currentPath ? path.join(currentPath, file.name).replace(/\\/g, '/') : file.name;
+
+      if (file.mimeType === 'application/vnd.google-apps.folder') {
+        // フォルダなら再帰的に探索
+        const children = await listDriveFilesRecursive(drive, file.id, relPath);
+        results = results.concat(children);
+      } else {
+        // ファイルならリストに追加
+        results.push({
+          id: file.id,
+          name: file.name,
+          modifiedTime: file.modifiedTime,
+          relPath: relPath
+        });
+      }
+    }
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+
+  return results;
+}
+
+/**
+ * ローカルの相対ディレクトリパスに対応するDrive上のフォルダIDを確保する
+ * (階層構造が存在しない場合は作成する)
+ * @param {string} relativeDir - ローカルの相対ディレクトリパス (例: "sub/folder")
+ * @param {Map} cache - パスとIDのキャッシュ
+ */
+async function ensureDriveDirectory(drive, rootId, relativeDir, cache) {
+  // 現在のディレクトリ('.')または空文字の場合はルートIDを返す
+  if (relativeDir === '.' || relativeDir === '') return rootId;
+
+  const normalizedPath = relativeDir.replace(/\\/g, '/');
+  if (cache.has(normalizedPath)) return cache.get(normalizedPath);
+
+  // パスを分割して親から順に探索・作成
+  const parts = normalizedPath.split('/');
+  let currentParentId = rootId;
+  let currentPathStack = '';
+
+  for (const part of parts) {
+    currentPathStack = currentPathStack ? `${currentPathStack}/${part}` : part;
+
+    if (cache.has(currentPathStack)) {
+      currentParentId = cache.get(currentPathStack);
+    } else {
+      // 存在確認と作成 (親IDを指定して作成)
+      currentParentId = await getOrCreateDriveFolder(drive, part, currentParentId);
+      cache.set(currentPathStack, currentParentId);
+    }
+  }
+
+  return currentParentId;
+}
+
+/**
+ * ファイルの新規アップロード
+ * @param {string} parentId - 親フォルダID
+ * @param {string} name - ファイル名
+ * @param {string} localFilePath - ローカルファイルのフルパス
+ * @param {Date} mtime - 更新日時
+ */
+async function uploadFileToDrive(drive, parentId, name, localFilePath, mtime) {
+  const fileMetadata = {
+    name: name,
+    parents: [parentId],
+    modifiedTime: mtime.toISOString() // メタデータとして更新日時を設定
+  };
+  const media = {
+    mimeType: 'application/octet-stream',
+    body: fs.createReadStream(localFilePath),
+  };
+
+  await drive.files.create({
+    resource: fileMetadata,
+    media: media,
+    fields: 'id',
+  });
+}
+
+/**
+ * ファイルの更新（上書き）
+ * @param {string} fileId - 更新対象のファイルID
+ */
+async function updateDriveFile(drive, fileId, localFilePath, mtime) {
+  const fileMetadata = {
+    modifiedTime: mtime.toISOString()
+  };
+  const media = {
+    mimeType: 'application/octet-stream',
+    body: fs.createReadStream(localFilePath),
+  };
+
+  await drive.files.update({
+    fileId: fileId,
+    resource: fileMetadata,
+    media: media,
+    fields: 'id',
+  });
+}
+
+/**
+ * ファイルのダウンロード
+ * @param {string} fileId - ダウンロード対象のファイルID
+ * @param {string} modifiedTimeStr - クラウド側の更新日時文字列
+ */
+async function downloadDriveFile(drive, fileId, localFilePath, modifiedTimeStr) {
+  const dest = fs.createWriteStream(localFilePath);
+
+  const res = await drive.files.get(
+    { fileId: fileId, alt: 'media' },
+    { responseType: 'stream' }
+  );
+
+  return new Promise((resolve, reject) => {
+    res.data
+      .on('end', () => {
+        // ストリーム終了
+      })
+      .on('error', err => {
+        reject(err);
+      })
+      .pipe(dest);
+
+    dest.on('finish', () => {
+      // ファイル書き込み完了後にタイムスタンプを同期
+      try {
+        const date = new Date(modifiedTimeStr);
+        fs.utimesSync(localFilePath, new Date(), date);
+        resolve();
+      } catch (e) {
+        console.error('Failed to set utimes:', e);
+        // 時刻設定失敗は致命的エラーにせず完了とする
+        resolve();
+      }
+    });
+
+    dest.on('error', err => reject(err));
+  });
+}
+
+// ========== ファイル/ディレクトリ操作、ターミナル、その他機能 ==========
 
 /**
  * 全ての起動中ターミナルのカレントディレクトリを変更するヘルパー関数
@@ -92,7 +806,7 @@ function changeAllTerminalsDirectory(targetPath) {
       if (!term.isDisposed) {
         const shellName = (term.shellName || '').toLowerCase();
         let cmd = '';
-        
+
         // プラットフォームとシェルに応じてコマンドを生成
         if (process.platform === 'win32') {
           // Windowsの場合
@@ -116,7 +830,6 @@ function changeAllTerminalsDirectory(targetPath) {
         if (cmd) {
           // コマンドを送信（Enterキー相当の \r を含む）
           term.write(cmd);
-          // 視覚的にプロンプトを更新するために改行を追加で送る場合もあるが、基本は上記でOK
         }
       }
     });
@@ -126,7 +839,7 @@ function changeAllTerminalsDirectory(targetPath) {
   }
 }
 
-// ★追加: ディレクトリ監視を開始する関数
+// ディレクトリ監視を開始する関数
 function startFileWatcher(webContentsId, dirPath) {
   // 既存のウォッチャーがあれば停止
   if (fileWatchers.has(webContentsId)) {
@@ -145,10 +858,18 @@ function startFileWatcher(webContentsId, dirPath) {
     const watcher = fs.watch(dirPath, { recursive: true }, (eventType, filename) => {
       if (filename) {
         // .gitフォルダ内の変更は無視する（頻繁すぎるため）
-        if (filename.includes('.git') || filename.includes('node_modules')) return;
-        
-        // レンダラープロセスへ通知（デバウンスはレンダラー側で行うか、ここで行う）
-        // ここでは単純に送る
+        if (filename.includes('node_modules')) return;
+
+        // ★修正: .gitフォルダの監視ロジックを変更
+        // 以前はすべて無視していましたが、外部でのGit操作（VS Codeでのコミット等）を検知するため、
+        // 重要なファイル（index, HEAD, refs）の変更は許可します。
+        if (filename.includes('.git')) {
+          // オブジェクトファイルや一時ファイルの変更は無視してノイズを減らす
+          const isImportant = filename.includes('index') || filename.includes('HEAD') || filename.includes('refs');
+          if (!isImportant) return;
+        }
+
+        // レンダラープロセスへ通知
         const window = BrowserWindow.fromId(webContentsId);
         if (window && !window.isDestroyed()) {
           window.webContents.send('file-system-changed', { eventType, filename });
@@ -157,7 +878,7 @@ function startFileWatcher(webContentsId, dirPath) {
     });
 
     watcher.on('error', (error) => {
-        console.error(`Watcher error: ${error}`);
+      console.error(`Watcher error: ${error}`);
     });
 
     fileWatchers.set(webContentsId, watcher);
@@ -168,7 +889,7 @@ function startFileWatcher(webContentsId, dirPath) {
   }
 }
 
-// ★高速化ヘルパー: URLの先頭部分だけを取得する関数
+// URLの先頭部分だけを取得する関数
 const fetchHtmlHead = (url) => {
   return new Promise((resolve, reject) => {
     // Stream APIを使用
@@ -184,7 +905,7 @@ const fetchHtmlHead = (url) => {
     const chunks = [];
     let size = 0;
     // 60KBもあれば通常headタグは含まれる
-    const MAX_SIZE = 60 * 1024; 
+    const MAX_SIZE = 60 * 1024;
 
     stream.on('data', (chunk) => {
       chunks.push(chunk);
@@ -203,7 +924,6 @@ const fetchHtmlHead = (url) => {
     });
 
     stream.on('error', (err) => {
-      // destroy()による中断もエラーとして扱われる場合があるため、
       // データが少しでも取れていれば成功とみなす
       if (chunks.length > 0) {
         resolve(Buffer.concat(chunks).toString());
@@ -235,14 +955,14 @@ function createWindow() {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; img-src 'self' https: data:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:;"
+          "default-src 'self'; img-src 'self' https: data:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com;"
         ]
       }
     })
   })
 
   // --- Integrated Terminal Setup with TerminalService ---
-  
+
   // Set up terminal service event handlers
   terminalService.on('terminal-data', ({ terminalId, data }) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -338,10 +1058,10 @@ function createWindow() {
     try {
       console.log(`IPC: Closing terminal ${terminalId}`);
       const result = terminalService.closeTerminal(terminalId);
-      
+
       // Wait a bit for the process to fully clean up
       await new Promise(resolve => setTimeout(resolve, 100));
-      
+
       console.log(`IPC: Terminal ${terminalId} close completed`);
       return result;
     } catch (error) {
@@ -355,23 +1075,38 @@ function createWindow() {
     saveTerminalState();
     return true;
   });
-  
+
   // --- End of Terminal Setup ---
 
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
+
+  // Zoom factorを1.0に設定（拡大縮小をリセット）
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.setZoomFactor(1.0);
+  });
 
   // 外部リンクを開くためのハンドラー
   ipcMain.handle('open-external', async (event, url) => {
     await shell.openExternal(url);
   });
 
-  // ★高速化: URLのメタデータ(OGP)を取得するハンドラー (Stream版)
+  // アイテムをエクスプローラーで表示（選択状態にする）
+  ipcMain.handle('show-item-in-folder', async (event, filePath) => {
+    shell.showItemInFolder(filePath);
+  });
+
+  // フォルダをエクスプローラーで開く
+  ipcMain.handle('open-path', async (event, dirPath) => {
+    await shell.openPath(dirPath);
+  });
+
+  // URLのメタデータ(OGP)を取得するハンドラー (Stream版)
   ipcMain.handle('fetch-url-metadata', async (event, url) => {
     try {
       // 全文取得(await got)ではなく、先頭だけ取得する関数を使用
       const body = await fetchHtmlHead(url);
-      
+
       // 簡易的な正規表現でOGPタグを抽出
       const getMetaContent = (prop) => {
         const regex = new RegExp(`<meta\\s+(?:property|name)=["']${prop}["']\\s+content=["']([^"']+)["']`, 'i');
@@ -381,7 +1116,7 @@ function createWindow() {
 
       const titleRegex = /<title>([^<]*)<\/title>/i;
       const titleMatch = body.match(titleRegex);
-      
+
       const metadata = {
         title: getMetaContent('og:title') || (titleMatch ? titleMatch[1].trim() : url),
         description: getMetaContent('og:description') || getMetaContent('description') || '',
@@ -394,10 +1129,10 @@ function createWindow() {
       const decodeEntities = (str) => {
         if (!str) return str;
         return str.replace(/&amp;/g, '&')
-                  .replace(/&lt;/g, '<')
-                  .replace(/&gt;/g, '>')
-                  .replace(/&quot;/g, '"')
-                  .replace(/&#39;/g, "'");
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
       };
 
       metadata.title = decodeEntities(metadata.title);
@@ -406,15 +1141,15 @@ function createWindow() {
       return { success: true, data: metadata };
     } catch (error) {
       console.error('Failed to fetch URL metadata:', error.message);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
-        data: { title: url, description: '', image: '', url: url, domain: new URL(url).hostname } 
+        data: { title: url, description: '', image: '', url: url, domain: new URL(url).hostname }
       };
     }
   });
 
-  // ★高速化: URLのタイトルを取得するハンドラー (Stream版)
+  // URLのタイトルを取得するハンドラー (Stream版)
   ipcMain.handle('fetch-url-title', async (event, url) => {
     try {
       const body = await fetchHtmlHead(url);
@@ -430,21 +1165,21 @@ function createWindow() {
 
   // ウィンドウ操作用のIPCハンドラー
   ipcMain.handle('window-minimize', () => {
-    if(mainWindow) mainWindow.minimize();
+    if (mainWindow) mainWindow.minimize();
   });
 
   ipcMain.handle('window-maximize', () => {
-    if(mainWindow) {
-        if (mainWindow.isMaximized()) {
+    if (mainWindow) {
+      if (mainWindow.isMaximized()) {
         mainWindow.unmaximize();
-        } else {
+      } else {
         mainWindow.maximize();
-        }
+      }
     }
   });
 
   ipcMain.handle('window-close', () => {
-    if(mainWindow) mainWindow.close();
+    if (mainWindow) mainWindow.close();
   });
 
   // Settings Handlers
@@ -454,6 +1189,32 @@ function createWindow() {
 
   ipcMain.handle('save-app-settings', (event, settings) => {
     return saveAppSettings(settings);
+  });
+
+  // Recent Files Handlers (Updated for auto-cleanup and file-only filter)
+  ipcMain.handle('load-recent-files', () => {
+    const files = loadRecentFiles();
+    // 存在しないファイルやフォルダをフィルタリング
+    const validFiles = files.filter(item => {
+      try {
+        if (!fs.existsSync(item.path)) return false;
+        // ディレクトリは除外してファイルのみにする
+        return fs.statSync(item.path).isFile();
+      } catch (e) {
+        return false;
+      }
+    });
+
+    // リストに変化があれば保存し直す（自動クリーンアップ）
+    if (validFiles.length !== files.length) {
+      saveRecentFiles(validFiles);
+    }
+
+    return validFiles;
+  });
+
+  ipcMain.handle('save-recent-files', (event, files) => {
+    return saveRecentFiles(files);
   });
 
   // Open the DevTools.
@@ -480,13 +1241,13 @@ function createWindow() {
 
   if (fs.existsSync(initialFolderPath)) {
     workingDirectories.set(webContentsId, initialFolderPath);
-    // ★追加: 初期フォルダの監視開始
+    // 初期フォルダの監視開始
     startFileWatcher(webContentsId, initialFolderPath);
   } else {
     // 指定したパスが無い場合はホームディレクトリにする（安全策）
     const homeDir = os.homedir();
     workingDirectories.set(webContentsId, homeDir);
-    // ★追加: ホームディレクトリの監視開始
+    // ホームディレクトリの監視開始
     startFileWatcher(webContentsId, homeDir);
   }
 
@@ -503,15 +1264,15 @@ function createWindow() {
   mainWindow.on('closed', () => {
     clearInterval(saveInterval);
     workingDirectories.delete(webContentsId);
-    
-    // ★追加: ウォッチャーのクリーンアップ
+
+    // ウォッチャーのクリーンアップ
     if (fileWatchers.has(webContentsId)) {
-        try {
-            fileWatchers.get(webContentsId).close();
-        } catch (e) { /* ignore */ }
-        fileWatchers.delete(webContentsId);
+      try {
+        fileWatchers.get(webContentsId).close();
+      } catch (e) { /* ignore */ }
+      fileWatchers.delete(webContentsId);
     }
-    
+
     mainWindow = null;
   });
 }
@@ -617,11 +1378,11 @@ ipcMain.handle('execute-command', async (event, command, currentDir) => {
       try {
         if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
           workingDirectories.set(webContentsId, newPath);
-          
+
           // 内部コマンドでCDが実行された場合もターミナルを同期
           changeAllTerminalsDirectory(newPath);
-          
-          // ★追加: 新しいディレクトリの監視を開始
+
+          // 新しいディレクトリの監視を開始
           startFileWatcher(webContentsId, newPath);
 
           resolve({
@@ -684,28 +1445,71 @@ ipcMain.handle('execute-command', async (event, command, currentDir) => {
 });
 
 // Git operations
+ipcMain.handle('git-init', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Invalid directory path');
+
+    await git.init({ fs, dir });
+
+    // 改行コードの自動変換を有効化 (LF ⇔ CRLF)
+    await git.setConfig({
+      fs,
+      dir,
+      path: 'core.autocrlf',
+      value: 'true'
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('git-status', async (event, repoPath) => {
   try {
-    const dir = repoPath || os.homedir();
-    const matrix = await git.statusMatrix({ fs, dir });
+    const dir = repoPath;
+    if (!dir || !fs.existsSync(dir)) {
+      return { success: false, error: 'Invalid directory path' };
+    }
+    // .gitフォルダの存在確認
+    if (!fs.existsSync(path.join(dir, '.git'))) {
+      return { success: false, error: 'not a git repository' };
+    }
+
+    // filterオプションを追加して、.gitディレクトリや不要なファイルをスキャン対象外にする
+    const matrix = await git.statusMatrix({
+      fs,
+      dir,
+      filter: (f) => {
+        // .gitフォルダ自体とその中身を除外
+        if (f === '.git' || f.startsWith('.git/')) return false;
+        // node_modulesを除外 (パフォーマンス向上と誤検知防止)
+        if (f === 'node_modules' || f.startsWith('node_modules/')) return false;
+        return true;
+      }
+    });
 
     const staged = [];
     const unstaged = [];
 
-    // statusMatrix returns [filepath, HEADStatus, WorkdirStatus, StageStatus]
-    // https://isomorphic-git.org/docs/en/statusMatrix
     for (const [filepath, HEADStatus, WorkdirStatus, StageStatus] of matrix) {
-      // Skip unmodified files
       if (HEADStatus === 1 && WorkdirStatus === 1 && StageStatus === 1) continue;
+      if (HEADStatus === 0 && WorkdirStatus === 0 && StageStatus === 0) continue;
 
-      // Unstaged changes (workdir different from stage)
+      // getStatusTextの結果を確認し、有効なステータスのみ追加するよう変更
       if (WorkdirStatus !== StageStatus) {
-        unstaged.push({ filepath, status: getStatusText(HEADStatus, WorkdirStatus, StageStatus, 'workdir') });
+        const status = getStatusText(HEADStatus, WorkdirStatus, StageStatus, 'workdir');
+        if (status !== 'unknown') {
+          unstaged.push({ filepath, status });
+        }
       }
 
-      // Staged changes (stage different from HEAD)
       if (StageStatus !== HEADStatus) {
-        staged.push({ filepath, status: getStatusText(HEADStatus, WorkdirStatus, StageStatus, 'stage') });
+        const status = getStatusText(HEADStatus, WorkdirStatus, StageStatus, 'stage');
+        if (status !== 'unknown') {
+          staged.push({ filepath, status });
+        }
       }
     }
 
@@ -714,6 +1518,336 @@ ipcMain.handle('git-status', async (event, repoPath) => {
     return { success: false, error: error.message };
   }
 });
+
+// git-stage-all ハンドラー: 削除ファイルも含めてステージングする処理を追加
+ipcMain.handle('git-stage-all', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+    if (!fs.existsSync(path.join(dir, '.git'))) throw new Error('not a git repository');
+
+    // ステータスを取得
+    const matrix = await git.statusMatrix({
+      fs,
+      dir,
+      filter: (f) => {
+        if (f === '.git' || f.startsWith('.git/')) return false;
+        if (f === 'node_modules' || f.startsWith('node_modules/')) return false;
+        return true;
+      }
+    });
+
+    const operations = [];
+
+    // statusMatrixの各行: [filepath, HEAD, WORKDIR, STAGE]
+    for (const [filepath, head, workdir, stage] of matrix) {
+      // 変更がないファイルはスキップ (autocrlf=trueなら改行コード違いはここで無視される)
+      if (workdir === stage) continue;
+
+      // ケースA: ファイルが削除されている (workdir === 0)
+      if (workdir === 0) {
+        if (stage !== 0) {
+          // ステージに残っている場合は git remove を実行
+          operations.push(git.remove({ fs, dir, filepath }));
+        }
+      }
+      // ケースB: ファイルが変更または新規作成されている (workdir !== 0)
+      else {
+        // ステージと異なる場合は git add を実行
+        operations.push(git.add({ fs, dir, filepath }));
+      }
+    }
+
+    // 並列実行で反映
+    await Promise.all(operations);
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// git-log ハンドラ (currentBranchを返すように変更)
+ipcMain.handle('git-log', async (event, repoPath, depth = 20) => {
+  try {
+    const dir = repoPath;
+    if (!dir || !fs.existsSync(dir)) {
+      return { success: false, error: 'Invalid directory path' };
+    }
+    if (!fs.existsSync(path.join(dir, '.git'))) {
+      return { success: false, error: 'not a git repository' };
+    }
+
+    // 現在のブランチ名を取得
+    let currentBranch = 'HEAD';
+    try {
+      currentBranch = await git.currentBranch({ fs, dir }) || 'HEAD';
+    } catch (e) {
+      console.warn('Failed to get current branch:', e);
+    }
+
+    const commits = await git.log({
+      fs,
+      dir,
+      depth: depth,
+      ref: currentBranch === 'HEAD' ? undefined : currentBranch
+    }).catch(async () => {
+      // mainがない場合はHEADで試行
+      try {
+        return await git.log({ fs, dir, depth: depth, ref: 'HEAD' });
+      } catch (e) {
+        return [];
+      }
+    });
+
+    // コミット情報を整形
+    const history = commits.map(commit => {
+      return {
+        oid: commit.oid, // SHA
+        message: commit.commit.message,
+        author: commit.commit.author,
+        committer: commit.commit.committer,
+        refs: [] // デフォルトは空
+      };
+    });
+
+    // 簡易的なRefs解決 (HEADやmainの位置を表示するため)
+    try {
+      const branches = await git.listBranches({ fs, dir });
+      for (const branch of branches) {
+        const sha = await git.resolveRef({ fs, dir, ref: branch });
+        const target = history.find(h => h.oid === sha);
+        if (target) {
+          target.refs.push({ name: branch });
+        }
+      }
+    } catch (e) { /* ignore ref resolution errors */ }
+
+    return { success: true, history, currentBranch };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// git-get-branches ハンドラ (リモートブランチも取得するように変更)
+ipcMain.handle('git-get-branches', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    if (!dir || !fs.existsSync(path.join(dir, '.git'))) {
+      return { success: false, error: 'Not a git repository' };
+    }
+
+    // ローカルブランチ一覧
+    const localBranches = await git.listBranches({ fs, dir });
+
+    // リモートブランチ一覧
+    let remoteBranches = [];
+    try {
+      // 'origin' リモートのブランチを取得
+      remoteBranches = await git.listBranches({ fs, dir, remote: 'origin' });
+    } catch (e) {
+      // リモートがない場合などは無視
+    }
+
+    // リモートブランチには 'origin/' をつけて区別（HEADは除外）
+    const formattedRemotes = remoteBranches
+      .filter(b => b !== 'HEAD')
+      .map(b => `origin/${b}`);
+
+    // 重複を除去しつつマージ（ローカルと同名のリモートがある場合はローカル優先表示など、UI側で制御してもよいがここでは単純結合）
+    const allBranches = [...localBranches, ...formattedRemotes];
+
+    const current = await git.currentBranch({ fs, dir });
+
+    return { success: true, branches: allBranches, current };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// git-checkout ハンドラ (リモートブランチからの作成に対応)
+ipcMain.handle('git-checkout', async (event, repoPath, branchName) => {
+  try {
+    const dir = repoPath;
+
+    // リモートブランチ (origin/xxx) が指定された場合
+    if (branchName.startsWith('origin/')) {
+      const newBranchName = branchName.replace('origin/', '');
+
+      // ローカルに同名ブランチがまだない場合、リモートを追跡する形で新規作成
+      const locals = await git.listBranches({ fs, dir });
+      if (!locals.includes(newBranchName)) {
+        // リモートの最新コミットIDを取得
+        // isomorphic-gitでは refs/remotes/origin/xxx を参照する
+        // エラーハンドリングのため try-catch は呼び出し元任せにするかここで処理
+        try {
+          // リモートの参照先OIDを取得する（完全なref名を指定する必要がある場合がある）
+          // 簡易的に checkout 時に ref を指定するだけでも動くケースがあるが、
+          // 明示的に branch を作成してから checkout する方が確実
+          await git.branch({
+            fs,
+            dir,
+            ref: newBranchName,
+            checkout: true, // 同時にチェックアウト
+            object: `origin/${newBranchName}` // start point
+          });
+          return { success: true };
+        } catch (e) {
+          // 失敗した場合は通常のcheckoutを試みる（フォールバック）
+          console.warn("Smart checkout failed, trying normal checkout", e);
+        }
+      }
+      // ローカルに既にある場合は、そのローカルブランチ名でチェックアウト
+      branchName = newBranchName;
+    }
+
+    // 通常のチェックアウト
+    await git.checkout({
+      fs,
+      dir,
+      ref: branchName
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// git-commit-detail ハンドラ (変更ファイル数を取得)
+ipcMain.handle('git-commit-detail', async (event, repoPath, oid) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Invalid directory path');
+
+    // コミットオブジェクトを取得
+    const commit = await git.readCommit({ fs, dir, oid });
+    const parentOid = commit.commit.parent && commit.commit.parent.length > 0 ? commit.commit.parent[0] : null;
+
+    let filesChanged = 0;
+
+    if (parentOid) {
+      // 親コミットと比較して変更数をカウント
+      filesChanged = await countChangedFiles(fs, dir, oid, parentOid);
+    } else {
+      // 親がない場合（Initial commit）、全ファイル数をカウント
+      filesChanged = await countTreeFiles(fs, dir, oid);
+    }
+
+    return {
+      success: true,
+      stats: {
+        filesChanged: filesChanged,
+        insertions: 0, // isomorphic-gitで正確な行数diffを取るのは重いため省略
+        deletions: 0
+      }
+    };
+  } catch (error) {
+    console.error('Git commit detail error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// git-reset-head ハンドラ (Hard Reset相当)
+ipcMain.handle('git-reset-head', async (event, repoPath, targetOid) => {
+  try {
+    const dir = repoPath;
+    // 1. 現在のブランチ名を取得
+    const currentBranch = await git.currentBranch({ fs, dir });
+    
+    if (currentBranch) {
+      // ブランチ上にいる場合: ブランチの参照先(Ref)を強制的に書き換える
+      await fs.promises.writeFile(
+        path.join(dir, '.git', 'refs', 'heads', currentBranch),
+        targetOid + '\n' // 末尾に改行を入れるのがGitの作法
+      );
+      
+      // 2. ワーキングディレクトリをその状態に合わせる (Force Checkout)
+      await git.checkout({
+        fs,
+        dir,
+        ref: currentBranch,
+        force: true // ローカルの変更を破棄して強制更新
+      });
+    } else {
+      // Detached HEADの場合: 単にそのコミットへチェックアウトするだけ
+      await git.checkout({
+        fs,
+        dir,
+        ref: targetOid,
+        force: true
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Git reset error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// git-revert-commit ハンドラ (gitコマンドを使用)
+ipcMain.handle('git-revert-commit', async (event, repoPath, oid) => {
+  return new Promise((resolve) => {
+    // 競合が発生しない場合は自動コミット (--no-edit)
+    exec(`git revert ${oid} --no-edit`, { cwd: repoPath }, (error, stdout, stderr) => {
+      if (error) {
+        // コンフリクトなどで失敗した場合
+        resolve({ success: false, error: stderr || error.message });
+      } else {
+        resolve({ success: true });
+      }
+    });
+  });
+});
+
+// ヘルパー: 2つのコミット間の変更ファイル数をカウント
+async function countChangedFiles(fs, dir, oid1, oid2) {
+  try {
+    return (await git.walk({
+      fs,
+      dir,
+      trees: [git.TREE({ ref: oid1 }), git.TREE({ ref: oid2 })],
+      map: async function (filepath, [A, B]) {
+        // ルートディレクトリは無視
+        if (filepath === '.') return;
+
+        // ディレクトリ自体の変更はカウントしない（ファイルのみ）
+        if ((await A?.type()) === 'tree' || (await B?.type()) === 'tree') return;
+
+        const oidA = await A?.oid();
+        const oidB = await B?.oid();
+
+        // OIDが異なれば変更あり（追加/削除/変更）
+        if (oidA !== oidB) {
+          return 1;
+        }
+        return undefined;
+      }
+    })).reduce((a, b) => a + (b || 0), 0);
+  } catch (e) {
+    console.error('Walk error:', e);
+    return 0;
+  }
+}
+
+// ヘルパー: ツリー内のファイル数をカウント (Initial commit用)
+async function countTreeFiles(fs, dir, oid) {
+  try {
+    return (await git.walk({
+      fs,
+      dir,
+      trees: [git.TREE({ ref: oid })],
+      map: async function (filepath, [A]) {
+        if (filepath === '.') return;
+        if ((await A?.type()) === 'tree') return;
+        return 1;
+      }
+    })).reduce((a, b) => a + (b || 0), 0);
+  } catch (e) {
+    return 0;
+  }
+}
 
 // Helper function to get status text
 function getStatusText(HEADStatus, WorkdirStatus, StageStatus, type) {
@@ -731,7 +1865,11 @@ function getStatusText(HEADStatus, WorkdirStatus, StageStatus, type) {
 
 ipcMain.handle('git-add', async (event, repoPath, filepath) => {
   try {
-    const dir = repoPath || os.homedir();
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+    // .gitチェック
+    if (!fs.existsSync(path.join(dir, '.git'))) throw new Error('not a git repository');
+
     await git.add({ fs, dir, filepath });
     return { success: true };
   } catch (error) {
@@ -741,8 +1879,26 @@ ipcMain.handle('git-add', async (event, repoPath, filepath) => {
 
 ipcMain.handle('git-remove', async (event, repoPath, filepath) => {
   try {
-    const dir = repoPath || os.homedir();
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+    if (!fs.existsSync(path.join(dir, '.git'))) throw new Error('not a git repository');
+
+    // 指定されたファイルをステージから削除 (git rm)
     await git.remove({ fs, dir, filepath });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('git-reset', async (event, repoPath, filepath) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+    if (!fs.existsSync(path.join(dir, '.git'))) throw new Error('not a git repository');
+
+    // resetIndex は git reset HEAD <file> に相当します（ステージング解除）
+    await git.resetIndex({ fs, dir, filepath });
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -751,132 +1907,81 @@ ipcMain.handle('git-remove', async (event, repoPath, filepath) => {
 
 ipcMain.handle('git-commit', async (event, repoPath, message) => {
   try {
-    const dir = repoPath || os.homedir();
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+    if (!fs.existsSync(path.join(dir, '.git'))) throw new Error('not a git repository');
 
-    // Get author info from git config or use defaults
-    let author = {
-      name: 'User',
-      email: 'user@example.com'
-    };
-
+    let author = { name: 'User', email: 'user@example.com' };
     try {
       const name = await git.getConfig({ fs, dir, path: 'user.name' });
       const email = await git.getConfig({ fs, dir, path: 'user.email' });
       if (name) author.name = name;
       if (email) author.email = email;
-    } catch (e) {
-      // Use defaults if config not found
-    }
+    } catch (e) { }
 
-    const sha = await git.commit({
-      fs,
-      dir,
-      message,
-      author
-    });
-
+    const sha = await git.commit({ fs, dir, message, author });
     return { success: true, sha };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('git-push', async (event, repoPath) => {
-  try {
-    const dir = repoPath || os.homedir();
-    await git.push({
-      fs,
-      http,
-      dir,
-      remote: 'origin',
-      ref: 'main'
-    });
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('git-pull', async (event, repoPath) => {
-  try {
-    const dir = repoPath || os.homedir();
-    await git.pull({
-      fs,
-      http,
-      dir,
-      remote: 'origin',
-      ref: 'main',
-      singleBranch: true
-    });
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-// File operations
+// ファイル保存 (新規作成のみ履歴対象)
 ipcMain.handle('save-file', async (event, filepath, content) => {
   try {
     const webContentsId = event.sender.id;
     const cwd = workingDirectories.get(webContentsId) || os.homedir();
     const fullPath = path.isAbsolute(filepath) ? filepath : path.join(cwd, filepath);
 
-    // Create directory if it doesn't exist
     const dir = path.dirname(fullPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // 既に存在するかチェック (中身の変更はUndo対象外にするため)
+    const isNewFile = !fs.existsSync(fullPath);
 
     fs.writeFileSync(fullPath, content, 'utf8');
+
+    if (isNewFile) {
+      addToHistory({ type: 'create', path: fullPath });
+    }
     return { success: true, path: fullPath };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
 
-// リネーム処理
+// リネーム
 ipcMain.handle('rename-file', async (event, oldPath, newName) => {
   try {
     const dir = path.dirname(oldPath);
     const ext = path.extname(oldPath);
-    
-    // 新しい名前が拡張子を含んでいない場合、元の拡張子を維持する
-    // newNameに拡張子があるかどうかをチェック
     let newFilename = newName;
-    if (!path.extname(newName) && ext) {
-        newFilename += ext;
+    // 拡張子が省略された場合、元の拡張子を維持
+    if (!path.extname(newName) && ext && !fs.statSync(oldPath).isDirectory()) {
+      newFilename += ext;
     }
-    
     const newPath = path.join(dir, newFilename);
-    
-    // 同じ名前なら何もしない
+
     if (oldPath === newPath) return { success: true, path: oldPath };
-    
-    // 移動先に同名ファイルがある場合はエラー
-    if (fs.existsSync(newPath)) {
-        return { success: false, error: '同名のファイルが既に存在します。' };
-    }
+    if (fs.existsSync(newPath)) return { success: false, error: '同名のファイルが既に存在します。' };
 
     fs.renameSync(oldPath, newPath);
+    addToHistory({ type: 'rename', from: oldPath, to: newPath });
     return { success: true, path: newPath };
   } catch (error) {
-    console.error('Failed to rename file:', error);
     return { success: false, error: error.message };
   }
 });
 
-// ★追加: 移動処理
+// 移動 (Drag & Drop)
 ipcMain.handle('move-file', async (event, oldPath, newPath) => {
   try {
-    // 移動先に同名ファイルがある場合はエラー
-    if (fs.existsSync(newPath)) {
-      return { success: false, error: '移動先に同名のファイルまたはフォルダが存在します。' };
-    }
+    if (fs.existsSync(newPath)) return { success: false, error: '移動先に同名のファイルが存在します。' };
 
     fs.renameSync(oldPath, newPath);
+    addToHistory({ type: 'move', from: oldPath, to: newPath });
     return { success: true, path: newPath };
   } catch (error) {
-    console.error('Failed to move file:', error);
     return { success: false, error: error.message };
   }
 });
@@ -912,24 +2017,116 @@ ipcMain.handle('read-directory', async (event, dirPath) => {
   }
 });
 
+// 削除 (ファイル・フォルダ共通)
 ipcMain.handle('delete-file', async (event, filepath) => {
   try {
     if (fs.existsSync(filepath)) {
-      // ファイルだけでなくフォルダも再帰的に削除できるように変更
-      fs.rmSync(filepath, { recursive: true, force: true });
+      const backupPath = generateBackupPath(filepath);
+      // 再帰的にコピー (フォルダ対応)
+      fs.cpSync(filepath, backupPath, { recursive: true, force: true });
+
+      await shell.trashItem(filepath);
+
+      addToHistory({ type: 'delete', originalPath: filepath, backupPath: backupPath });
       return true;
     }
     return false;
   } catch (error) {
-    console.error('Failed to delete file/directory:', error);
+    console.error('Failed to move to trash:', error);
     throw error;
   }
 });
 
+// --- Undo Handler (全操作対応) ---
+ipcMain.handle('file:undo', async (event) => {
+  const op = fileHistory.undoStack.pop();
+  if (!op) return { success: false, message: '元に戻す操作はありません' };
+
+  try {
+    switch (op.type) {
+      case 'delete': // 削除の取り消し -> 復元
+        if (!fs.existsSync(path.dirname(op.originalPath))) {
+          fs.mkdirSync(path.dirname(op.originalPath), { recursive: true });
+        }
+        fs.cpSync(op.backupPath, op.originalPath, { recursive: true, force: true });
+        fileHistory.redoStack.push(op);
+        return { success: true, operation: 'restore', path: op.originalPath };
+
+      case 'create': // 作成の取り消し -> 削除
+        if (fs.existsSync(op.path)) {
+          // Redo用にバックアップを取ってから削除
+          const backupPath = generateBackupPath(op.path);
+          fs.cpSync(op.path, backupPath, { recursive: true, force: true });
+          await shell.trashItem(op.path);
+
+          op.backupPath = backupPath; // バックアップパスを記録してRedoスタックへ
+          fileHistory.redoStack.push(op);
+          return { success: true, operation: 'delete', path: op.path };
+        }
+        break;
+
+      case 'rename':
+      case 'move': // 移動/リネームの取り消し -> 逆移動
+        if (fs.existsSync(op.to)) {
+          fs.renameSync(op.to, op.from);
+          fileHistory.redoStack.push(op);
+          return { success: true, operation: 'rename', src: op.to, dest: op.from };
+        }
+        break;
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+  return { success: false, message: '操作対象が見つかりません' };
+});
+
+// --- Redo Handler (全操作対応) ---
+ipcMain.handle('file:redo', async (event) => {
+  const op = fileHistory.redoStack.pop();
+  if (!op) return { success: false, message: 'やり直す操作はありません' };
+
+  try {
+    switch (op.type) {
+      case 'delete': // 削除のやり直し -> 再削除
+        if (fs.existsSync(op.originalPath)) {
+          await shell.trashItem(op.originalPath);
+          fileHistory.undoStack.push(op);
+          return { success: true, operation: 'delete', path: op.originalPath };
+        }
+        break;
+
+      case 'create': // 作成のやり直し -> 再作成(復元)
+        if (op.backupPath && fs.existsSync(op.backupPath)) {
+          if (!fs.existsSync(path.dirname(op.path))) {
+            fs.mkdirSync(path.dirname(op.path), { recursive: true });
+          }
+          fs.cpSync(op.backupPath, op.path, { recursive: true, force: true });
+          fileHistory.undoStack.push(op);
+          return { success: true, operation: 'create', path: op.path };
+        }
+        break;
+
+      case 'rename':
+      case 'move': // 移動/リネームのやり直し -> 順方向移動
+        if (fs.existsSync(op.from)) {
+          fs.renameSync(op.from, op.to);
+          fileHistory.undoStack.push(op);
+          return { success: true, operation: 'rename', src: op.from, dest: op.to };
+        }
+        break;
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+  return { success: false, message: '操作対象が見つかりません' };
+});
+
+// ディレクトリ作成
 ipcMain.handle('create-directory', async (event, dirPath) => {
   try {
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
+      addToHistory({ type: 'create', path: dirPath });
     }
     return true;
   } catch (error) {
@@ -962,11 +2159,11 @@ ipcMain.handle('select-folder', async (event) => {
       // カレントディレクトリを更新
       const webContentsId = event.sender.id;
       workingDirectories.set(webContentsId, selectedPath);
-      
+
       // フォルダ変更時に全ターミナルのディレクトリを同期
       changeAllTerminalsDirectory(selectedPath);
-      
-      // ★追加: 新しいフォルダの監視を開始
+
+      // 新しいフォルダの監視を開始
       startFileWatcher(webContentsId, selectedPath);
 
       return { success: true, path: selectedPath };
@@ -1020,7 +2217,7 @@ ipcMain.handle('generate-pdf', async (event, htmlContent) => {
   }
 });
 
-// ★追加: PDFエクスポート（ファイル保存）のIPCハンドラー
+// PDFエクスポート（ファイル保存）のIPCハンドラー
 ipcMain.handle('export-pdf', async (event, htmlContent) => {
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
@@ -1119,6 +2316,41 @@ function getPdfHtmlTemplate(htmlContent) {
               color: #666;
               margin: 16px 0;
             }
+            /* List Styling */
+            ul, ol {
+              padding-left: 2em;
+              margin-bottom: 1em;
+            }
+            ol ol, ul ol, ol ul, ul ul {
+                margin-bottom: 0;
+            }
+            li {
+              margin-bottom: 0.2em; /* 0.5em から変更 */
+              white-space: pre-wrap; /* リストのネストのインデント用スペースを保持 */
+            }
+            /* リスト内の段落マージンを削除して隙間を詰める */
+            li > p {
+              margin-top: 0;
+              margin-bottom: 0;
+            }
+            /* Task List (Checklist) Styling */
+            li:has(input[type="checkbox"]) {
+              list-style-type: none;
+              position: relative;
+            }
+            input[type="checkbox"] {
+              margin-right: 0.5em;
+              vertical-align: middle;
+            }
+            
+            /* Mark styling for ==highlight== */
+            mark {
+              background-color: #fff700;
+              color: black;
+              padding: 0 2px;
+              border-radius: 2px;
+            }
+
             table {
               border-collapse: collapse;
               width: 100%;
@@ -1145,6 +2377,77 @@ function getPdfHtmlTemplate(htmlContent) {
               margin: 0;
               border: none;
             }
+            /* ブックマークカード用スタイル */
+            .cm-bookmark-widget {
+                display: flex;
+                width: 100%;
+                max-width: 100%;
+                height: 120px;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                overflow: hidden;
+                margin: 16px 0;
+                background-color: #ffffff;
+                text-decoration: none;
+                color: inherit;
+                page-break-inside: avoid;
+            }
+            .cm-bookmark-content {
+                flex: 1;
+                padding: 12px 16px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                overflow: hidden;
+                min-width: 0;
+            }
+            .cm-bookmark-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #111827;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-bottom: 4px;
+                line-height: 1.4;
+            }
+            .cm-bookmark-desc {
+                font-size: 12px;
+                color: #6b7280;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                line-height: 1.5;
+                margin: 0;
+            }
+            .cm-bookmark-meta {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                margin-top: 8px;
+                font-size: 12px;
+                color: #6b7280;
+            }
+            .cm-bookmark-favicon {
+                width: 16px;
+                height: 16px;
+                object-fit: contain;
+            }
+            .cm-bookmark-cover {
+                width: 33%;
+                max-width: 240px;
+                min-width: 120px;
+                height: 100%;
+                border-left: 1px solid #f3f4f6;
+                position: relative;
+            }
+            .cm-bookmark-image {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+            }
           </style>
         </head>
         <body>
@@ -1153,6 +2456,215 @@ function getPdfHtmlTemplate(htmlContent) {
       </html>
     `;
 }
+
+// ========== エディタコンテキストメニュー ==========
+ipcMain.on('show-editor-context-menu', (event) => {
+  const template = [
+    { label: 'カット', role: 'cut' },
+    { label: 'コピー', role: 'copy' },
+    { label: 'ペースト', role: 'paste' },
+    { type: 'separator' },
+    { label: 'すべてを選択', role: 'selectAll' },
+    { type: 'separator' },
+    {
+      label: '太字',
+      click: () => event.sender.send('editor-context-menu-command', 'bold')
+    },
+    {
+      label: '表の挿入',
+      click: () => event.sender.send('editor-context-menu-command', 'insert-table')
+    },
+    {
+      label: 'ハイライト',
+      submenu: [
+        {
+          label: '黄色',
+          click: () => event.sender.send('editor-context-menu-command', { action: 'highlight', color: '#fff700' })
+        },
+        {
+          label: '赤色',
+          click: () => event.sender.send('editor-context-menu-command', { action: 'highlight', color: '#ffcccc' })
+        },
+        {
+          label: '青色',
+          click: () => event.sender.send('editor-context-menu-command', { action: 'highlight', color: '#ccf0ff' })
+        },
+        {
+          label: '緑色',
+          click: () => event.sender.send('editor-context-menu-command', { action: 'highlight', color: '#ccffcc' })
+        }
+      ]
+    },
+    {
+      label: 'コードブロック',
+      click: () => event.sender.send('editor-context-menu-command', 'code-block')
+    }
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
+});
+
+// ★追加: GitHub OAuth認証ハンドラ
+ipcMain.handle('auth-github', async () => {
+  const CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+  const CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    return { success: false, error: '.envファイルにGITHUB_CLIENT_IDとGITHUB_CLIENT_SECRETを設定してください。' };
+  }
+
+  try {
+    const REDIRECT_PORT = 3000;
+    const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/auth/github`;
+
+    // 1. ブラウザを開いてユーザーに許可を求める
+    const authUrl = `https://github.com/login/oauth/authorize?client_id=${CLIENT_ID}&scope=repo&redirect_uri=${REDIRECT_URI}`;
+    shell.openExternal(authUrl);
+
+    // 2. ローカルサーバーを立ててコールバックを待つ
+    return new Promise((resolve) => {
+      const server = httpModule.createServer(async (req, res) => {
+        if (req.url.startsWith('/auth/github')) {
+          const query = urlModule.parse(req.url, true).query;
+          const code = query.code;
+
+          if (code) {
+            // 3. 取得したcodeを使ってアクセストークンを要求
+            try {
+              const tokenResponse = await got.post('https://github.com/login/oauth/access_token', {
+                json: {
+                  client_id: CLIENT_ID,
+                  client_secret: CLIENT_SECRET,
+                  code: code
+                },
+                headers: {
+                  Accept: 'application/json'
+                }
+              }).json();
+
+              if (tokenResponse.access_token) {
+                // 設定ファイルに保存
+                const settings = loadAppSettings();
+                settings.githubToken = tokenResponse.access_token;
+                saveAppSettings(settings);
+
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end('<h1>認証成功！</h1><p>アプリに戻ってください。</p><script>setTimeout(() => window.close(), 1000);</script>');
+
+                resolve({ success: true });
+              } else {
+                res.end('Auth failed.');
+                resolve({ success: false, error: 'Token exchange failed' });
+              }
+            } catch (err) {
+              res.end('Error.');
+              resolve({ success: false, error: err.message });
+            }
+          } else {
+            res.end('No code returned.');
+            resolve({ success: false, error: 'No code returned' });
+          }
+
+          // サーバーを閉じる
+          setTimeout(() => {
+            try { server.close(); } catch (e) { }
+          }, 1000);
+        }
+      });
+
+      server.on('error', (e) => {
+        resolve({ success: false, error: `Port ${REDIRECT_PORT} is in use.` });
+      });
+
+      server.listen(REDIRECT_PORT);
+    });
+
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 共通の認証ハンドラ (GitHubトークンを使用)
+const onAuthHandler = () => {
+  // 1. 設定ファイルからトークンを読み込む
+  const settings = loadAppSettings();
+  const token = settings.githubToken || process.env.GITHUB_TOKEN; // .envは後方互換用
+  if (token) {
+    return { username: token, password: '' };
+  }
+  // トークンがない場合はキャンセル（これが "Operation canceled" の原因）
+  return { cancel: true };
+};
+
+// --- git-fetch (認証対応) ---
+ipcMain.handle('git-fetch', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    if (!dir || !fs.existsSync(path.join(dir, '.git'))) return { success: false, error: 'Not a git repository' };
+
+    await git.fetch({
+      fs, http, dir,
+      remote: 'origin',
+      ref: 'main',
+      depth: 10,
+      singleBranch: false,
+      onAuth: onAuthHandler // 認証
+    });
+    return { success: true };
+  } catch (error) {
+    if (error.code === 401) return { success: false, error: '認証エラー: サインインしてください。' };
+    return { success: false, error: error.message };
+  }
+});
+
+// --- git-pull (認証対応) ---
+ipcMain.handle('git-pull', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    const currentBranch = await git.currentBranch({ fs, dir }) || 'main';
+
+    let author = { name: 'User', email: 'user@example.com' };
+    try {
+      const name = await git.getConfig({ fs, dir, path: 'user.name' });
+      const email = await git.getConfig({ fs, dir, path: 'user.email' });
+      if (name) author.name = name;
+      if (email) author.email = email;
+    } catch (e) { }
+
+    await git.pull({
+      fs, http, dir,
+      remote: 'origin',
+      ref: currentBranch,
+      singleBranch: true,
+      author: author,
+      onAuth: onAuthHandler // 認証
+    });
+    return { success: true };
+  } catch (error) {
+    if (error.code === 401) return { success: false, error: '認証エラー: サインインしてください。' };
+    return { success: false, error: error.message };
+  }
+});
+
+// --- git-push (認証対応) ---
+ipcMain.handle('git-push', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    const currentBranch = await git.currentBranch({ fs, dir }) || 'main';
+
+    await git.push({
+      fs, http, dir,
+      remote: 'origin',
+      ref: currentBranch,
+      onAuth: onAuthHandler // 認証
+    });
+    return { success: true };
+  } catch (error) {
+    if (error.code === 401) return { success: false, error: '認証エラー: サインインしてください。' };
+    return { success: false, error: error.message };
+  }
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -1173,12 +2685,9 @@ app.whenReady().then(() => {
 app.on('window-all-closed', function () {
   // Save terminal state before quitting
   saveTerminalState();
-  
+
   // Dispose all terminals
   terminalService.dispose();
 
   if (process.platform !== 'darwin') app.quit()
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

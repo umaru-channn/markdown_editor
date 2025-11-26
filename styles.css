@@ -107,7 +107,7 @@ input[type="number"]::-webkit-outer-spin-button {
     overflow: hidden;
     margin-left: var(--activitybar-width);
     margin-right: var(--activitybar-width);
-    transition: margin-right 0.2s ease;
+    /* transition: margin-right 0.2s ease; 削除: レイアウト変更を即座に行うため */
 }
 
 .main-content:has(.right-pane:not(.hidden)) {
@@ -562,6 +562,110 @@ body[data-theme="dark"] .outline-item:hover {
     display: none;
 }
 
+/* ========== Git Panel Styles (Updated) ========== */
+
+.git-file-list {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 10px;
+}
+
+.git-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--text-color);
+}
+
+.git-file-item:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+body[data-theme="dark"] .git-file-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.git-file-left {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+}
+
+.git-file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.git-file-dir {
+    color: #888;
+    font-size: 0.9em;
+    margin-left: 4px;
+}
+
+.git-file-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.git-status-badge {
+    font-size: 11px;
+    font-weight: bold;
+    width: 14px;
+    text-align: center;
+}
+
+.git-status-badge.modified { color: #e2c08d; } /* M: Yellow/Orange */
+.git-status-badge.added { color: #73c991; }    /* A: Green */
+.git-status-badge.deleted { color: #c74e39; }  /* D: Red */
+
+/* アクションボタン（+ / -）: ホバー時のみ表示 */
+.git-actions {
+    opacity: 0;
+    transition: opacity 0.1s;
+    display: flex;
+    align-items: center;
+}
+
+.git-file-item:hover .git-actions {
+    opacity: 1;
+}
+
+.git-action-btn-small {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.git-action-btn-small:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+    color: #007acc;
+}
+body[data-theme="dark"] .git-action-btn-small:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #4daafc;
+}
+
+.git-empty-msg {
+    padding: 8px;
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    font-style: italic;
+}
+
 /* Git Section */
 .git-section {
     margin-bottom: 15px;
@@ -570,16 +674,33 @@ body[data-theme="dark"] .outline-item:hover {
 .git-section-title {
     font-weight: bold;
     padding-bottom: 5px;
-    border-bottom: 1px solid var(--sidebar-border);
     margin-bottom: 5px;
     color: var(--text-color);
     opacity: 0.8;
+    cursor: pointer; /* クリック可能に */
+    display: flex;
+    align-items: center;
+    user-select: none;
+}
+
+/* 開閉アイコンのスタイル */
+.git-section-title .toggle-icon {
+    display: inline-block;
+    width: 16px;
+    text-align: center;
+    font-size: 10px;
+    margin-right: 4px;
+    transition: transform 0.2s;
+}
+
+/* 閉じているときのアイコン回転 */
+.git-section-title.collapsed .toggle-icon {
+    transform: rotate(-90deg);
 }
 
 .git-commit-area {
-    margin-top: 15px;
-    border-top: 1px solid var(--sidebar-border);
-    padding-top: 10px;
+    margin-top: 4px;
+    background-color: transparent;
 }
 
 .git-commit-area textarea {
@@ -587,17 +708,27 @@ body[data-theme="dark"] .outline-item:hover {
     padding: 5px;
     border: 1px solid var(--sidebar-border);
     border-radius: 3px;
-    font-size: 12px;
-    font-family: monospace;
-    resize: vertical;
-    background-color: var(--main-bg);
+    font-size: 16px;
+    font-family: inherit;
+    resize: none;
+    overflow: hidden;
+    min-height: 30px; 
+    field-sizing: content; /* 内容に合わせて自動で高さを調整 */
+    background-color: var(--sidebar-bg); /* 背景色をサイドバーに合わせる */
     color: var(--text-color);
+}
+
+.git-commit-area textarea:focus {
+    border-color: #007acc;
+    outline: none;
+    background-color: var(--main-bg);
 }
 
 .git-action-btn {
     width: 100%;
     padding: 5px;
     margin-top: 5px;
+    margin-bottom: 5px;
     background-color: #007acc;
     color: white;
     border: none;
@@ -610,6 +741,40 @@ body[data-theme="dark"] .outline-item:hover {
     background-color: #005a9e;
 }
 
+.git-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background-color: #555;
+}
+
+/* Git Init UI */
+.git-init-container {
+    padding: 20px 10px;
+    text-align: center;
+    color: var(--text-color);
+}
+
+.git-init-container p {
+    font-size: 13px;
+    margin-bottom: 15px;
+    opacity: 0.8;
+}
+
+.git-init-btn {
+    background-color: #007acc;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background-color 0.2s;
+}
+
+.git-init-btn:hover {
+    background-color: #005a9e;
+}
+
 /* ========== Center Pane (Editor) ========== */
 .center-pane {
     flex: 1;
@@ -617,7 +782,7 @@ body[data-theme="dark"] .outline-item:hover {
     flex-direction: column;
     background: var(--main-bg);
     min-width: 0;
-    transition: margin-bottom 0.2s ease;
+    /* transition: margin-bottom 0.2s ease; 削除: レイアウト変更を即座に行うため */
 }
 
 /* File Title Bar (Obsidian-like) */
@@ -771,7 +936,7 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     flex-shrink: 0;
 }
 
-.toolbar-dropdown-menu, .toolbar-icon-menu {
+.toolbar-icon-menu {
     display: none;
     position: absolute;
     top: 100%;
@@ -786,7 +951,7 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     padding: 4px 0;
 }
 
-.toolbar-dropdown-menu::before, .toolbar-icon-menu::before {
+.toolbar-icon-menu::before {
     content: "";
     position: absolute;
     top: -10px;
@@ -796,7 +961,6 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     background: transparent;
 }
 
-.toolbar-dropdown-container:hover .toolbar-dropdown-menu,
 .toolbar-dropdown-container:hover .toolbar-icon-menu {
     display: block;
 }
@@ -811,24 +975,6 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
 .toolbar-dropdown-container:hover .toolbar-icon-menu {
     display: flex;
     gap: 2px;
-}
-
-.toolbar-dropdown-menu button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    padding: 6px 12px;
-    margin: 0;
-    font-size: 13px;
-    color: var(--text-color);
-    height: auto;
-}
-
-.toolbar-dropdown-menu button:hover {
-    background-color: var(--toolbar-btn-hover);
 }
 
 /* Editor Area */
@@ -885,6 +1031,11 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     font-family: inherit;
 }
 
+/* 現在行のハイライトを青系に変更 */
+.cm-activeLine {
+    background-color: rgba(0, 122, 204, 0.1) !important;
+}
+
 .cm-line {
     padding: 0 2px;
     line-height: var(--line-height);
@@ -910,9 +1061,9 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
 .cm-live-quote {
     background: var(--cb-body-bg);
     border-left: 4px solid var(--cb-border-color);
-    padding: 2px 10px;
+    padding: 0 10px; /* 修正: 上下パディングを削除 */
     color: #6a737d;
-    margin: 0.5em 0;
+    margin: 0; /* 修正: マージンを削除して行番号ズレを防止 */
     display: block;
 }
 body[data-theme="dark"] .cm-live-quote { color: #8b949e; }
@@ -920,6 +1071,21 @@ body[data-theme="dark"] .cm-live-quote { color: #8b949e; }
 .cm-live-bold { font-weight: bold; }
 .cm-live-em { font-style: italic; }
 .cm-live-s { text-decoration: line-through; color: #6a737d; }
+
+/* ハイライト (==) */
+.cm-live-highlight {
+    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.7) 0); /* 蛍光マーカー風 */
+    /* または単色背景 */
+    /* background-color: rgba(255, 255, 0, 0.4); */
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+body[data-theme="dark"] .cm-live-highlight {
+    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.5) 0);
+    /* ダークモードでの可読性を考慮 */
+    color: inherit;
+}
 
 .cm-live-code {
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
@@ -953,7 +1119,7 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 }
 
 .cm-live-li::before {
-    content: '•';
+    content: "\2022";
     position: absolute;
     /* 0.5em(基本) + (インデントレベル * タブ幅) */
     left: calc(0.5em + (var(--indent-level, 0) * var(--list-indent-width)));
@@ -1087,8 +1253,9 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     border-top-right-radius: var(--cb-radius);
     
     display: flex !important;
-    justify-content: flex-end !important;
+    justify-content: flex-end !important; /* 右寄せ */
     align-items: center;
+    position: relative;
 }
 
 /* プレビューモード（カーソルなし）のフッター */
@@ -1108,23 +1275,49 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 }
 
 /* 言語名ボタン */
-.cm-language-widget {
-    display: inline-block;
-    margin-right: 8px;
-    /* 強制的に右に寄せる */
-    margin-left: auto;
-    line-height: normal;
+.cm-language-widget-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px; /* 右端からの余白 */
+    z-index: 10;
+}
+
+.cm-language-select-btn {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: background-color 0.1s;
+    font-family: var(--editor-font-family);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cm-language-select-btn:hover {
+    background-color: rgba(0,0,0,0.08);
+    color: var(--text-color);
+}
+
+.cm-language-select-btn .arrow {
+    font-size: 8px;
+    opacity: 0.6;
 }
 
 .cm-code-copy-btn {
     background: transparent;
-    border: 1px solid transparent;
-    color: #666;
+    border: none;
+    color: #999;
     font-size: 0.75rem;
-    font-weight: bold;
+    font-weight: normal;
     cursor: pointer;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: 3px;
     transition: all 0.2s ease;
     font-family: var(--editor-font-family);
 }
@@ -1136,7 +1329,97 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 
 .cm-code-copy-btn.copied {
     color: #28a745;
-    border-color: #28a745;
+}
+
+/* Notion-like Language Dropdown */
+.cm-language-dropdown-portal {
+    position: fixed; /* 画面に対して絶対配置 */
+    background-color: var(--main-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 9999;
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    font-family: var(--editor-font-family);
+    font-size: 13px;
+}
+
+.cm-language-search {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    background-color: rgba(0,0,0,0.05);
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--text-color);
+    outline: none;
+    margin-bottom: 4px;
+}
+
+.cm-language-search:focus {
+    background-color: var(--main-bg);
+    border-color: #007acc;
+    box-shadow: 0 0 0 1px #007acc;
+}
+
+.cm-language-list {
+    max-height: 250px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+/* スクロールバーのカスタマイズ */
+.cm-language-list::-webkit-scrollbar {
+    width: 8px;
+}
+.cm-language-list::-webkit-scrollbar-thumb {
+    background-color: rgba(0,0,0,0.2);
+    border-radius: 4px;
+}
+.cm-language-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.cm-language-item {
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-color);
+}
+
+.cm-language-item:hover {
+    background-color: rgba(0, 122, 204, 0.1);
+}
+
+.cm-language-item.selected {
+    background-color: transparent;
+}
+
+.cm-language-item.empty {
+    color: #999;
+    cursor: default;
+    padding: 8px;
+    text-align: center;
+}
+
+.cm-language-item .label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-language-item .check {
+    color: #007acc;
+    font-weight: bold;
+    font-size: 12px;
 }
 
 /* ダークモード */
@@ -1144,12 +1427,39 @@ body[data-theme="dark"] .cm-code-header {
     background-color: var(--cb-header-bg, #161b22);
 }
 
-body[data-theme="dark"] .cm-code-copy-btn {
+body[data-theme="dark"] .cm-language-select-btn {
     color: #8b949e;
+}
+body[data-theme="dark"] .cm-language-select-btn:hover {
+    background-color: rgba(255,255,255,0.1);
+    color: #c9d1d9;
+}
+
+body[data-theme="dark"] .cm-code-copy-btn {
+    color: #666;
 }
 body[data-theme="dark"] .cm-code-copy-btn:hover {
     background-color: rgba(255,255,255,0.1);
     color: #c9d1d9;
+}
+
+body[data-theme="dark"] .cm-language-dropdown-portal {
+    background-color: #252526;
+    border-color: #454545;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="dark"] .cm-language-search {
+    background-color: #3c3c3c;
+    color: #ccc;
+}
+body[data-theme="dark"] .cm-language-search:focus {
+    background-color: #252526;
+    border-color: #007acc;
+}
+
+body[data-theme="dark"] .cm-language-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Settings View */
@@ -1413,7 +1723,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
 /* ========== Resizers ========== */
 .resizer {
     position: absolute;
-    z-index: 10;
+    z-index: 30;
     opacity: 0;
     transition: opacity 0.2s;
     background: #007acc;
@@ -1511,7 +1821,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
 .modal-buttons {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 5px; /* 2025/12/02 */
 }
 
 .modal-btn {
@@ -1618,7 +1928,7 @@ body.is-resizing-row .bottom-pane {
     transition: none !important;
 }
 
-/* ★追加: 通知トースト */
+/* 通知トースト */
 .notification-container {
     position: fixed;
     bottom: 30px;
@@ -1669,7 +1979,7 @@ body:not([data-theme="dark"]) .notification-toast {
     border-left-width: 4px;
 }
 
-/* ★追加: ページブレイクウィジェットのスタイル */
+/* ページブレイクウィジェットのスタイル */
 /* 改ページ行を通常のテキスト行の高さに合わせる */
 .cm-page-break-widget {
     display: flex;
@@ -1705,7 +2015,7 @@ body[data-theme="dark"] .cm-page-break-widget::after {
     border-bottom-color: #444;
 }
 
-/* ★追加: Notion風ブックマークカードのスタイル */
+/* Notion風ブックマークカードのスタイル */
 .cm-bookmark-widget {
     display: flex;
     width: 100%;
@@ -1838,4 +2148,668 @@ body[data-theme="dark"] .cm-bookmark-cover {
 
 body[data-theme="dark"] .skeleton-box {
     background-color: #374151;
+}
+
+/* Cloud Sync Styles */
+.setting-note {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.setting-input-group {
+    margin-bottom: 10px;
+}
+
+.setting-input-group label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.setting-input-group input {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid var(--sidebar-border);
+    background-color: var(--main-bg);
+    color: var(--text-color);
+    border-radius: 3px;
+}
+
+.auth-status {
+    margin-left: 10px;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.auth-status.authenticated {
+    color: #28a745;
+}
+
+.auth-status.unauthenticated {
+    color: #dc3545;
+}
+
+/* Sync Button Animation */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ツールバー用とサイドバー用(.icon)の両方に対応 */
+.sync-btn.syncing,
+.icon.syncing {
+    animation: spin 1s linear infinite;
+    color: #007acc;
+}
+
+.sync-provider-settings {
+    margin-top: 15px;
+    padding: 15px;
+    border: 1px solid var(--sidebar-border);
+    border-radius: 5px;
+    background-color: rgba(0,0,0,0.02);
+}
+
+.sync-provider-settings h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+/* ========== Custom Search Widget (VS Code Style) ========== */
+.search-widget {
+    position: absolute;
+    top: 8px;
+    right: 24px; /* スクロールバーの幅を考慮 */
+    z-index: 2000;
+    background-color: var(--main-bg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    padding: 6px;
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: var(--editor-font-family);
+    transition: transform 0.2s, opacity 0.2s;
+    border: 1px solid var(--sidebar-border);
+}
+
+.search-widget.hidden {
+    display: none;
+    /* アニメーションさせたい場合は以下を使用し、JSでhiddenクラスの制御を変える */
+    /* transform: translateY(-10px); opacity: 0; pointer-events: none; */
+}
+
+.search-widget-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.search-input-container {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+/* トグルアイコン（置換展開用） */
+.search-icon-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
+    cursor: pointer;
+    color: var(--text-color);
+    opacity: 0.7;
+    transition: transform 0.2s;
+}
+
+.search-icon-toggle:hover {
+    opacity: 1;
+}
+
+.search-icon-toggle.expanded {
+    transform: rotate(90deg);
+}
+
+/* 入力フィールド */
+.search-widget input {
+    width: 100%;
+    height: 26px;
+    background-color: var(--sidebar-bg); /* 入力欄背景を少し変える */
+    border: 1px solid transparent;
+    color: var(--text-color);
+    padding: 0 70px 0 6px; /* 右側にオプションボタン用の余白を開ける */
+    font-size: 13px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.search-widget input:focus {
+    border-color: #007acc;
+    background-color: var(--main-bg);
+}
+
+/* 検索オプション（入力欄の中に配置） */
+.search-options {
+    position: absolute;
+    right: 4px;
+    top: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+}
+
+/* アイコンボタン共通 */
+.icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    opacity: 0.7;
+    font-size: 11px; /* 文字アイコン用 */
+}
+
+.icon-btn:hover {
+    background-color: rgba(0,0,0,0.1);
+    opacity: 1;
+}
+
+.icon-btn.active {
+    background-color: rgba(0, 122, 204, 0.2);
+    color: #007acc;
+    opacity: 1;
+}
+
+/* アクションエリア（次へ/前へ/閉じる） */
+.search-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.search-count {
+    font-size: 11px;
+    color: var(--text-color);
+    opacity: 0.6;
+    margin-right: 6px;
+    white-space: nowrap;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* 置換行のスタイル調整 */
+.replace-row {
+    padding-left: 20px; /* トグルアイコン分インデント */
+}
+
+/* ダークモード対応 */
+body[data-theme="dark"] .search-widget {
+    background-color: #252526;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="dark"] .search-widget input {
+    background-color: #3c3c3c;
+    color: #ccc;
+}
+
+body[data-theme="dark"] .search-widget input:focus {
+    background-color: #444;
+    border-color: #007acc;
+}
+
+body[data-theme="dark"] .icon-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+body[data-theme="dark"] .icon-btn.active {
+    background-color: rgba(0, 122, 204, 0.4);
+    color: #fff;
+}
+
+/* CodeMirror標準の検索ハイライトの上書き */
+.cm-searchMatch {
+    background-color: rgba(255, 235, 59, 0.4);
+}
+/* 現在のマッチを「青」にして選択状態のように見せる */  
+.cm-searchMatch-selected {
+    background-color: #007acc !important; /* VS Code風の青 */
+    color: white !important; /* 文字色を白にして可読性確保 */
+    border: 1px solid #007acc;
+    border-radius: 2px;
+}
+
+/* 選択範囲そのもの（Native Selection）と色が混ざらないように調整 */
+/* ★変更: 非フォーカス時も青系の色を維持するように変更 */
+.cm-content ::selection, 
+.cm-selectionBackground {
+    background-color: rgba(0, 122, 204, 0.3) !important;
+}
+
+/* ダークモード時の調整 */
+body[data-theme="dark"] .cm-searchMatch {
+    background-color: rgba(255, 235, 59, 0.2);
+}
+
+body[data-theme="dark"] .cm-searchMatch-selected {
+    background-color: #264f78 !important; /* ダークモードでの濃い青 */
+    color: white !important;
+    border: 1px solid #569cd6;
+}
+
+/* 標準の検索パネルを強制的に非表示にする (ゾンビ表示対策) */
+.cm-panel.cm-search {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+
+/* ========== Recent Files List ========== */
+.recent-files-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.recent-file-item {
+    padding: 6px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--sidebar-border);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.recent-file-item:hover {
+    background-color: rgba(0,0,0,0.05);
+}
+body[data-theme="dark"] .recent-file-item:hover {
+    background-color: rgba(255,255,255,0.05);
+}
+
+.recent-file-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.recent-file-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #888;
+}
+
+.recent-file-path {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60%;
+    opacity: 0.7;
+}
+
+.recent-file-time {
+    white-space: nowrap;
+    font-size: 10px;
+    opacity: 0.8;
+}
+
+body[data-theme="dark"] .recent-file-info {
+    color: #999;
+}
+
+/* ========== Git Panel Styles ========== */
+
+/* Git Init UI */
+.git-init-container {
+    padding: 20px 10px;
+    text-align: center;
+    color: var(--text-color);
+}
+
+.git-init-container p {
+    font-size: 13px;
+    margin-bottom: 15px;
+    opacity: 0.8;
+}
+
+.git-init-btn {
+    background-color: #007acc;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background-color 0.2s;
+}
+
+.git-init-btn:hover {
+    background-color: #005a9e;
+}
+
+/* ========== Git History Graph Styles (Added) ========== */
+
+.git-history-container {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    margin-top: 10px;
+    border-top: 1px solid var(--sidebar-border);
+    padding-top: 10px;
+    min-height: 200px; /* ある程度の高さを確保 */
+}
+
+.git-history-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.git-history-row {
+    display: flex;
+    padding: 4px 0;
+    cursor: default;
+    position: relative;
+}
+
+.git-history-row:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+body[data-theme="dark"] .git-history-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Timeline visualization */
+.git-timeline {
+    width: 20px;
+    position: relative;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+.git-timeline-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    background-color: #555;
+    transform: translateX(-50%);
+    opacity: 0.3;
+}
+
+.git-timeline-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #007acc;
+    border-radius: 50%;
+    position: absolute;
+    top: 8px; /* 行の高さに合わせて調整 */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    border: 2px solid var(--sidebar-bg); /* 背景色でくり抜いて見えるように */
+}
+
+body[data-theme="dark"] .git-timeline-dot {
+    border-color: #252526;
+}
+
+.git-history-content {
+    flex: 1;
+    min-width: 0;
+    padding-right: 5px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.git-history-header {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.git-refs {
+    display: inline-flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.git-ref-badge {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 8px;
+    background-color: #e5e5e5;
+    color: #333;
+    border: 1px solid #ccc;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.git-ref-badge.main {
+    background-color: #007acc;
+    color: white;
+    border-color: #005a9e;
+}
+
+.git-ref-badge.remote {
+    background-color: #d1d5da;
+    color: #0366d6;
+    border-color: #0366d6;
+}
+
+body[data-theme="dark"] .git-ref-badge {
+    background-color: #333;
+    color: #ccc;
+    border-color: #555;
+}
+body[data-theme="dark"] .git-ref-badge.remote {
+    background-color: #1f2428;
+    color: #58a6ff;
+    border-color: #388bfd;
+}
+
+.git-history-message {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+
+.git-history-meta {
+    font-size: 10px;
+    color: #888;
+    margin-top: 2px;
+}
+
+.git-branch-badge {
+    font-size: 10px;
+    background: #007acc;
+    color: white;
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+/* Tooltip Styles */
+.git-commit-tooltip {
+    position: fixed;
+    background-color: #252526;
+    color: #ccc;
+    border: 1px solid #454545;
+    border-radius: 5px;
+    padding: 10px;
+    width: 280px;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    font-size: 12px;
+    pointer-events: none; /* マウスイベントを邪魔しない */
+}
+
+body:not([data-theme="dark"]) .git-commit-tooltip {
+    background-color: #fff;
+    color: #333;
+    border-color: #ddd;
+}
+
+.git-tooltip-header {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.git-tooltip-avatar {
+    width: 30px;
+    height: 30px;
+    background-color: #444;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+}
+
+.git-tooltip-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.git-tooltip-author {
+    font-weight: bold;
+    color: #4daafc; /* VS Code Blue */
+}
+body:not([data-theme="dark"]) .git-tooltip-author { color: #007acc; }
+
+.git-tooltip-date {
+    color: #888;
+    font-size: 11px;
+}
+
+.git-tooltip-branch {
+    margin-bottom: 5px;
+    color: #fff;
+    font-weight: bold;
+}
+body:not([data-theme="dark"]) .git-tooltip-branch { color: #000; }
+
+.git-tooltip-stats {
+    margin-bottom: 8px;
+    color: #ccc;
+}
+
+.git-tooltip-actions a {
+    color: #4daafc;
+    text-decoration: none;
+}
+body:not([data-theme="dark"]) .git-tooltip-actions a { color: #007acc; }
+
+/* ブランチバッジをクリック可能に */
+.git-branch-badge {
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    user-select: none;
+    position: relative; /* メニュー位置の基準 */
+}
+
+.git-branch-badge:hover {
+    background-color: #005a9e;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.git-branch-badge:active {
+    transform: translateY(0);
+}
+
+/* ブランチ選択メニュー */
+.branch-menu {
+    position: fixed;
+    background-color: var(--main-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    z-index: 2000;
+    min-width: 150px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 4px 0;
+    color: var(--text-color);
+}
+
+body[data-theme="dark"] .branch-menu {
+    background-color: #252526;
+    border-color: #454545;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.branch-menu-item {
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.branch-menu-item:hover {
+    background-color: #007acc;
+    color: white;
+}
+
+.branch-menu-item.current {
+    font-weight: bold;
+    background-color: rgba(0, 122, 204, 0.1);
+}
+body[data-theme="dark"] .branch-menu-item.current {
+    background-color: rgba(0, 122, 204, 0.2);
+}
+.branch-menu-item:hover.current {
+    background-color: #007acc; /* ホバー時は青背景 */
+}
+
+.branch-check {
+    margin-left: 8px;
+    font-weight: bold;
+}
+
+/* 現在のブランチを強調（光らせる） */
+.git-ref-badge.current-branch {
+    background-color: #2da44e; /* GitHubの緑色 */
+    color: white;
+    border-color: #2da44e;
+    font-weight: bold;
+    z-index: 1;
+}
+
+/* ダークモード時の調整 */
+body[data-theme="dark"] .git-ref-badge.current-branch {
+    background-color: #238636;
+    border-color: #238636;
+    color: white;
 }

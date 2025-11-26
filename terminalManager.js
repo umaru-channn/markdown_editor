@@ -24,34 +24,6 @@ function getDefaultShell() {
             shell: cmdPath,
             args: []
         };
-        
-        // 旧ロジック: PowerShellを優先していた部分
-        /*
-        // Check for PowerShell 7+ (latest version)
-        const ps7Path = detectPowerShell7();
-        if (ps7Path) {
-            return {
-                shell: ps7Path,
-                args: []
-            };
-        }
-
-        // Fallback to Windows PowerShell if available
-        const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-        if (fs.existsSync(powershellPath)) {
-            return {
-                shell: powershellPath,
-                args: []
-            };
-        }
-
-        // Final fallback to cmd.exe (always available on Windows)
-        const cmdPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32\\cmd.exe');
-        return {
-            shell: cmdPath,
-            args: []
-        };
-        */
     } else if (platform === 'darwin') {
         // macOS: Use zsh (default on modern macOS), fallback to bash
         if (fs.existsSync('/bin/zsh')) {

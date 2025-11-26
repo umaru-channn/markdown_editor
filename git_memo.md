@@ -35,11 +35,16 @@ git push origin main --force
 # 履歴をきれいにするor標準マージ
 git pull --rebase
 git pull --no-ff
+
 # ブランチの削除
+# リモート
 git push origin --delete
+# ローカル
 git branch -D 
+# 同時
 set BRANCH_NAME=live_preview
 git push origin --delete %BRANCH_NAME% && git branch -D %BRANCH_NAME%
+
 # gitのリモートの最新状態を受け取る
 git pull origin main
 # マージする

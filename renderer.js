@@ -1,16 +1,62 @@
 /**
  * Markdown IDE - Main Renderer Process
  * Integrated layout with full Markdown functionality (CodeMirror 6) and Terminal Support
+ * Update: Added Search functionality (Ctrl+F) with VS Code like styling
+ * Update: Added drawSelection for persistent selection visibility
+ * Update: Dynamic language switching based on file extension
+ * Update: Integrated Git Management features with Init support
+ * Update: Added Git History Graph and Detail Tooltip
+ * Fix: Hide unnecessary Git UI elements when no repository is found
  */
 
+const path = require('path');
 const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
-const { EditorView, keymap, highlightActiveLine, lineNumbers } = require("@codemirror/view");
+const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
-const { markdown, markdownLanguage } = require("@codemirror/lang-markdown");
-const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit } = require("@codemirror/language");
-const { javascript } = require("@codemirror/lang-javascript");
+const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit, StreamLanguage, LanguageSupport } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
+const { tablePlugin } = require("./tablePlugin.js");
+
+// 言語パッケージのインポート（Modern）
+const { markdown, markdownLanguage } = require("@codemirror/lang-markdown");
+const { javascript } = require("@codemirror/lang-javascript");
+const { html: htmlLang } = require("@codemirror/lang-html");
+const { css } = require("@codemirror/lang-css");
+const { json } = require("@codemirror/lang-json");
+const { python } = require("@codemirror/lang-python");
+const { cpp } = require("@codemirror/lang-cpp");
+const { java } = require("@codemirror/lang-java");
+const { rust } = require("@codemirror/lang-rust");
+const { sql } = require("@codemirror/lang-sql");
+const { php } = require("@codemirror/lang-php");
+const { go } = require("@codemirror/lang-go");
+const { xml } = require("@codemirror/lang-xml");
+const { yaml } = require("@codemirror/lang-yaml");
+
+// 言語パッケージのインポート（Legacy / StreamLanguage）
+const { csharp, scala, kotlin, dart } = require("@codemirror/legacy-modes/mode/clike");
+const { ruby } = require("@codemirror/legacy-modes/mode/ruby");
+const { swift } = require("@codemirror/legacy-modes/mode/swift");
+const { shell } = require("@codemirror/legacy-modes/mode/shell");
+const { powerShell } = require("@codemirror/legacy-modes/mode/powershell");
+const { dockerFile } = require("@codemirror/legacy-modes/mode/dockerfile");
+const { lua } = require("@codemirror/legacy-modes/mode/lua");
+const { perl } = require("@codemirror/legacy-modes/mode/perl");
+const { r } = require("@codemirror/legacy-modes/mode/r");
+const { diff: diffLanguage } = require("@codemirror/legacy-modes/mode/diff");
+
+// @codemirror/search から必要なクラスをインポート
+const {
+    search,
+    setSearchQuery,
+    SearchQuery,
+    findNext,
+    findPrevious,
+    replaceNext,
+    replaceAll,
+    closeSearchPanel
+} = require("@codemirror/search");
 
 // プログラムによる変更を識別するためのアノテーション
 const ExternalChange = Annotation.define();
@@ -65,10 +111,37 @@ const fileTitleInput = document.getElementById('file-title-input');
 const fileStatsElement = document.getElementById('file-stats');
 
 // ツールバーボタン
-const headingSelector = document.getElementById('heading-selector');
 const btnBulletList = document.getElementById('btn-bullet-list');
 const btnNumberList = document.getElementById('btn-number-list');
 const btnCheckList = document.getElementById('btn-check-list');
+
+// 最近使ったファイルリスト
+const btnRecentClear = document.getElementById('btn-recent-clear');
+const recentFilesList = document.getElementById('recent-files-list');
+
+// ========== Git関連 DOM要素 ==========
+const gitUnstagedList = document.getElementById('git-unstaged');
+const gitStagedList = document.getElementById('git-staged');
+const gitMessageInput = document.getElementById('git-message');
+const btnGitCommit = document.getElementById('git-commit-btn');
+const btnGitPush = document.getElementById('git-push-btn');
+const btnGitRefresh = document.getElementById('btn-git-refresh');
+const btnGitStage = document.getElementById('btn-git-stage');
+const btnGitUnstage = document.getElementById('btn-git-unstage');
+
+// Git履歴用要素
+const gitHistoryList = document.getElementById('git-history-list');
+const gitCurrentBranchBadge = document.getElementById('git-current-branch');
+const gitCommitTooltip = document.getElementById('git-commit-tooltip');
+
+// ========== Cloud Sync Logic (Frontend) ==========
+const btnCloudSync = document.getElementById('btn-cloud-sync');
+const syncServiceSelect = document.getElementById('sync-service');
+const syncSettingsDropbox = document.getElementById('sync-settings-dropbox');
+const syncSettingsGDrive = document.getElementById('sync-settings-gdrive');
+const btnAuthDropbox = document.getElementById('btn-auth-dropbox');
+const btnAuthGDrive = document.getElementById('btn-auth-gdrive');
+const syncStatusText = document.getElementById('sync-status-text');
 
 // ========== 状態管理 ==========
 let globalEditorView = null; // CodeMirrorインスタンス
@@ -89,6 +162,7 @@ let appSettings = {
 // CodeMirror Compartments for dynamic reconfiguration
 const themeCompartment = new Compartment();
 const editorStyleCompartment = new Compartment();
+const languageCompartment = new Compartment(); // 言語設定用のCompartment
 
 // ========== PDF Preview State ==========
 let isPdfPreviewVisible = false;
@@ -112,6 +186,7 @@ let openedFiles = new Map();
 let fileModificationState = new Map();
 let currentSortOrder = 'asc';
 let currentFilePath = null;
+let recentFiles = []; // 最近開いたファイルのリスト
 
 // ========== 左ペイン幅の動的制御用変数更新関数 ==========
 function updateLeftPaneWidthVariable() {
@@ -160,14 +235,6 @@ function switchMainView(targetId) {
     } else {
         if (fileTitleBar) fileTitleBar.classList.add('hidden');
     }
-
-    // 5. エディタへの自動フォーカスを削除
-    // ファイルを開いたときに勝手にエディタへカーソルが移動するのを防ぐため削除しました。
-    /*
-    if (targetId === 'content-readme' && globalEditorView) {
-        globalEditorView.focus();
-    }
-    */
 }
 
 // ========== 設定関連の関数 ==========
@@ -204,6 +271,12 @@ function applySettingsToUI() {
     if (fontFamilyInput) fontFamilyInput.value = appSettings.fontFamily;
     if (themeInput) themeInput.value = appSettings.theme;
     if (autoSaveInput) autoSaveInput.checked = appSettings.autoSave;
+
+    // ステータスバーのフォントサイズ更新
+    const statusFontSize = document.getElementById('status-font-size');
+    if (statusFontSize) {
+        statusFontSize.textContent = `Size: ${appSettings.fontSize}`;
+    }
 
     // テーマの適用
     if (appSettings.theme === 'dark') {
@@ -295,61 +368,230 @@ const codeLanguages = (info) => {
     if (!lang) return null;
 
     if (lang === 'js' || lang === 'javascript' || lang === 'node') return LanguageDescription.of({ name: 'javascript', support: javascript() });
-    if (lang === 'html' || lang === 'htm') return LanguageDescription.of({ name: 'html', support: require("@codemirror/lang-html").html() });
-    if (lang === 'css' || lang === 'scss') return LanguageDescription.of({ name: 'css', support: require("@codemirror/lang-css").css() });
-    if (lang === 'py' || lang === 'python') return LanguageDescription.of({ name: 'python', support: require("@codemirror/lang-python").python() });
-    if (lang === 'md' || lang === 'markdown') return LanguageDescription.of({ name: 'markdown', support: require("@codemirror/lang-markdown").markdown() });
-    // 必要に応じて他言語を追加
+    if (lang === 'ts' || lang === 'typescript') return LanguageDescription.of({ name: 'typescript', support: javascript({ typescript: true }) });
+    if (lang === 'html' || lang === 'htm') return LanguageDescription.of({ name: 'html', support: htmlLang() });
+    if (lang === 'css' || lang === 'scss') return LanguageDescription.of({ name: 'css', support: css() });
+    if (lang === 'py' || lang === 'python') return LanguageDescription.of({ name: 'python', support: python() });
+    if (lang === 'md' || lang === 'markdown') return LanguageDescription.of({ name: 'markdown', support: markdown({ base: markdownLanguage, codeLanguages: codeLanguages }) });
+    if (lang === 'c' || lang === 'cpp') return LanguageDescription.of({ name: 'cpp', support: cpp() });
+    if (lang === 'java') return LanguageDescription.of({ name: 'java', support: java() });
+    if (lang === 'rust') return LanguageDescription.of({ name: 'rust', support: rust() });
+    if (lang === 'sql') return LanguageDescription.of({ name: 'sql', support: sql() });
+    if (lang === 'json') return LanguageDescription.of({ name: 'json', support: json() });
+    if (lang === 'php') return LanguageDescription.of({ name: 'php', support: php() });
+    if (lang === 'go' || lang === 'golang') return LanguageDescription.of({ name: 'go', support: go() });
+    if (lang === 'xml') return LanguageDescription.of({ name: 'xml', support: xml() });
+    if (lang === 'yaml' || lang === 'yml') return LanguageDescription.of({ name: 'yaml', support: yaml() });
+
+    // Legacy / StreamLanguage supports (変更点: new LanguageSupport()でラップする)
+    if (lang === 'c#' || lang === 'csharp' || lang === 'cs') return LanguageDescription.of({ name: 'csharp', support: new LanguageSupport(StreamLanguage.define(csharp)) });
+    if (lang === 'ruby' || lang === 'rb') return LanguageDescription.of({ name: 'ruby', support: new LanguageSupport(StreamLanguage.define(ruby)) });
+    if (lang === 'swift') return LanguageDescription.of({ name: 'swift', support: new LanguageSupport(StreamLanguage.define(swift)) });
+    if (lang === 'kotlin' || lang === 'kt') return LanguageDescription.of({ name: 'kotlin', support: new LanguageSupport(StreamLanguage.define(kotlin)) });
+    if (lang === 'bash' || lang === 'sh' || lang === 'shell' || lang === 'zsh') return LanguageDescription.of({ name: 'bash', support: new LanguageSupport(StreamLanguage.define(shell)) });
+    if (lang === 'powershell' || lang === 'ps1') return LanguageDescription.of({ name: 'powershell', support: new LanguageSupport(StreamLanguage.define(powerShell)) });
+    if (lang === 'dockerfile' || lang === 'docker') return LanguageDescription.of({ name: 'dockerfile', support: new LanguageSupport(StreamLanguage.define(dockerFile)) });
+    if (lang === 'lua') return LanguageDescription.of({ name: 'lua', support: new LanguageSupport(StreamLanguage.define(lua)) });
+    if (lang === 'perl' || lang === 'pl') return LanguageDescription.of({ name: 'perl', support: new LanguageSupport(StreamLanguage.define(perl)) });
+    if (lang === 'r') return LanguageDescription.of({ name: 'r', support: new LanguageSupport(StreamLanguage.define(r)) });
+    if (lang === 'dart') return LanguageDescription.of({ name: 'dart', support: new LanguageSupport(StreamLanguage.define(dart)) });
+    if (lang === 'scala') return LanguageDescription.of({ name: 'scala', support: new LanguageSupport(StreamLanguage.define(scala)) });
+    if (lang === 'diff' || lang === 'patch') return LanguageDescription.of({ name: 'diff', support: new LanguageSupport(StreamLanguage.define(diffLanguage)) });
 
     return null;
 };
 
-const startDoc = `# マークダウン記法の使い方
+// 拡張子に基づいて適切な言語Extensionの配列を返す関数
+function getLanguageExtensions(filePath) {
+    // デフォルト（ファイルパスがない、または不明な場合）はMarkdownとして扱う
+    const defaultMarkdown = [
+        markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
+        livePreviewPlugin,
+        tablePlugin
+    ];
 
-Markdown（マークダウン）は、手軽に文章の構造や装飾を書くための記法です。
-左側に書くと、右側にプレビューが表示されます。
+    if (!filePath) return defaultMarkdown;
 
-## 見出し
-# H1 見出し
-## H2 見出し
-### H3 見出し
-#### H4 見出し
-##### H5 見出し
-###### H6 見出し
+    const ext = path.extname(filePath).toLowerCase();
 
-## テキストの装飾
-**太字** や *斜体* 、~~取り消し線~~ が使えます。
+    // 拡張子に応じた言語設定
+    switch (ext) {
+        // Markdownとして扱う拡張子 (.md, .markdown, .txt など)
+        case '.md':
+        case '.markdown':
+        case '.txt':
+        case '.text':
+        case '.log':
+            return defaultMarkdown;
 
-## リスト
-- リスト項目1
-- リスト項目2
-    - ネストされた項目
+        // 各プログラミング言語
+        case '.js':
+        case '.jsx':
+            return [javascript({ jsx: true })];
+        case '.ts':
+        case '.tsx':
+            return [javascript({ typescript: true, jsx: true })];
+        case '.html':
+        case '.htm':
+            return [htmlLang()];
+        case '.css':
+        case '.scss':
+        case '.less':
+            return [css()];
+        case '.json':
+            return [json()];
+        case '.py':
+            return [python()];
+        case '.c':
+        case '.cpp':
+        case '.h':
+        case '.hpp':
+            return [cpp()];
+        case '.java':
+            return [java()];
+        case '.rs':
+            return [rust()];
+        case '.sql':
+            return [sql()];
+        case '.php':
+            return [php()];
+        case '.go':
+            return [go()];
+        case '.xml':
+            return [xml()];
+        case '.yaml':
+        case '.yml':
+            return [yaml()];
 
+        // Legacy Modes (変更点: new LanguageSupport()でラップする)
+        case '.cs':
+            return [new LanguageSupport(StreamLanguage.define(csharp))];
+        case '.rb':
+            return [new LanguageSupport(StreamLanguage.define(ruby))];
+        case '.swift':
+            return [new LanguageSupport(StreamLanguage.define(swift))];
+        case '.kt':
+        case '.kts':
+            return [new LanguageSupport(StreamLanguage.define(kotlin))];
+        case '.sh':
+        case '.bash':
+        case '.zsh':
+            return [new LanguageSupport(StreamLanguage.define(shell))];
+        case '.ps1':
+        case '.psm1':
+            return [new LanguageSupport(StreamLanguage.define(powerShell))];
+        case 'dockerfile':
+        case '.dockerfile':
+            return [new LanguageSupport(StreamLanguage.define(dockerFile))];
+        case '.lua':
+            return [new LanguageSupport(StreamLanguage.define(lua))];
+        case '.pl':
+        case '.pm':
+            return [new LanguageSupport(StreamLanguage.define(perl))];
+        case '.r':
+            return [new LanguageSupport(StreamLanguage.define(r))];
+        case '.dart':
+            return [new LanguageSupport(StreamLanguage.define(dart))];
+        case '.scala':
+            return [new LanguageSupport(StreamLanguage.define(scala))];
+        case '.diff':
+        case '.patch':
+            return [new LanguageSupport(StreamLanguage.define(diffLanguage))];
+
+        // 未知の拡張子や拡張子なしの場合も、このエディタの性質上Markdownとして扱う
+        default:
+            // "Dockerfile" (no ext) check
+            if (path.basename(filePath).toLowerCase() === 'dockerfile') {
+                return [new LanguageSupport(StreamLanguage.define(dockerFile))];
+            }
+            return defaultMarkdown;
+    }
+}
+
+const startDoc = `# Markdown IDE の使い方
+
+このエディタは、Markdown記法をリアルタイムでプレビューしながら記述できるIDEです。
+上部のツールバーを使って、簡単に装飾や要素を挿入できます。
+
+## 🛠 ツールバー機能
+
+### 基本操作
+- 💾 **保存**: \`Ctrl + S\`
+- 📤 **PDFエクスポート**: 記述した内容をPDFとして保存します。
+- ↩/↪ **元に戻す/やり直し**: \`Ctrl + Z\` / \`Ctrl + Y\`
+
+### 検索機能
+- 🔍 **検索**: \`Ctrl + F\` (編集画面内を検索・置換できます)
+
+### テキスト装飾
+ツールバーのボタンで以下の装飾が可能です。
+- **太字**: \`**Bold**\` (Ctrl + B)
+- *斜体*: \`*Italic*\` (Ctrl + I)
+- ~~取り消し線~~: \`~~Strike~~\` (Ctrl + Shift + S)
+- ==ハイライト==: \`==Highlight==\`
+
+### 見出し
+\`H2\`, \`H3\` ボタンで素早く見出しを作成できます。\`Ctrl + 1\` ~ \`Ctrl + 6\` のショートカットも利用可能です。
+
+### リスト
+- 箇条書きリスト
 1. 番号付きリスト
-2. 番号付きリスト
-    1-1. ネストされた番号付きリスト
+- [ ] チェックリスト（タスクリスト）
 
-## コード
-インラインの \`code\` や、コードブロックが書けます：
+### 挿入機能
+- **リンク**: \`[タイトル](URL)\`
+- **画像**: \`![alt](画像URL)\`
+- **引用**: \`> 引用テキスト\`
+- **コード**: インライン \` \`code\` \` やコードブロック
+- **区切り線**: \`---\`
+
+## ✨ 高度な機能
+
+### テーブル（表）
+ツールバーの \`Table\` ボタンで挿入できます。
+作成されたテーブルは、マウス操作で**列幅の変更**や**行・列の追加/削除**が可能です。
+
+| 機能 | 説明 | 対応 |
+| :--- | :--- | :---: |
+| リサイズ | 列の境界線をドラッグ | ✅ |
+| 編集 | セルを直接編集 | ✅ |
+| 右クリック | 行・列の操作メニュー | ✅ |
+
+### 改ページ (Page Break)
+PDFエクスポート時の改ページ位置を指定できます。ツールバーの改ページボタンを押すと挿入されます。
+
+<div class="page-break"></div>
+
+（↑ここに改ページが入っています）
+
+### ブックマークカード (URL貼り付け)
+URLをエディタに貼り付けると、メニューが表示され「ブックマーク」を選択するとリッチなカード形式で表示されます。
+
+@card https://www.electronjs.org/
+
+### コードブロック
+言語を指定してシンタックスハイライトが可能です。
 
 \`\`\`javascript
-console.log('Hello, Markdown!');
-const x = 10;
+function hello() {
+    console.log("Hello, Markdown IDE!");
+}
 \`\`\`
+
+## ⌨️ ショートカットキー
+- \`Ctrl + S\`: 保存
+- \`Ctrl + B\`: 太字
+- \`Ctrl + I\`: 斜体
+- \`Ctrl + Shift + S\`: 取り消し線
+- \`Ctrl + 1\` ~ \`6\`: 見出し1~6
+- \`Ctrl + F\`: 検索
 `;
 
 // ========== リスト操作ロジック (Custom List Handling) ==========
 
-// 正規表現: ハイフン区切りの番号 (1-1. や 2-1-1. など) に対応
-const LIST_RE = /^(\s*)((?:[-*+]|\d+(?:-\d+)*\.)|(- \[[ xX]\]))\s+/;
-// 番号部分だけを抽出する正規表現 (例: "1-1." -> "1-1")
+const LIST_RE = /^(\s*)((- \[[ xX]\])|(?:[-*+]|\d+(?:-\d+)*\.))\s+/;
 const ORDERED_RE = /^(\s*)(\d+(?:-\d+)*)\.\s/;
 
-/**
- * 次の連番文字列を生成する関数
- * @param {string} currentNum - 現在の番号文字列 (例: "1", "1-1", "2-1")
- * @returns {string} 次の番号文字列 (例: "2", "1-2", "2-2")
- */
 function incrementOrderedNumber(currentNum) {
     const parts = currentNum.split('-');
     const lastPart = parts.pop();
@@ -360,9 +602,6 @@ function incrementOrderedNumber(currentNum) {
     return currentNum; // Fallback
 }
 
-/**
- * Enterキー: リストの継続と連番処理
- */
 const handleListNewline = (view) => {
     const { state, dispatch } = view;
     const { from, to, empty } = state.selection.main;
@@ -370,9 +609,6 @@ const handleListNewline = (view) => {
 
     const line = state.doc.lineAt(from);
     const text = line.text;
-    // カーソルが行末にあるか（または行末までの空白のみか）簡易チェック
-    // 厳密にはカーソルより後ろに文字がないことを確認すべきだが、
-    // リスト継続は通常行末でEnterを押したときに発動する
 
     const match = text.match(LIST_RE);
     if (!match) return false;
@@ -381,25 +617,20 @@ const handleListNewline = (view) => {
     const indent = match[1];
     const marker = match[2];
 
-    // カーソルが行頭のマーカー部分にある場合は通常の改行
     if (from < line.from + fullMatch.length) return false;
 
-    // コンテンツが空の場合 (マーカーのみの行でEnter) -> リスト解除
     if (text.trim().length === fullMatch.trim().length) {
         dispatch({ changes: { from: line.from, to: line.to, insert: "" } });
         return true;
     }
 
-    // コンテンツがある場合 -> 次の項目を作成
     let nextMarker = marker;
 
-    // 番号付きリストの場合、番号をインクリメント
     const orderedMatch = text.match(ORDERED_RE);
     if (orderedMatch) {
-        const currentNum = orderedMatch[2]; // "1" or "1-1"
+        const currentNum = orderedMatch[2];
         nextMarker = incrementOrderedNumber(currentNum) + ".";
     } else if (marker.startsWith("- [")) {
-        // タスクリストは未チェック状態で継続
         nextMarker = "- [ ]";
     }
 
@@ -408,14 +639,10 @@ const handleListNewline = (view) => {
     return true;
 };
 
-/**
- * Tabキー: インデントと番号のネスト化 (例: 1. -> 1-1.)
- */
 const handleListIndent = (view) => {
     const { state, dispatch } = view;
     const { from, empty } = state.selection.main;
 
-    // 範囲選択時は通常のインデント
     if (!empty && state.selection.ranges.some(r => !r.empty)) {
         return indentMore(view);
     }
@@ -425,45 +652,9 @@ const handleListIndent = (view) => {
     const match = text.match(ORDERED_RE);
 
     if (match) {
-        // 番号付きリストの場合
         const currentIndent = match[1];
-        const currentNum = match[2]; // "2" とか "1-2"
+        const currentNum = match[2];
 
-        // 1つ上の行を探して、親となる番号を取得する
-        let parentNum = null;
-        if (line.number > 1) {
-            for (let i = line.number - 1; i >= 1; i--) {
-                const prevLine = state.doc.line(i);
-                const prevMatch = prevLine.text.match(ORDERED_RE);
-                if (prevMatch) {
-                    const prevIndent = prevMatch[1];
-                    // インデントが現在の行と同じか少ない行を見つける
-                    // ネストする場合、親は「同じインデントレベル」の直前の項目であることが多い
-                    // あるいは Markdownの構造的には、親はインデントが少ないはずだが、
-                    // ユーザーの要望「1-1」を作るには、「直前の 1.」の子にしたい。
-                    // 直前の行がリストなら、それを親とするのが自然。
-                    if (prevIndent.length === currentIndent.length) {
-                        parentNum = prevMatch[2];
-                        break;
-                    }
-                    if (prevIndent.length < currentIndent.length) {
-                        // インデントが浅いものが見つかったらそれが親の可能性が高い
-                        parentNum = prevMatch[2];
-                        break;
-                    }
-                } else if (prevLine.text.trim() !== "") {
-                    // 空行以外でリストでない行に当たったら探索終了
-                    break;
-                }
-            }
-        }
-
-        // 親番号が見つかったら "親番号-1." にする。見つからなければ "1." にする（あるいは "1-1." にする？）
-        // ユーザー要望: ネスト -> 1-1. 
-        // 通常、1. の下でTabしたら 1-1. になってほしい。
-        // つまり直前の行の番号 + "-1"
-
-        // 直前の行を見る（単純化）
         let prevLineNumStr = "";
         if (line.number > 1) {
             const prevLine = state.doc.line(line.number - 1);
@@ -476,24 +667,19 @@ const handleListIndent = (view) => {
         const newNum = prevLineNumStr ? `${prevLineNumStr}-1` : `${currentNum}-1`;
         const newMarker = `${newNum}.`;
 
-        // インデントを追加し、マーカーを置換
-        const indentUnitText = "    "; // 4スペース
+        const indentUnitText = "    ";
         const changes = [
-            { from: line.from, insert: indentUnitText }, // インデント追加
-            { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker } // マーカー置換
+            { from: line.from, insert: indentUnitText },
+            { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker }
         ];
 
         dispatch({ changes });
         return true;
     }
 
-    // その他のリストや通常テキストは通常のインデント動作
     return indentMore(view);
 };
 
-/**
- * Shift-Tabキー: インデント解除と親連番の再開 (例: 1-1. -> 2.)
- */
 const handleListDedent = (view) => {
     const { state, dispatch } = view;
     const { from, empty } = state.selection.main;
@@ -508,16 +694,10 @@ const handleListDedent = (view) => {
 
     if (match) {
         const currentIndent = match[1];
-        // インデントがない場合は何もしない（これ以上解除できない）
         if (currentIndent.length === 0) return indentLess(view);
 
-        // インデントを減らした後、そのレベルでの「続きの番号」を探す
-        // つまり、上方向に探索し、(現在のインデント - 1単位) と同じインデントを持つ行を探す
-
-        let targetIndentLen = Math.max(0, currentIndent.length - 4); // 4スペース減らすと仮定
-        // タブ文字混在などを考慮すると厳密には難しいが、簡易的に長さを比較
-
-        let nextNum = "1"; // デフォルト
+        let targetIndentLen = Math.max(0, currentIndent.length - 4);
+        let nextNum = "1";
 
         for (let i = line.number - 1; i >= 1; i--) {
             const prevLine = state.doc.line(i);
@@ -525,9 +705,7 @@ const handleListDedent = (view) => {
 
             if (prevMatch) {
                 const prevIndent = prevMatch[1];
-                // ターゲットと同じインデントレベルの行が見つかった
                 if (prevIndent.length <= targetIndentLen) {
-                    // その番号をインクリメント
                     nextNum = incrementOrderedNumber(prevMatch[2]);
                     break;
                 }
@@ -536,17 +714,15 @@ const handleListDedent = (view) => {
 
         const newMarker = `${nextNum}.`;
 
-        // インデントを削除し、マーカーを置換
-        // インデント削除: 先頭から4文字（またはタブ1つ）削除
         let deleteLen = 0;
         if (text.startsWith("\t")) deleteLen = 1;
         else if (text.startsWith("    ")) deleteLen = 4;
-        else if (text.startsWith(" ")) deleteLen = currentIndent.length; // インデント全削除フォールバック
+        else if (text.startsWith(" ")) deleteLen = currentIndent.length;
 
         if (deleteLen > 0) {
             const changes = [
-                { from: line.from, to: line.from + deleteLen, insert: "" }, // インデント削除
-                { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker } // マーカー置換
+                { from: line.from, to: line.from + deleteLen, insert: "" },
+                { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length + 1, insert: newMarker }
             ];
             dispatch({ changes });
             return true;
@@ -556,7 +732,6 @@ const handleListDedent = (view) => {
     return indentLess(view);
 };
 
-// Obsidian風リスト操作キーマップ (カスタマイズ版)
 const obsidianLikeListKeymap = [
     {
         key: "Enter",
@@ -574,7 +749,6 @@ const obsidianLikeListKeymap = [
 
 // ========== ペースト処理（URL貼り付け時のモーダル表示） ==========
 function showPasteOptionModal(url, view) {
-    // 既存のモーダルがあれば削除
     const existingModal = document.querySelector('.modal-overlay');
     if (existingModal) existingModal.remove();
 
@@ -583,7 +757,7 @@ function showPasteOptionModal(url, view) {
 
     const content = document.createElement('div');
     content.className = 'modal-content';
-    content.style.width = '400px'; // 幅を少し広げる
+    content.style.width = '400px';
 
     const message = document.createElement('div');
     message.className = 'modal-message';
@@ -594,22 +768,18 @@ function showPasteOptionModal(url, view) {
     const buttons = document.createElement('div');
     buttons.className = 'modal-buttons';
 
-    // キャンセルボタン
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'modal-btn';
     cancelBtn.textContent = 'キャンセル';
 
-    // 通常のURLとして貼り付けボタン
     const plainBtn = document.createElement('button');
     plainBtn.className = 'modal-btn';
     plainBtn.textContent = '通常のURL';
 
-    // リンク
     const linkBtn = document.createElement('button');
     linkBtn.className = 'modal-btn';
     linkBtn.textContent = 'リンク';
 
-    // ブックマーク - Primary
     const bookmarkBtn = document.createElement('button');
     bookmarkBtn.className = 'modal-btn primary';
     bookmarkBtn.textContent = 'ブックマーク';
@@ -632,51 +802,44 @@ function showPasteOptionModal(url, view) {
     cancelBtn.addEventListener('click', closeModal);
 
     plainBtn.addEventListener('click', () => {
-        // カーソル位置にURLを挿入
         view.dispatch(view.state.replaceSelection(url));
         closeModal();
     });
 
     linkBtn.addEventListener('click', async () => {
-        // UIフィードバック: 取得中...
         linkBtn.disabled = true;
         linkBtn.textContent = '取得中...';
-        
+
         try {
             let title = url;
             if (window.electronAPI && window.electronAPI.fetchUrlTitle) {
                 title = await window.electronAPI.fetchUrlTitle(url);
             }
-            // リンク形式で挿入 [Title](URL)
             view.dispatch(view.state.replaceSelection(`[${title}](${url})`));
             showNotification('リンクを作成しました', 'success');
         } catch (e) {
             console.error('Failed to fetch title', e);
-            // 失敗時はURLをタイトルとして挿入
             view.dispatch(view.state.replaceSelection(`[${url}](${url})`));
             showNotification('タイトルの取得に失敗しました', 'error');
         }
         closeModal();
     });
 
-    // ブックマーク: @card を付けて挿入 (プラグインがこれを検知してカード化する)
     bookmarkBtn.addEventListener('click', () => {
         const state = view.state;
         const doc = state.doc;
         const selection = state.selection.main;
-        
-        // 前後の改行判定
+
         const hasNewlineBefore = selection.from === 0 || doc.sliceString(selection.from - 1, selection.from) === '\n';
         const hasNewlineAfter = selection.to === doc.length || doc.sliceString(selection.to, selection.to + 1) === '\n';
-        
-        // @card 識別子を付与
+
         let insertText = `@card ${url}`;
-        
+
         if (!hasNewlineBefore) insertText = '\n' + insertText;
         if (!hasNewlineAfter) insertText = insertText + '\n';
-        
+
         view.dispatch(view.state.replaceSelection(insertText));
-        
+
         showNotification('ブックマークを作成しました', 'success');
         closeModal();
     });
@@ -689,7 +852,6 @@ function showPasteOptionModal(url, view) {
 const pasteHandler = EditorView.domEventHandlers({
     paste(event, view) {
         const text = event.clipboardData.getData("text/plain");
-        // 簡易的なURLチェック (http/httpsで始まり、空白を含まない)
         const urlRegex = /^(http|https):\/\/[^ "]+$/;
 
         if (urlRegex.test(text)) {
@@ -701,9 +863,226 @@ const pasteHandler = EditorView.domEventHandlers({
     }
 });
 
-function initEditor() {
-    if (globalEditorView) return;
+// ========== 検索ウィジェット管理 ==========
+let searchState = {
+    query: "",
+    replace: "",
+    caseSensitive: false,
+    regexp: false,
+    wholeWord: false
+};
 
+let searchWidgetControl = null;
+
+function setupSearchWidget(view) {
+    const widget = document.getElementById('custom-search-widget');
+    const searchInput = document.getElementById('search-input');
+    const replaceInput = document.getElementById('replace-input');
+    const replaceRow = document.getElementById('replace-row');
+    const searchCount = document.getElementById('search-count');
+
+    // Toggle Buttons
+    const btnToggleReplace = document.getElementById('search-toggle-replace');
+    const btnCase = document.getElementById('opt-case');
+    const btnWord = document.getElementById('opt-word');
+    const btnRegex = document.getElementById('opt-regex');
+
+    // Action Buttons
+    const btnPrev = document.getElementById('search-prev');
+    const btnNext = document.getElementById('search-next');
+    const btnCloseSearch = document.getElementById('search-close');
+    const btnReplace = document.getElementById('replace-btn');
+    const btnReplaceAll = document.getElementById('replace-all-btn');
+
+    if (!widget) return;
+
+    // デバウンス用のタイマー
+    let debounceTimer = null;
+    let lastQueryString = ""; // 最後に実行したクエリを保存
+
+    const performSearch = () => {
+        // 空クエリの場合は検索状態をクリアして終了
+        if (!searchInput.value) {
+            view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "", replace: "" })) });
+            searchCount.textContent = "No results";
+            lastQueryString = "";
+            return;
+        }
+
+        try {
+            // 現在の入力値を保存
+            lastQueryString = searchInput.value;
+
+            const query = new SearchQuery({
+                search: searchInput.value,
+                caseSensitive: searchState.caseSensitive,
+                regexp: searchState.regexp,
+                wholeWord: searchState.wholeWord,
+                replace: replaceInput.value
+            });
+
+            // CodeMirrorに検索クエリをセット（ハイライト更新）
+            view.dispatch({ effects: setSearchQuery.of(query) });
+
+            // 件数カウント (負荷対策: 上限1000件で打ち切り)
+            let count = 0;
+            const cursor = query.getCursor(view.state);
+            // 無限ループ防止のため最大1000件まで
+            const MAX_SEARCH_COUNT = 1000;
+
+            // next()の結果オブジェクトを確認してループ
+            let item = cursor.next();
+            while (!item.done) {
+                count++;
+                if (count >= MAX_SEARCH_COUNT) {
+                    break;
+                }
+                item = cursor.next();
+            }
+
+            if (count > 0) {
+                searchCount.textContent = count >= MAX_SEARCH_COUNT ? "1000+" : `${count} results`;
+            } else {
+                searchCount.textContent = "No results";
+            }
+        } catch (e) {
+            // 正規表現エラーなどはここでキャッチ
+            console.warn("Search Error:", e);
+            searchCount.textContent = "Invalid Regex";
+        }
+    };
+
+    const updateSearch = () => {
+        // 入力ごとの即時実行を防ぐ（デバウンス）
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(performSearch, 300); // 300ms待機
+    };
+
+    // Event Listeners
+    searchInput.addEventListener('input', updateSearch);
+    replaceInput.addEventListener('input', updateSearch);
+
+    // Options
+    const toggleOption = (btn, key) => {
+        searchState[key] = !searchState[key];
+        btn.classList.toggle('active', searchState[key]);
+        performSearch(); // オプション変更は即時実行
+    };
+
+    btnCase.addEventListener('click', () => toggleOption(btnCase, 'caseSensitive'));
+    btnWord.addEventListener('click', () => toggleOption(btnWord, 'wholeWord'));
+    btnRegex.addEventListener('click', () => toggleOption(btnRegex, 'regexp'));
+
+    // Navigation
+    btnNext.addEventListener('click', () => {
+        // 現在のクエリが古い場合のみ実行
+        if (searchInput.value !== lastQueryString) {
+            performSearch();
+        }
+        findNext(view);
+        view.focus();
+    });
+    btnPrev.addEventListener('click', () => {
+        if (searchInput.value !== lastQueryString) {
+            performSearch();
+        }
+        findPrevious(view);
+        view.focus();
+    });
+
+    // Replace functions
+    const executeReplace = (all = false) => {
+        performSearch(); // 置換前に最新のクエリ状態を保証
+        if (all) replaceAll(view);
+        else replaceNext(view);
+    };
+
+    btnReplace.addEventListener('click', () => executeReplace(false));
+    btnReplaceAll.addEventListener('click', () => executeReplace(true));
+
+    btnToggleReplace.addEventListener('click', () => {
+        const isHidden = replaceRow.classList.contains('hidden');
+        if (isHidden) {
+            replaceRow.classList.remove('hidden');
+            btnToggleReplace.classList.add('expanded');
+        } else {
+            replaceRow.classList.add('hidden');
+            btnToggleReplace.classList.remove('expanded');
+        }
+    });
+
+    const closeWidget = () => {
+        widget.classList.add('hidden');
+        view.focus();
+    };
+    btnCloseSearch.addEventListener('click', closeWidget);
+
+    // キーボード操作
+    const handleKeydown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+
+            // Enterキーが押された際、検索クエリが未反映なら実行する
+            if (searchInput.value !== lastQueryString) {
+                performSearch();
+            }
+
+            // その後で移動処理
+            if (e.shiftKey) findPrevious(view);
+            else if (e.ctrlKey && e.altKey) replaceAll(view);
+            else findNext(view);
+
+            // Note: Enterキーの場合は入力欄にフォーカスを残したままにする
+            // drawSelection拡張により、フォーカスがなくても選択範囲（青色）が表示されるようになる
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeWidget();
+        }
+    };
+    searchInput.addEventListener('keydown', handleKeydown);
+    replaceInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+            e.preventDefault();
+            if (searchInput.value !== lastQueryString) {
+                performSearch();
+            }
+            replaceNext(view);
+        } else {
+            handleKeydown(e);
+        }
+    });
+
+    return {
+        open: () => {
+            widget.classList.remove('hidden');
+            searchInput.select();
+
+            // 選択テキストがあれば検索ワードにセット
+            const { from, to } = view.state.selection.main;
+            if (from !== to) {
+                const text = view.state.sliceDoc(from, to);
+                searchInput.value = text;
+                performSearch();
+            }
+        },
+        toggleReplace: () => {
+            widget.classList.remove('hidden');
+            replaceRow.classList.remove('hidden');
+            btnToggleReplace.classList.add('expanded');
+
+            const { from, to } = view.state.selection.main;
+            if (from !== to) {
+                const text = view.state.sliceDoc(from, to);
+                searchInput.value = text;
+                performSearch();
+            }
+            replaceInput.focus();
+        }
+    };
+}
+
+// ========== Editor State Helper (Fix for Issue 2) ==========
+function createEditorState(content, filePath) {
     const initialTheme = appSettings.theme === 'dark' ? oneDark : [];
     const initialStyle = EditorView.theme({
         ".cm-content": {
@@ -718,43 +1097,73 @@ function initEditor() {
         ".cm-scroller": { fontFamily: 'inherit' }
     });
 
-    const state = EditorState.create({
-        doc: startDoc,
+    return EditorState.create({
+        doc: content,
         extensions: [
+            EditorState.phrases.of({ "Find": "検索...", }),
             themeCompartment.of(initialTheme),
             editorStyleCompartment.of(initialStyle),
             indentUnit.of("    "),
-            // カスタムキーマップを最高優先度で登録
             Prec.highest(keymap.of(obsidianLikeListKeymap)),
-            // ペーストイベントハンドラを追加
             pasteHandler,
             history(),
-            keymap.of([
-                ...defaultKeymap,
-                ...historyKeymap,
-                { key: "Mod-s", run: () => { saveCurrentFile(false); return true; } }
-            ]),
+            search(),
+            drawSelection(),
+            dropCursor(),
+            Prec.highest(keymap.of([
+                { key: "Mod-f", run: () => { searchWidgetControl?.open(); return true; } },
+                { key: "Mod-h", run: () => { searchWidgetControl?.toggleReplace(); return true; } },
+                {
+                    key: "Escape", run: (view) => {
+                        const widget = document.getElementById('custom-search-widget');
+                        if (widget && !widget.classList.contains('hidden')) {
+                            widget.classList.add('hidden');
+                            view.focus();
+                            return true;
+                        }
+                        return false;
+                    }
+                },
+                { key: "Mod-s", run: () => { saveCurrentFile(false); return true; } },
+                { key: "Mod-b", run: (view) => { toggleMark(view, "**"); return true; } },
+                { key: "Mod-i", run: (view) => { toggleMark(view, "*"); return true; } },
+                { key: "Mod-Shift-s", run: (view) => { toggleMark(view, "~~"); return true; } },
+                { key: "Mod-1", run: (view) => { toggleLinePrefix(view, "#"); return true; } },
+                { key: "Mod-2", run: (view) => { toggleLinePrefix(view, "##"); return true; } },
+                { key: "Mod-3", run: (view) => { toggleLinePrefix(view, "###"); return true; } },
+                { key: "Mod-4", run: (view) => { toggleLinePrefix(view, "####"); return true; } },
+                { key: "Mod-5", run: (view) => { toggleLinePrefix(view, "#####"); return true; } },
+                { key: "Mod-6", run: (view) => { toggleLinePrefix(view, "######"); return true; } },
+            ])),
+            keymap.of([...defaultKeymap, ...historyKeymap]),
             syntaxHighlighting(defaultHighlightStyle),
-            markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
-            livePreviewPlugin,
+            languageCompartment.of(getLanguageExtensions(filePath)),
             EditorView.lineWrapping,
             highlightActiveLine(),
             lineNumbers(),
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
-                    // 変更がプログラムによるもの（ExternalChange）か判定
                     const isExternal = update.transactions.some(tr => tr.annotation(ExternalChange));
-                    // 外部変更（読み込み時など）の場合は未保存マークを付けない (false)
                     onEditorInput(!isExternal);
                 }
             })
-        ],
+        ]
     });
+}
+
+function initEditor() {
+    if (globalEditorView) return;
+
+    // 初期状態（README相当）でステートを作成
+    const state = createEditorState(startDoc, 'default.md');
 
     globalEditorView = new EditorView({
         state: state,
         parent: editorContainer,
     });
+
+    // カスタム検索ウィジェットのセットアップ
+    searchWidgetControl = setupSearchWidget(globalEditorView);
 }
 
 // ========== エディタ操作ヘルパー ==========
@@ -763,34 +1172,27 @@ function toggleLinePrefix(view, prefix) {
     const { state, dispatch } = view;
     const { from } = state.selection.main;
     const line = state.doc.lineAt(from);
-    const match = line.text.match(/^\s*(#+\s*|>\s*)/); // 引用(>)も対象に追加
+    const match = line.text.match(/^\s*(#+\s*|>\s*)/);
 
     let changes;
     let newCursorPos;
 
-    // すでに同じプレフィックスがある場合は削除、ない場合は追加
     if (match && match[1].trim() === prefix.trim()) {
         const matchLen = match[0].length;
         changes = { from: line.from, to: line.from + matchLen, insert: "" };
-        // 変更後の行末 = 元の行末 - 削除した文字数
         newCursorPos = line.to - matchLen;
     } else {
         const insertText = prefix.endsWith(' ') ? prefix : prefix + ' ';
         if (match) {
-            // 置換
             const matchLen = match[0].length;
             changes = { from: line.from, to: line.from + matchLen, insert: insertText };
-            // 変更後の行末 = 元の行末 - 削除文字数 + 挿入文字数
             newCursorPos = line.to - matchLen + insertText.length;
         } else {
-            // 追加
             changes = { from: line.from, to: line.from, insert: insertText };
-            // 変更後の行末 = 元の行末 + 挿入文字数
             newCursorPos = line.to + insertText.length;
         }
     }
 
-    // 変更を適用し、カーソルを「変更後の行の末尾」に移動させる
     dispatch({
         changes: changes,
         selection: { anchor: newCursorPos, head: newCursorPos }
@@ -806,7 +1208,6 @@ function toggleMark(view, mark) {
     const extendedFrom = Math.max(0, from - mark.length);
     const extendedTo = Math.min(state.doc.length, to + mark.length);
 
-    // 解除ロジック
     if (extendedFrom >= 0 && extendedTo <= state.doc.length) {
         const surroundingText = state.sliceDoc(extendedFrom, extendedTo);
         if (surroundingText.startsWith(mark) && surroundingText.endsWith(mark)) {
@@ -818,14 +1219,30 @@ function toggleMark(view, mark) {
         }
     }
 
-    // 適用ロジック
     dispatch({
         changes: { from: from, to: to, insert: `${mark}${selectedText}${mark}` },
-        // 選択範囲なしの場合: マーカーの中間にカーソルを置く
-        // 選択範囲ありの場合: マーカーの後ろにカーソルを置く
         selection: empty
             ? { anchor: from + mark.length, head: from + mark.length }
             : { anchor: to + mark.length * 2, head: to + mark.length * 2 }
+    });
+    view.focus();
+}
+
+function toggleHighlightColor(view, color) {
+    if (!view) return;
+    const { state, dispatch } = view;
+    const { from, to } = state.selection.main;
+    const selectedText = state.sliceDoc(from, to);
+
+    // HTMLタグの形式
+    const openTag = `<span style="background-color: ${color}">`;
+    const closeTag = `</span>`;
+
+    const insertText = `${openTag}${selectedText}${closeTag}`;
+
+    dispatch({
+        changes: { from, to, insert: insertText },
+        selection: { anchor: from + insertText.length, head: from + insertText.length }
     });
     view.focus();
 }
@@ -837,20 +1254,20 @@ function toggleList(view, type) {
     const startLine = state.doc.lineAt(from);
     const endLine = state.doc.lineAt(to);
     let changes = [];
-    let totalChangeLength = 0; // 累積文字数変化量
+    let totalChangeLength = 0;
 
     for (let i = startLine.number; i <= endLine.number; i++) {
         const line = state.doc.line(i);
         const text = line.text;
         const bulletMatch = text.match(/^(\s*)([-*+] )\s*/);
-        const orderedMatch = text.match(/^(\s*)(\d+(?:-\d+)*\. )\s*/); // ハイフン付き番号も考慮
+        const orderedMatch = text.match(/^(\s*)(\d+(?:-\d+)*\. )\s*/);
         const checkMatch = text.match(/^(\s*)(- \[[ x]\] )\s*/);
 
         let diff = 0;
 
         if (type === 'ul') {
             if (bulletMatch) {
-                const delLen = bulletMatch[0].length - bulletMatch[1].length; // インデント以外の部分の長さ
+                const delLen = bulletMatch[0].length - bulletMatch[1].length;
                 changes.push({ from: line.from + bulletMatch[1].length, to: line.from + bulletMatch[0].length, insert: "" });
                 diff = -delLen;
             } else {
@@ -879,7 +1296,6 @@ function toggleList(view, type) {
         totalChangeLength += diff;
     }
 
-    // カーソルを最終行の末尾に移動
     const newHead = endLine.to + totalChangeLength;
 
     dispatch({
@@ -905,10 +1321,32 @@ function insertImage(view) {
     const { from, to } = state.selection.main;
     const selectedText = state.sliceDoc(from, to);
     const text = selectedText || "Image";
-    // 画像記法 ![alt](url) を挿入し、url部分を選択状態にする
     dispatch({
         changes: { from: from, to: to, insert: `![${text}](url)` },
         selection: { anchor: from + 2 + text.length + 2, head: from + 2 + text.length + 5 }
+    });
+    view.focus();
+}
+
+function insertTable(view) {
+    if (!view) return;
+    const { state, dispatch } = view;
+    const { from, to } = state.selection.main;
+
+    const table =
+        `| Col 1 | Col 2 | Col 3 |
+| :--- | :--- | :--- |
+|  |  |  |
+|  |  |  |
+`;
+
+    const lineStart = state.doc.lineAt(from).from;
+    const needsNewline = from !== lineStart;
+    const insertText = (needsNewline ? "\n" : "") + table;
+
+    dispatch({
+        changes: { from: from, to: to, insert: insertText },
+        selection: { anchor: from + (needsNewline ? 1 : 0) + 2 }
     });
     view.focus();
 }
@@ -918,9 +1356,7 @@ function insertHorizontalRule(view) {
     const { state, dispatch } = view;
     const { from } = state.selection.main;
     const line = state.doc.lineAt(from);
-    // 現在行の最後に改行して水平線を挿入
     const insert = `\n---\n`;
-    // 挿入後のカーソル位置（水平線の次の行）
     const newPos = line.to + insert.length;
     dispatch({
         changes: { from: line.to, insert: insert },
@@ -929,17 +1365,15 @@ function insertHorizontalRule(view) {
     view.focus();
 }
 
-// ★追加: 改ページを挿入する関数
 function insertPageBreak(view) {
     if (!view) return;
     const { state, dispatch } = view;
     const { from } = state.selection.main;
     const line = state.doc.lineAt(from);
-    
-    // 現在行の最後に改行して改ページ用タグを挿入
+
     const insert = `\n<div class="page-break"></div>\n`;
     const newPos = line.to + insert.length;
-    
+
     dispatch({
         changes: { from: line.to, insert: insert },
         selection: { anchor: newPos, head: newPos }
@@ -957,10 +1391,6 @@ function insertCodeBlock(view) {
 
     dispatch({
         changes: { from: from, to: to, insert: insert },
-        // コードブロック内（1行目の `` ` の次）にカーソルを置くのが親切だが、
-        // 「後ろから始めてほしい」という要望なので、ブロックの後に置くか、
-        // 少なくともバッククォートの前（行頭）には置かない。
-        // ここではブロックの中（書き始めの位置）に置く。
         selection: { anchor: from + 4, head: from + 4 }
     });
     view.focus();
@@ -985,13 +1415,16 @@ document.querySelectorAll('.dropdown-item[data-action^="h"]').forEach(item => {
 document.getElementById('bold-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "**"));
 document.getElementById('italic-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "*"));
 document.getElementById('strike-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "~~"));
+document.getElementById('highlight-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "=="));
+
 document.getElementById('link-btn')?.addEventListener('click', () => insertLink(globalEditorView));
 document.getElementById('image-btn')?.addEventListener('click', () => insertImage(globalEditorView));
+document.getElementById('btn-table')?.addEventListener('click', () => insertTable(globalEditorView));
+
 document.getElementById('code-btn')?.addEventListener('click', () => insertCodeBlock(globalEditorView));
-document.getElementById('inline-code-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "`")); // インラインコード追加
+document.getElementById('inline-code-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "`"));
 document.getElementById('quote-btn')?.addEventListener('click', () => toggleLinePrefix(globalEditorView, ">"));
 document.getElementById('hr-btn')?.addEventListener('click', () => insertHorizontalRule(globalEditorView));
-// ★追加: 改ページボタンのイベントリスナー
 document.getElementById('btn-page-break')?.addEventListener('click', () => insertPageBreak(globalEditorView));
 
 if (btnBulletList) btnBulletList.addEventListener('click', () => toggleList(globalEditorView, 'ul'));
@@ -1005,7 +1438,6 @@ document.getElementById('btn-close-file-toolbar')?.addEventListener('click', () 
     }
 });
 
-// ★変更: PDFエクスポートボタンのイベントリスナー (alert -> showNotification)
 const btnExportPdf = document.getElementById('btn-export-pdf');
 if (btnExportPdf) {
     btnExportPdf.addEventListener('click', async () => {
@@ -1018,7 +1450,9 @@ if (btnExportPdf) {
         }
 
         try {
-            const htmlContent = marked.parse(markdownContent);
+            const processedMarkdown = await processMarkdownForExport(markdownContent);
+            const htmlContent = marked.parse(processedMarkdown, { breaks: true, gfm: true });
+
             if (typeof window.electronAPI?.exportPdf === 'function') {
                 const result = await window.electronAPI.exportPdf(htmlContent);
                 if (result.success) {
@@ -1043,38 +1477,30 @@ const toolbarOverflowMenu = document.getElementById('toolbar-overflow-menu');
 
 let originalToolbarItems = [];
 
-// 初期化時に元のアイテムリストを保存（Moreボタン以外）
 function initToolbarOverflow() {
     if (!toolbarLeft || !toolbarMoreBtn) return;
 
-    // Moreボタン以外の要素を配列として保存
     originalToolbarItems = Array.from(toolbarLeft.children).filter(el => el !== toolbarMoreBtn);
 
-    // ResizeObserverでツールバーのサイズ変更を監視
     const resizeObserver = new ResizeObserver(() => {
-        // デバウンス（setTimeout）を削除し、アニメーションフレームで即座に処理
         requestAnimationFrame(() => {
             handleToolbarResize();
         });
     });
     resizeObserver.observe(toolbarLeft);
 
-    // Moreボタンのクリックイベント
     toolbarMoreBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         toolbarOverflowMenu.classList.toggle('hidden');
 
-        // メニューの位置調整 (ボタンの下、右端合わせ)
         const rect = toolbarMoreBtn.getBoundingClientRect();
         const toolbarRect = toolbarLeft.parentElement.getBoundingClientRect();
 
-        // 右端を合わせる
         const rightOffset = toolbarRect.right - rect.right;
         toolbarOverflowMenu.style.right = rightOffset + 'px';
         toolbarOverflowMenu.style.left = 'auto';
     });
 
-    // メニュー外クリックで閉じる
     document.addEventListener('click', (e) => {
         if (!toolbarOverflowMenu.contains(e.target) && e.target !== toolbarMoreBtn) {
             toolbarOverflowMenu.classList.add('hidden');
@@ -1085,16 +1511,13 @@ function initToolbarOverflow() {
 function handleToolbarResize() {
     if (!toolbarLeft || originalToolbarItems.length === 0) return;
 
-    // 一旦すべてのアイテムをツールバーに戻す（これが重い場合は最適化が必要だが、ボタン数なら許容範囲）
     const currentChildren = Array.from(toolbarLeft.children);
     const itemsInMenu = Array.from(toolbarOverflowMenu.children);
 
-    // メニューにあるアイテムをツールバーに戻す
     itemsInMenu.forEach(item => {
         toolbarLeft.insertBefore(item, toolbarMoreBtn);
     });
 
-    // 順番を元に戻す（これがないと並び順が狂う）
     originalToolbarItems.forEach(item => {
         if (item.parentElement !== toolbarLeft) {
             toolbarLeft.insertBefore(item, toolbarMoreBtn);
@@ -1103,23 +1526,16 @@ function handleToolbarResize() {
 
     toolbarMoreBtn.classList.add('hidden');
 
-    // コンテナの利用可能な幅を取得
     const containerWidth = toolbarLeft.clientWidth;
-
-    // Moreボタンの幅（スタイルから推測、または固定値）
     const moreBtnWidth = 32;
 
     let currentWidth = 0;
     let overflowStartIndex = -1;
 
-    // 各アイテムの幅を積算し、あふれる位置を特定
     for (let i = 0; i < originalToolbarItems.length; i++) {
         const item = originalToolbarItems[i];
+        const itemWidth = item.offsetWidth + 4;
 
-        // offsetWidthを使って高速化（getBoundingClientRectより軽い）
-        const itemWidth = item.offsetWidth + 4; // gap考慮 (CSSのgap: 4pxと一致させる)
-
-        // 次のアイテムを追加したときに、Moreボタンを表示するスペースも含めて収まるか確認
         if (currentWidth + itemWidth > containerWidth - moreBtnWidth - 10) {
             overflowStartIndex = i;
             break;
@@ -1127,11 +1543,9 @@ function handleToolbarResize() {
         currentWidth += itemWidth;
     }
 
-    // あふれるアイテムがある場合、メニューに移動
     if (overflowStartIndex !== -1) {
         toolbarMoreBtn.classList.remove('hidden');
 
-        // あふれたアイテムをメニューに移動
         const fragment = document.createDocumentFragment();
         for (let i = overflowStartIndex; i < originalToolbarItems.length; i++) {
             fragment.appendChild(originalToolbarItems[i]);
@@ -1141,12 +1555,7 @@ function handleToolbarResize() {
 }
 
 // ========== 基本機能 ==========
-/**
- * エディタの内容が変更されたときに呼ばれる処理
- * @param {boolean} markAsDirty - 未保存マーク（●）をつけるかどうか。ファイル読み込み時はfalseにする。
- */
 function onEditorInput(markAsDirty = true) {
-    // 未保存マークの処理（markAsDirtyがtrueの場合のみ実行）
     if (markAsDirty && currentFilePath && currentFilePath !== 'README.md') {
         fileModificationState.set(currentFilePath, true);
         const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
@@ -1155,14 +1564,12 @@ function onEditorInput(markAsDirty = true) {
         }
     }
 
-    // アウトライン更新（デバウンス）
     if (window.outlineUpdateTimeout) clearTimeout(window.outlineUpdateTimeout);
     window.outlineUpdateTimeout = setTimeout(() => {
         updateOutline();
         syncOutlineWithCursor();
     }, 500);
 
-    // PDFプレビュー更新
     if (isPdfPreviewVisible) {
         if (window.pdfUpdateTimeout) clearTimeout(window.pdfUpdateTimeout);
         window.pdfUpdateTimeout = setTimeout(() => {
@@ -1209,11 +1616,9 @@ async function initializeTerminal() {
             e.stopPropagation();
             const rect = newToggle.getBoundingClientRect();
             if (shellDropdown) {
-                // 上下配置に関わらず、常にボタンの下（または上）にドロップダウンを表示し、右端を合わせる
                 shellDropdown.style.top = `${rect.bottom + 2}px`;
                 shellDropdown.style.bottom = 'auto';
 
-                // 画面右端からの距離を計算して、ドロップダウンの右端をボタンの右側に合わせる
                 const rightGap = window.innerWidth - rect.right;
                 shellDropdown.style.right = `${Math.max(0, rightGap)}px`;
                 shellDropdown.style.left = 'auto';
@@ -1459,12 +1864,10 @@ function updateTerminalVisibility() {
     const showTerminalRight = isTerminalVisible && isPositionRight;
     const needRightPane = (showPdf || showTerminalRight) && isRightActivityBarVisible;
 
-    // 右アクティビティバーの幅を計算（表示なら幅分、非表示なら0）
     const barWidth = isRightActivityBarVisible ? rightActivityBarWidth : 0;
-    // CSS変数にセットして、styles.css側で利用できるようにする
-    document.documentElement.style.setProperty('--right-activity-offset', barWidth + 'px');
+    document.documentElement.style.setProperty('--right-activity-offset,', barWidth + 'px');
 
-    // レイアウト変更開始フラグを立てる
+    // レイアウト変更中のフラグは一時的に立てるが、CSSトランジション削除に伴い即座に解除してOK
     document.body.classList.add('is-layout-changing');
 
     if (needRightPane) {
@@ -1505,7 +1908,6 @@ function updateTerminalVisibility() {
             resizerBottom.style.top = `calc(100vh - 200px - 24px)`;
         }
 
-        // メインコンテンツ全体ではなく、センターペイン（エディタ部分）のみ底上げする
         const currentHeight = bottomPane.style.height || '200px';
         const heightVal = parseInt(currentHeight);
 
@@ -1515,7 +1917,6 @@ function updateTerminalVisibility() {
         bottomPane.classList.add('hidden');
         if (resizerBottom) resizerBottom.classList.add('hidden');
 
-        // ステータスバーがFlexboxに入ったため、通常時は0pxでOK
         if (!isTerminalVisible || isPositionRight) {
             centerPane.style.marginBottom = '0px';
         }
@@ -1551,35 +1952,17 @@ function updateTerminalVisibility() {
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
 
-    // アニメーション終了後にレイアウト計算を行うためのリスナー設定
-    const transitionTarget = mainContent;
+    // CSSのトランジションを削除したため、即座に完了処理を行う
+    document.body.classList.remove('is-layout-changing');
 
-    const handleTransitionEnd = (e) => {
-        // アニメーションが完了したら
-        if ((e.target === mainContent && e.propertyName === 'margin-right') ||
-            (e.target === centerPane && e.propertyName === 'margin-bottom')) {
-
-            document.body.classList.remove('is-layout-changing');
-
-            if (isTerminalVisible && activeTerminalId) {
-                fitTerminal(activeTerminalId);
-                const t = terminals.get(activeTerminalId);
-                if (t) t.xterm.focus();
-            }
+    // レイアウト変更後にターミナルをリサイズする（少し待つ必要はほぼないが念のためRAF）
+    requestAnimationFrame(() => {
+        if (isTerminalVisible && activeTerminalId) {
+            fitTerminal(activeTerminalId);
+            const t = terminals.get(activeTerminalId);
+            if (t) t.xterm.focus();
         }
-    };
-
-    // 毎回追加削除するのは面倒なので、transitionendは一度だけ発火するように調整するか、フォールバックに頼る
-    mainContent.addEventListener('transitionend', handleTransitionEnd, { once: true });
-    centerPane.addEventListener('transitionend', handleTransitionEnd, { once: true });
-
-    // フォールバック: トランジションが発生しない場合やイベントが発火しない場合のため
-    setTimeout(() => {
-        if (document.body.classList.contains('is-layout-changing')) {
-            document.body.classList.remove('is-layout-changing');
-            if (isTerminalVisible && activeTerminalId) fitTerminal(activeTerminalId);
-        }
-    }, 300); // CSSのtransition時間より少し長く
+    });
 
     if (isTerminalVisible) {
         if (terminals.size === 0) {
@@ -1590,7 +1973,6 @@ function updateTerminalVisibility() {
             if (term && term.element.parentElement !== targetContainer) {
                 targetContainer.appendChild(term.element);
             }
-            // fitTerminalはtransitionend後に呼ばれるのでここでは最低限の表示のみ
         }
     }
 }
@@ -1600,10 +1982,12 @@ function switchHeaderButtons(targetId) {
     const headerButtonsFiles = document.getElementById('header-buttons-files');
     const headerButtonsGit = document.getElementById('header-buttons-git');
     const headerButtonsOutline = document.getElementById('header-buttons-outline');
+    const headerButtonsRecent = document.getElementById('header-buttons-recent');
 
     if (headerButtonsFiles) headerButtonsFiles.classList.add('content-hidden');
     if (headerButtonsGit) headerButtonsGit.classList.add('content-hidden');
     if (headerButtonsOutline) headerButtonsOutline.classList.add('content-hidden');
+    if (headerButtonsRecent) headerButtonsRecent.classList.add('content-hidden');
 
     if (targetId === 'files' && headerButtonsFiles) {
         headerButtonsFiles.classList.remove('content-hidden');
@@ -1611,12 +1995,13 @@ function switchHeaderButtons(targetId) {
         headerButtonsGit.classList.remove('content-hidden');
     } else if (targetId === 'outline' && headerButtonsOutline) {
         headerButtonsOutline.classList.remove('content-hidden');
+    } else if (targetId === 'recent' && headerButtonsRecent) {
+        headerButtonsRecent.classList.remove('content-hidden');
     }
 }
 
 // ========== イベントリスナー設定 ==========
 
-// ターミナル開閉
 if (btnTerminalRight) {
     btnTerminalRight.addEventListener('click', () => {
         if (isTerminalVisible) {
@@ -1629,7 +2014,6 @@ if (btnTerminalRight) {
     });
 }
 
-// ターミナル位置切り替え
 if (btnTogglePosition) {
     btnTogglePosition.addEventListener('click', () => {
         isPositionRight = !isPositionRight;
@@ -1639,12 +2023,10 @@ if (btnTogglePosition) {
     });
 }
 
-// 左ペイン表示/非表示
 if (btnToggleLeftPane) {
     btnToggleLeftPane.addEventListener('click', () => {
         const willHide = !leftPane.classList.contains('hidden');
 
-        // アニメーション開始フラグ
         document.body.classList.add('is-layout-changing');
 
         leftPane.classList.toggle('hidden', willHide);
@@ -1660,16 +2042,14 @@ if (btnToggleLeftPane) {
             }
         }, { once: true });
 
-        // フォールバック
         setTimeout(() => {
             document.body.classList.remove('is-layout-changing');
         }, 300);
     });
 }
 
-// 左ペイン内容切り替え
 topSideSwitchButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
         const targetId = btn.dataset.target;
         if (!targetId) return;
 
@@ -1698,13 +2078,21 @@ topSideSwitchButtons.forEach(btn => {
                 updateOutline();
                 syncOutlineWithCursor();
             }
+            // Gitタブ切り替え時の処理
+            if (targetId === 'git') {
+                refreshGitStatus();
+            }
+            // Recentタブ切り替え時の処理
+            if (targetId === 'recent') {
+                await loadRecentFiles(); // メインプロセスから最新の状態（削除済みを除外）を再取得
+                renderRecentFiles();
+            }
         }
 
         switchHeaderButtons(targetId);
     });
 });
 
-// Zenモード
 if (btnZen) {
     btnZen.addEventListener('click', () => {
         const enteringZenMode = !ideContainer.classList.contains('zen-mode-active');
@@ -1721,7 +2109,6 @@ if (btnZen) {
     });
 }
 
-// PDFプレビュー
 if (btnPdfPreview) {
     btnPdfPreview.addEventListener('click', () => {
         togglePdfPreview();
@@ -1753,7 +2140,8 @@ async function generatePdfPreview() {
             return;
         }
 
-        const htmlContent = marked.parse(markdownContent);
+        const processedMarkdown = await processMarkdownForExport(markdownContent);
+        const htmlContent = marked.parse(processedMarkdown, { breaks: true, gfm: true });
 
         if (typeof window.electronAPI?.generatePdf === 'function') {
             await renderHtmlToPdf(htmlContent);
@@ -1766,6 +2154,72 @@ async function generatePdfPreview() {
     } catch (error) {
         console.error('Failed to generate PDF preview:', error);
     }
+}
+
+async function processMarkdownForExport(markdown) {
+    let processed = markdown.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+
+    processed = processed.replace(/^(\s+)(\d+(?:-\d+)+\.)/gm, (match, indent, marker) => {
+        return '&nbsp;'.repeat(indent.length) + marker;
+    });
+
+    const bookmarkRegex = /^@card\s+(https?:\/\/[^\s]+)$/gm;
+    const matches = [...processed.matchAll(bookmarkRegex)];
+
+    if (matches.length === 0) return processed;
+
+    const replacements = await Promise.all(matches.map(async (match) => {
+        const url = match[1];
+        let data = null;
+
+        if (!window.pdfMetadataCache) window.pdfMetadataCache = new Map();
+
+        if (window.pdfMetadataCache.has(url)) {
+            data = window.pdfMetadataCache.get(url);
+        } else {
+            try {
+                const result = await window.electronAPI.fetchUrlMetadata(url);
+                if (result.success) {
+                    data = result.data;
+                    window.pdfMetadataCache.set(url, data);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        if (!data) {
+            return {
+                original: match[0],
+                replacement: `<div class="cm-bookmark-widget"><div class="cm-bookmark-content"><div class="cm-bookmark-title"><a href="${url}">${url}</a></div></div></div>`
+            };
+        }
+
+        const faviconUrl = `https://www.google.com/s2/favicons?domain=${data.domain}&sz=32`;
+
+        const html = `<a href="${data.url}" class="cm-bookmark-widget" target="_blank" rel="noopener noreferrer">
+    <div class="cm-bookmark-content">
+        <div class="cm-bookmark-title">${data.title}</div>
+        <div class="cm-bookmark-desc">${data.description}</div>
+        <div class="cm-bookmark-meta">
+            <img src="${faviconUrl}" class="cm-bookmark-favicon">
+            <span class="cm-bookmark-domain">${data.domain}</span>
+        </div>
+    </div>
+    ${data.image ? `<div class="cm-bookmark-cover"><img src="${data.image}" class="cm-bookmark-image"></div>` : ''}
+</a>`;
+
+        return {
+            original: match[0],
+            replacement: html
+        };
+    }));
+
+    for (const item of replacements) {
+        processed = processed.replaceAll(item.original, item.replacement);
+    }
+
+    return processed;
 }
 
 async function renderHtmlToPdf(htmlContent) {
@@ -1878,6 +2332,231 @@ async function renderPageToContainer(pageNumber, container) {
     }
 }
 
+// ========== Recent Files Logic ==========
+
+async function loadRecentFiles() {
+    try {
+        if (window.electronAPI && window.electronAPI.loadRecentFiles) {
+            recentFiles = await window.electronAPI.loadRecentFiles();
+        }
+    } catch (e) {
+        console.error("Failed to load recent files", e);
+    }
+}
+
+async function saveRecentFiles() {
+    try {
+        if (window.electronAPI && window.electronAPI.saveRecentFiles) {
+            await window.electronAPI.saveRecentFiles(recentFiles);
+        }
+    } catch (e) {
+        console.error("Failed to save recent files", e);
+    }
+}
+
+async function addToRecentFiles(filePath) {
+    if (!filePath || filePath === 'README.md') return;
+
+    const now = Date.now();
+    // 既存のエントリがあれば削除
+    recentFiles = recentFiles.filter(item => item.path !== filePath);
+
+    // 先頭に追加
+    recentFiles.unshift({
+        path: filePath,
+        lastOpened: now
+    });
+
+    // 最大50件に制限
+    if (recentFiles.length > 50) {
+        recentFiles = recentFiles.slice(0, 50);
+    }
+
+    await saveRecentFiles();
+
+    // Recentパネルが表示中なら更新
+    if (document.getElementById('content-recent') && !document.getElementById('content-recent').classList.contains('content-hidden')) {
+        renderRecentFiles();
+    }
+}
+
+function formatRecentTime(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'たった今';
+    if (diffMins < 60) return `${diffMins}分前`;
+    if (diffHours < 24) return `${diffHours}時間前`;
+    if (diffDays < 7) return `${diffDays}日前`;
+
+    return `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+}
+
+function renderRecentFiles() {
+    if (!recentFilesList) return;
+    recentFilesList.innerHTML = '';
+
+    // 現在のディレクトリ配下のファイルのみにフィルタリング
+    const filteredFiles = recentFiles.filter(item => {
+        if (!currentDirectoryPath) return true;
+        try {
+            // 現在のディレクトリからの相対パスを取得
+            const rel = path.relative(currentDirectoryPath, item.path);
+            // '..' で始まらず、かつ絶対パスでない（別のドライブ等でない）場合はフォルダ内とみなす
+            return !rel.startsWith('..') && !path.isAbsolute(rel);
+        } catch (e) {
+            return false;
+        }
+    });
+
+    if (filteredFiles.length === 0) {
+        recentFilesList.innerHTML = '<li style="padding: 10px; color: #888; font-size: 12px;">このフォルダの履歴はありません</li>';
+        return;
+    }
+
+    filteredFiles.forEach(item => {
+        const separator = item.path.includes('\\') ? '\\' : '/';
+        const fileName = item.path.split(separator).pop();
+
+        // フォルダ内での相対パスを表示用に計算
+        let displayPath = path.relative(currentDirectoryPath, item.path);
+        const dirPart = path.dirname(displayPath);
+
+        // 直下の場合は "./" 等はつけず、サブフォルダがある場合のみ表示
+        let displayDir = dirPart === '.' ? '' : dirPart + '/';
+
+        const li = document.createElement('li');
+        li.className = 'recent-file-item';
+        li.title = item.path; // ホバーでフルパス表示
+        li.innerHTML = `
+            <div class="recent-file-name">${fileName}</div>
+            <div class="recent-file-info">
+                <span class="recent-file-path">${displayDir}</span>
+                <span class="recent-file-time">${formatRecentTime(item.lastOpened)}</span>
+            </div>
+        `;
+
+        li.addEventListener('click', () => {
+            openFile(item.path, fileName);
+        });
+
+        recentFilesList.appendChild(li);
+    });
+}
+
+function updateRecentFilesAfterRename(oldPath, newPath) {
+    let changed = false;
+    recentFiles = recentFiles.map(file => {
+        if (file.path === oldPath) {
+            changed = true;
+            return { ...file, path: newPath };
+        }
+        return file;
+    });
+    if (changed) {
+        saveRecentFiles();
+        if (document.getElementById('content-recent') && !document.getElementById('content-recent').classList.contains('content-hidden')) {
+            renderRecentFiles();
+        }
+    }
+}
+
+if (btnRecentClear) {
+    btnRecentClear.addEventListener('click', () => {
+        showClearHistoryModal();
+    });
+}
+
+// ========== 履歴削除用のカスタムモーダル ==========
+function showClearHistoryModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    // ボタンが増えるため少し幅を広げる
+    content.style.width = '450px';
+
+    const message = document.createElement('div');
+    message.className = 'modal-message';
+    message.textContent = '履歴を削除しますか？\n(実際のファイルは削除されません)';
+    message.style.whiteSpace = 'pre-wrap';
+    message.style.marginBottom = '20px';
+
+    const buttons = document.createElement('div');
+    buttons.className = 'modal-buttons';
+    // ボタンのレイアウト調整（必要に応じて折り返し）
+    buttons.style.flexWrap = 'wrap';
+
+    // キャンセルボタン
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'modal-btn';
+    cancelBtn.textContent = 'キャンセル';
+    cancelBtn.onclick = () => overlay.remove();
+
+    // 全削除ボタン
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.className = 'modal-btn';
+    // 注意を引くため赤色系のスタイルを適用
+    clearAllBtn.style.backgroundColor = '#d9534f';
+    clearAllBtn.style.color = 'white';
+    clearAllBtn.style.borderColor = '#d43f3a';
+    clearAllBtn.textContent = 'すべての履歴を削除';
+
+    clearAllBtn.onclick = async () => {
+        recentFiles = [];
+        await saveRecentFiles();
+        renderRecentFiles();
+        showNotification('すべての履歴を消去しました', 'success');
+        overlay.remove();
+    };
+
+    // ボタンの追加順序（キャンセルを左、アクションを右へ）
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(clearAllBtn);
+
+    // フォルダを開いている場合のみ「フォルダ以下削除」ボタンを追加
+    if (currentDirectoryPath) {
+        const clearDirBtn = document.createElement('button');
+        clearDirBtn.className = 'modal-btn primary'; // 青色（Primary）
+        clearDirBtn.textContent = '現在のフォルダ以下のみ削除';
+
+        clearDirBtn.onclick = async () => {
+            // フィルタリング処理
+            recentFiles = recentFiles.filter(item => {
+                try {
+                    const rel = path.relative(currentDirectoryPath, item.path);
+                    // 親ディレクトリ以上(..)または別ドライブ(絶対パス)なら残す
+                    return rel.startsWith('..') || path.isAbsolute(rel);
+                } catch (e) {
+                    return true;
+                }
+            });
+            await saveRecentFiles();
+            renderRecentFiles();
+            showNotification('現在のフォルダ以下の履歴を消去しました', 'success');
+            overlay.remove();
+        };
+
+        // 一番右（推奨アクション）として追加
+        buttons.appendChild(clearDirBtn);
+    }
+
+    content.appendChild(message);
+    content.appendChild(buttons);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+
+    // 背景クリックで閉じる
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+}
+
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         if (ideContainer.classList.contains('zen-mode-active')) {
@@ -1888,14 +2567,12 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-// 設定タブ
 if (btnSettings) {
     btnSettings.addEventListener('click', () => {
         openSettingsTab();
     });
 }
 
-// 右アクティビティバー表示/非表示
 if (btnToggleRightActivity) {
     btnToggleRightActivity.addEventListener('click', () => {
         isRightActivityBarVisible = !isRightActivityBarVisible;
@@ -1903,7 +2580,6 @@ if (btnToggleRightActivity) {
     });
 }
 
-// ウィンドウコントロール
 if (btnMinimize) {
     btnMinimize.addEventListener('click', () => {
         window.electronAPI.minimizeWindow();
@@ -1936,7 +2612,6 @@ if (btnClose) {
     });
 }
 
-// ========== ファイルエクスプローラーボタン処理 ==========
 const btnSortAsc = document.getElementById('btn-sort-asc');
 const btnSortDesc = document.getElementById('btn-sort-desc');
 
@@ -1954,30 +2629,723 @@ if (btnSortDesc) {
     });
 }
 
-// ========== Git用ボタン処理 (未実装部分はログ出力) ==========
-const btnGitStage = document.getElementById('btn-git-stage');
-const btnGitUnstage = document.getElementById('btn-git-unstage');
-const btnGitRefresh = document.getElementById('btn-git-refresh');
+// ========== Git 機能の実装 (履歴機能統合済み) ==========
+
+/**
+ * Gitステータスを更新して表示する
+ * (履歴更新処理も呼び出す)
+ */
+async function refreshGitStatus() {
+    if (!currentDirectoryPath) return;
+
+    if (btnGitRefresh) btnGitRefresh.classList.add('syncing');
+
+    try {
+        const result = await window.electronAPI.gitStatus(currentDirectoryPath);
+
+        if (result.success) {
+            // リポジトリ有効時: UIを表示
+            setGitViewMode(true);
+
+            // 成功したらリストを表示
+            renderGitList(gitUnstagedList, result.unstaged, 'unstaged');
+            renderGitList(gitStagedList, result.staged, 'staged');
+
+            // ステージングが1件もない場合はセクションごと非表示にする
+            const stagedSection = document.getElementById('section-staged');
+            if (stagedSection) {
+                if (result.staged && result.staged.length > 0) {
+                    stagedSection.style.display = 'block';
+                } else {
+                    stagedSection.style.display = 'none';
+                }
+            }
+
+            // コミットエリアを有効化
+            if (gitMessageInput) gitMessageInput.disabled = false;
+            if (btnGitCommit) btnGitCommit.disabled = false;
+
+            // 履歴を更新
+            refreshGitHistory();
+
+        } else {
+            console.warn('Git status error:', result.error);
+
+            // リポジトリではない場合、初期化UIを表示
+            if (result.error.includes('not a git repository') || result.error.includes('Could not find HEAD') || result.error.includes('no such file or directory')) {
+                // リポジトリ無効時: 不要なUIを隠す
+                setGitViewMode(false);
+
+                renderGitInitUI(gitUnstagedList);
+                gitStagedList.innerHTML = '';
+                if (gitHistoryList) gitHistoryList.innerHTML = ''; // 履歴クリア
+
+                // コミットエリアを無効化
+                if (gitMessageInput) gitMessageInput.disabled = true;
+                if (btnGitCommit) btnGitCommit.disabled = true;
+            } else {
+                // その他のエラー時はUIを表示したままメッセージを出す
+                setGitViewMode(true);
+                gitUnstagedList.innerHTML = `<div class="git-empty-msg">エラー: ${result.error}</div>`;
+                gitStagedList.innerHTML = '';
+            }
+        }
+    } catch (e) {
+        console.error('Failed to refresh git status:', e);
+    } finally {
+        if (btnGitRefresh) btnGitRefresh.classList.remove('syncing');
+    }
+}
+
+/**
+ * リポジトリの有無に応じてGitパネルの表示要素を切り替えるヘルパー関数
+ * @param {boolean} isRepository 
+ */
+function setGitViewMode(isRepository) {
+    const commitArea = document.querySelector('.git-commit-area');
+    const historyContainer = document.querySelector('.git-history-container');
+
+    // Stagedセクション (ID: git-staged の親)
+    const stagedList = document.getElementById('git-staged');
+    const stagedSection = stagedList ? stagedList.closest('.git-section') : null;
+
+    // Unstagedセクションのタイトル (ID: git-unstaged の親の中のタイトル)
+    const unstagedList = document.getElementById('git-unstaged');
+    const unstagedSection = unstagedList ? unstagedList.closest('.git-section') : null;
+    const unstagedTitle = unstagedSection ? unstagedSection.querySelector('.git-section-title') : null;
+
+    const displayVal = isRepository ? '' : 'none';
+
+    if (commitArea) commitArea.style.display = displayVal;
+    if (historyContainer) historyContainer.style.display = displayVal;
+    if (stagedSection) stagedSection.style.display = displayVal;
+
+    // Unstagedのタイトルだけ隠す（ボタンを表示するためコンテナは残す）
+    if (unstagedTitle) unstagedTitle.style.display = displayVal;
+}
+
+/**
+ * 初期化ボタンを表示する関数
+ */
+function renderGitInitUI(container) {
+    container.innerHTML = `
+        <div class="git-init-container">
+            <p>このフォルダはGitリポジトリではありません。</p>
+            <button id="btn-git-init-action" class="git-init-btn">リポジトリを初期化 (Init)</button>
+        </div>
+    `;
+
+    const btn = document.getElementById('btn-git-init-action');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            try {
+                const result = await window.electronAPI.gitInit(currentDirectoryPath);
+                if (result.success) {
+                    showNotification('Gitリポジトリを初期化しました', 'success');
+                    refreshGitStatus();
+                } else {
+                    showNotification(`初期化エラー: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                showNotification(`エラー: ${e.message}`, 'error');
+            }
+        });
+    }
+}
+
+/**
+ * Gitファイルリストを描画するヘルパー関数
+ */
+function renderGitList(container, files, type) {
+    container.innerHTML = '';
+
+    if (!files || files.length === 0) {
+        // container.innerHTML = '<div class="git-empty-msg">変更なし</div>';
+        return;
+    }
+
+    files.forEach(file => {
+        const item = document.createElement('div');
+        item.className = 'git-file-item';
+        item.dataset.path = file.filepath;
+
+        // ステータスアイコンの決定
+        let statusChar = 'M';
+        let statusClass = 'modified';
+
+        if (file.status === 'new' || file.status === 'added') {
+            statusChar = 'A';
+            statusClass = 'added';
+        } else if (file.status === 'deleted') {
+            statusChar = 'D';
+            statusClass = 'deleted';
+        } else if (file.status === 'modified') {
+            statusChar = 'M';
+            statusClass = 'modified';
+        }
+
+        // パス操作 (簡易版)
+        const fileName = file.filepath.split(/[/\\]/).pop();
+        const dirName = file.filepath.substring(0, file.filepath.length - fileName.length);
+        const displayPath = dirName === '' ? '' : dirName;
+
+        const actionBtnIcon = type === 'unstaged' ? '+' : '−';
+        const actionTitle = type === 'unstaged' ? 'ステージする' : 'ステージを取り消す';
+
+        item.innerHTML = `
+            <div class="git-file-left">
+                <span class="git-file-name">${fileName} <span class="git-file-dir">${displayPath}</span></span>
+            </div>
+            <div class="git-file-right">
+                <span class="git-status-badge ${statusClass}">${statusChar}</span>
+                <div class="git-actions">
+                    <button class="git-action-btn-small" title="${actionTitle}">${actionBtnIcon}</button>
+                </div>
+            </div>
+        `;
+
+        // ファイルクリックで開く
+        item.addEventListener('click', (e) => {
+            if (e.target.closest('.git-action-btn-small')) return;
+            const separator = currentDirectoryPath.includes('\\') ? '\\' : '/';
+            const fullPath = currentDirectoryPath + (currentDirectoryPath.endsWith(separator) ? '' : separator) + file.filepath;
+            openFile(fullPath, fileName);
+        });
+
+        // アクションボタンクリック
+        const actionBtn = item.querySelector('.git-action-btn-small');
+        actionBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                if (type === 'unstaged') {
+                    if (file.status === 'deleted') {
+                        await window.electronAPI.gitRemove(currentDirectoryPath, file.filepath);
+                    } else {
+                        await window.electronAPI.gitAdd(currentDirectoryPath, file.filepath);
+                    }
+                } else {
+                    await window.electronAPI.gitReset(currentDirectoryPath, file.filepath);
+                }
+                refreshGitStatus();
+            } catch (err) {
+                console.error(err);
+                showNotification(`Git操作エラー: ${err.message}`, 'error');
+            }
+        });
+
+        container.appendChild(item);
+    });
+}
+
+/**
+ * Git履歴を描画する
+ */
+async function refreshGitHistory() {
+    if (!gitHistoryList) return;
+    try {
+        // window.electronAPI.gitHistoryが存在するか確認（古いpreload.jsの場合のエラー回避）
+        if (typeof window.electronAPI.gitHistory !== 'function') {
+            console.warn("gitHistory function is not available in preload script.");
+            return;
+        }
+
+        const result = await window.electronAPI.gitHistory(currentDirectoryPath, 20); // 最新20件
+        if (result.success) {
+            if (gitCurrentBranchBadge) {
+                gitCurrentBranchBadge.textContent = result.currentBranch;
+            }
+            renderGitGraph(result.history, result.currentBranch);
+        } else {
+            // エラー時（まだコミットがない場合など）は静かに
+            console.log("Git history status:", result.error);
+        }
+    } catch (e) {
+        console.error("Git history failed:", e);
+    }
+}
+
+/**
+ * コミットグラフとリストの描画
+ */
+function renderGitGraph(commits, currentBranch) {
+    gitHistoryList.innerHTML = '';
+
+    if (commits.length === 0) {
+        gitHistoryList.innerHTML = '<div class="git-empty-msg">No commits yet</div>';
+        return;
+    }
+
+    commits.forEach((commit, index) => {
+        const row = document.createElement('div');
+        row.className = 'git-history-row';
+        row.dataset.oid = commit.oid;
+
+        // タイムラインの線とドット
+        const timeline = document.createElement('div');
+        timeline.className = 'git-timeline';
+        const line = document.createElement('div');
+        line.className = 'git-timeline-line';
+        if (index === commits.length - 1) line.classList.add('last');
+
+        const dot = document.createElement('div');
+        dot.className = 'git-timeline-dot';
+
+        timeline.appendChild(line);
+        timeline.appendChild(dot);
+
+        // コンテンツ
+        const content = document.createElement('div');
+        content.className = 'git-history-content';
+
+        // メッセージとRefs
+        const header = document.createElement('div');
+        header.className = 'git-history-header';
+
+        // Refs (ブランチバッジ)
+        if (commit.refs && commit.refs.length > 0) {
+            const refsContainer = document.createElement('span');
+            refsContainer.className = 'git-refs';
+            commit.refs.forEach(ref => {
+                const badge = document.createElement('span');
+                badge.className = 'git-ref-badge';
+                // リモートかローカルかで色分け
+                if (ref.name.startsWith('origin/') || ref.name.startsWith('remotes/')) {
+                    badge.classList.add('remote');
+                    badge.textContent = `☁ ${ref.name.replace('remotes/', '')}`;
+                } else {
+                    badge.textContent = ref.name;
+                    // 現在のブランチの場合、クラスを追加して強調する
+                    if (ref.name === currentBranch) {
+                        badge.classList.add('current-branch');
+                    }
+                    if (ref.name === 'main' || ref.name === 'master') badge.classList.add('main');
+                }
+                refsContainer.appendChild(badge);
+            });
+            header.appendChild(refsContainer);
+        }
+
+        const msgSpan = document.createElement('span');
+        msgSpan.className = 'git-history-message';
+        msgSpan.textContent = commit.message.split('\n')[0]; // 1行目のみ
+        header.appendChild(msgSpan);
+
+        // Author & Date
+        const meta = document.createElement('div');
+        meta.className = 'git-history-meta';
+        const authorName = commit.author.name;
+        // 日時のフォーマット
+        const date = new Date(commit.author.timestamp * 1000);
+        const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        meta.textContent = `${authorName}, ${dateStr}`;
+
+        content.appendChild(header);
+        content.appendChild(meta);
+
+        row.appendChild(timeline);
+        row.appendChild(content);
+
+        // イベントリスナー: ツールチップ表示
+        row.addEventListener('mouseenter', (e) => showCommitTooltip(e, commit));
+        row.addEventListener('mouseleave', () => hideCommitTooltip());
+
+        // 右クリックでコンテキストメニュー表示
+        row.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            // ツールチップを隠す
+            hideCommitTooltip();
+            showCommitContextMenu(e.pageX, e.pageY, commit);
+        });
+
+        gitHistoryList.appendChild(row);
+    });
+}
+
+// ツールチップの状態管理
+let tooltipTimeout;
+
+async function showCommitTooltip(e, commit) {
+    if (!gitCommitTooltip) return;
+
+    // 表示位置の計算（行の右側、または下）
+    const rect = e.currentTarget.getBoundingClientRect();
+    gitCommitTooltip.style.top = `${rect.top}px`;
+    gitCommitTooltip.style.left = `${rect.right + 10}px`; // 右側に表示
+    gitCommitTooltip.classList.remove('hidden');
+
+    // 基本情報のセット
+    document.getElementById('tooltip-author').textContent = commit.author.name;
+    const date = new Date(commit.author.timestamp * 1000);
+    document.getElementById('tooltip-date').textContent = date.toLocaleString();
+    document.getElementById('tooltip-hash').textContent = commit.oid.substring(0, 8);
+
+    // ブランチ情報のセット
+    const branchEl = document.getElementById('tooltip-branch');
+    if (commit.refs && commit.refs.length > 0) {
+        branchEl.textContent = commit.refs.map(r => r.name).join(', ');
+        branchEl.style.display = 'block';
+    } else {
+        branchEl.style.display = 'none';
+    }
+
+    // 統計情報のローディング表示
+    const statsEl = document.getElementById('tooltip-stats');
+    statsEl.textContent = 'Loading stats...';
+
+    // 詳細情報の非同期取得
+    clearTimeout(tooltipTimeout);
+    tooltipTimeout = setTimeout(async () => {
+        try {
+            if (typeof window.electronAPI.gitGetCommitDetail === 'function') {
+                const result = await window.electronAPI.gitGetCommitDetail(currentDirectoryPath, commit.oid);
+                if (result.success) {
+                    const stats = result.stats;
+                    statsEl.innerHTML = `
+                        <span style="color:var(--text-color)">${stats.filesChanged} files changed</span>
+                    `;
+                } else {
+                    statsEl.textContent = 'No stats available';
+                }
+            } else {
+                statsEl.textContent = '';
+            }
+        } catch (e) {
+            statsEl.textContent = 'Error loading stats';
+        }
+    }, 200); // 少し遅延させて、素早いマウス移動時の負荷を減らす
+}
+
+function hideCommitTooltip() {
+    if (gitCommitTooltip) {
+        gitCommitTooltip.classList.add('hidden');
+        clearTimeout(tooltipTimeout);
+    }
+}
+
+// コミット履歴用のコンテキストメニュー
+function showCommitContextMenu(x, y, commit) {
+    if (activeContextMenu) activeContextMenu.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    // チェックアウト項目
+    const checkoutOption = document.createElement('div');
+    checkoutOption.className = 'context-menu-item';
+    checkoutOption.textContent = 'このコミットをチェックアウト';
+    checkoutOption.addEventListener('click', async () => {
+        menu.remove();
+        activeContextMenu = null;
+
+        showNotification(`コミット ${commit.oid.substring(0, 7)} をチェックアウト中...`, 'info');
+
+        try {
+            // SHAを指定してチェックアウト (Detached HEAD状態になります)
+            const result = await window.electronAPI.gitCheckout(currentDirectoryPath, commit.oid);
+
+            if (result.success) {
+                showNotification(`チェックアウト完了: ${commit.oid.substring(0, 7)}`, 'success');
+                refreshGitStatus();
+                initializeFileTreeWithState();
+                
+                // 現在開いているファイルがあればリロードして内容を反映
+                if (currentFilePath && openedFiles.has(currentFilePath)) {
+                    openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
+                }
+            } else {
+                showNotification(`チェックアウトエラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        }
+    });
+
+    // --- 追加: リセット項目 ---
+    const resetOption = document.createElement('div');
+    resetOption.className = 'context-menu-item';
+    resetOption.textContent = '現在のブランチをここにリセット (Hard)';
+    resetOption.title = '現在の変更をすべて破棄して、このコミットの状態に戻します';
+    resetOption.addEventListener('click', async () => {
+        menu.remove();
+        activeContextMenu = null;
+
+        if (!confirm(`現在の変更を破棄して、コミット ${commit.oid.substring(0, 7)} の状態に完全にリセットしますか？\nこの操作は取り消せません。`)) {
+            return;
+        }
+
+        showNotification('リセット中...', 'info');
+        try {
+            // main.js で実装する gitResetHead を呼び出し
+            const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
+            if (result.success) {
+                showNotification('リセット完了', 'success');
+                refreshGitStatus();
+                initializeFileTreeWithState();
+                if (currentFilePath && openedFiles.has(currentFilePath)) {
+                    openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
+                }
+            } else {
+                showNotification(`リセットエラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        }
+    });
+
+    // --- 追加: リバート項目 ---
+    const revertOption = document.createElement('div');
+    revertOption.className = 'context-menu-item';
+    revertOption.textContent = 'このコミットを打ち消し (Revert)';
+    revertOption.title = 'このコミットの変更を打ち消す新しいコミットを作成します';
+    revertOption.addEventListener('click', async () => {
+        menu.remove();
+        activeContextMenu = null;
+
+        if (!confirm(`コミット ${commit.oid.substring(0, 7)} を打ち消す新しいコミットを作成しますか？`)) {
+            return;
+        }
+
+        showNotification('打ち消しコミットを作成中...', 'info');
+        try {
+            // main.js で実装する gitRevertCommit を呼び出し
+            const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
+            if (result.success) {
+                showNotification('打ち消しコミットを作成しました', 'success');
+                refreshGitStatus();
+            } else {
+                showNotification(`Revertエラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        }
+    });
+
+    // ハッシュコピー項目
+    const copyHashOption = document.createElement('div');
+    copyHashOption.className = 'context-menu-item';
+    copyHashOption.textContent = 'コミットハッシュをコピー';
+    copyHashOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        navigator.clipboard.writeText(commit.oid);
+        showNotification('ハッシュをコピーしました', 'success');
+    });
+
+    menu.appendChild(checkoutOption);
+    
+    // 区切り線
+    const sep1 = document.createElement('div');
+    sep1.style.height = '1px';
+    sep1.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
+    sep1.style.margin = '4px 0';
+    menu.appendChild(sep1);
+    
+    menu.appendChild(resetOption);
+    menu.appendChild(revertOption);
+
+    const sep2 = document.createElement('div');
+    sep2.style.height = '1px';
+    sep2.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
+    sep2.style.margin = '4px 0';
+    menu.appendChild(sep2);
+
+    menu.appendChild(copyHashOption);
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+}
+
+// Git操作ボタン イベントリスナー
+// 既存の btnGitRefresh リスナーを修正 (Fetchも実行するようにする)
+if (btnGitRefresh) {
+    btnGitRefresh.addEventListener('click', async () => {
+        if (!currentDirectoryPath) return;
+
+        btnGitRefresh.classList.add('syncing');
+
+        // Fetchを実行（リモートの最新情報を取得）
+        try {
+            console.log('Fetching...');
+            await window.electronAPI.gitFetch(currentDirectoryPath);
+        } catch (e) {
+            console.warn('Fetch failed:', e);
+        }
+
+        // その後、ステータスと履歴を更新
+        await refreshGitStatus();
+
+        btnGitRefresh.classList.remove('syncing');
+    });
+}
+
+// Pullボタンのリスナー
+const btnGitPull = document.getElementById('git-pull-btn');
+if (btnGitPull) {
+    btnGitPull.addEventListener('click', async () => {
+        if (!currentDirectoryPath) return;
+
+        try {
+            btnGitPull.disabled = true;
+            btnGitPull.textContent = 'Pulling...';
+
+            const result = await window.electronAPI.gitPull(currentDirectoryPath);
+
+            if (result.success) {
+                showNotification('プル完了', 'success');
+                refreshGitStatus(); // 画面更新
+            } else {
+                showNotification(`プルエラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        } finally {
+            btnGitPull.disabled = false;
+            btnGitPull.textContent = 'Pull';
+        }
+    });
+}
 
 if (btnGitStage) {
-    btnGitStage.addEventListener('click', () => {
-        console.log('すべての変更をステージングしました。(処理未実装)');
+    btnGitStage.addEventListener('click', async () => {
+        if (!currentDirectoryPath) return;
+        try {
+
+            // 先にステータスを確認し、ステージすべき変更がない場合は終了する
+            const status = await window.electronAPI.gitStatus(currentDirectoryPath);
+            if (!status.success || status.unstaged.length === 0) {
+                return; // 何もしない
+            }
+
+            // 変更がある場合のみステージングを実行
+            const result = await window.electronAPI.gitStageAll(currentDirectoryPath);
+
+            // 成功したかどうかチェック
+            if (result.success) {
+                refreshGitStatus();
+                showNotification('すべての変更をステージしました', 'success');
+            }
+            // else {
+            //     // エラーなら例外を投げて catch ブロックへ
+            //     throw new Error(result.error);
+            // }
+        } catch (e) {
+            showNotification(`ステージエラー: ${e.message}`, 'error');
+        }
     });
 }
 
 if (btnGitUnstage) {
-    btnGitUnstage.addEventListener('click', () => {
-        console.log('すべての変更をアンステージングしました。(処理未実装)');
+    btnGitUnstage.addEventListener('click', async () => {
+        if (!currentDirectoryPath) return;
+        try {
+            const result = await window.electronAPI.gitStatus(currentDirectoryPath);
+            if (result.success && result.staged.length > 0) {
+                for (const file of result.staged) {
+                    await window.electronAPI.gitReset(currentDirectoryPath, file.filepath);
+                }
+                refreshGitStatus();
+                showNotification('すべての変更をアンステージしました', 'success');
+            }
+        } catch (e) {
+            showNotification(`アンステージエラー: ${e.message}`, 'error');
+        }
     });
 }
 
-if (btnGitRefresh) {
-    btnGitRefresh.addEventListener('click', () => {
-        console.log('Gitの状態を更新しました。(処理未実装)');
+if (btnGitCommit) {
+    btnGitCommit.addEventListener('click', async () => {
+        const message = gitMessageInput.value;
+        if (!message.trim()) {
+            showNotification('コミットメッセージを入力してください', 'error');
+            return;
+        }
+
+        const status = await window.electronAPI.gitStatus(currentDirectoryPath);
+        if (!status.success || status.staged.length === 0) {
+            showNotification('ステージされているファイルがありません', 'error');
+            return;
+        }
+
+        try {
+            btnGitCommit.disabled = true;
+            btnGitCommit.textContent = 'Committing...';
+
+            const result = await window.electronAPI.gitCommit(currentDirectoryPath, message);
+
+            if (result.success) {
+                gitMessageInput.value = '';
+                refreshGitStatus();
+                showNotification(`コミット完了: ${result.sha.substring(0, 7)}`, 'success');
+            } else {
+                showNotification(`コミットエラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        } finally {
+            btnGitCommit.disabled = false;
+            btnGitCommit.textContent = 'Commit';
+        }
     });
 }
 
-// ========== アウトライン機能の実装 ==========
+if (btnGitPush) {
+    btnGitPush.addEventListener('click', async () => {
+        if (!currentDirectoryPath) return;
+
+        try {
+            btnGitPush.disabled = true;
+            btnGitPush.textContent = 'Pushing...';
+
+            const result = await window.electronAPI.gitPush(currentDirectoryPath);
+
+            if (result.success) {
+                showNotification('プッシュ完了', 'success');
+            } else {
+                showNotification(`プッシュエラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        } finally {
+            btnGitPush.disabled = false;
+            btnGitPush.textContent = 'Push';
+        }
+    });
+}
+
+// ========== GitHub認証ボタンの実装 ==========
+const btnGithubAuth = document.getElementById('btn-github-auth');
+const authStatus = document.getElementById('github-auth-status');
+
+if (btnGithubAuth) {
+    btnGithubAuth.addEventListener('click', async () => {
+        btnGithubAuth.disabled = true;
+        btnGithubAuth.textContent = '認証中...';
+
+        try {
+            const result = await window.electronAPI.authGitHub();
+
+            if (result.success) {
+                showNotification('GitHub連携に成功しました', 'success');
+                btnGithubAuth.style.display = 'none'; // ボタンを隠す
+                if (authStatus) authStatus.style.display = 'block'; // 完了メッセージ表示
+            } else {
+                showNotification(`認証失敗: ${result.error}`, 'error');
+                btnGithubAuth.innerHTML = '<svg height="16" viewBox="0 0 16 16" width="16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg> GitHubでサインイン';
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+            btnGithubAuth.disabled = false;
+        } finally {
+            if (btnGithubAuth.style.display !== 'none') {
+                btnGithubAuth.disabled = false;
+            }
+        }
+    });
+}
+
 const outlineTree = document.getElementById('outline-tree');
 const btnOutlineCollapse = document.getElementById('btn-outline-collapse');
 const btnOutlineExpand = document.getElementById('btn-outline-expand');
@@ -2088,7 +3456,6 @@ if (btnOutlineExpand) {
     });
 }
 
-// ========== リサイザー機能 ==========
 const resizerRight = document.getElementById('resizer-right');
 const resizerBottom = document.getElementById('resizer-bottom');
 let isResizingRight = false;
@@ -2119,7 +3486,6 @@ document.addEventListener('mousemove', (e) => {
             rightPane.style.width = newWidth + 'px';
             resizerRight.style.right = (newWidth + rightActivityBarWidth) + 'px';
             document.documentElement.style.setProperty('--right-pane-width', newWidth + 'px');
-            // ここはmainContentのままでOK
             const mainContent = centerPane.parentElement;
             mainContent.style.marginRight = (newWidth + rightActivityBarWidth) + 'px';
 
@@ -2136,8 +3502,6 @@ document.addEventListener('mousemove', (e) => {
             bottomPane.style.height = newHeight + 'px';
             resizerBottom.style.top = (window.innerHeight - newHeight - 24) + 'px';
 
-            // mainContentではなくcenterPaneの下マージンを更新する
-            // これによりエディタだけが押し上げられ、サイドバーは影響を受けない
             centerPane.style.marginBottom = newHeight + 'px';
 
             if (activeTerminalId) {
@@ -2162,12 +3526,11 @@ document.addEventListener('mouseup', () => {
     }
 });
 
-// ========== ファイル名変更処理 ==========
 if (fileTitleInput) {
     fileTitleInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-            fileTitleInput.blur(); // フォーカスを外して変更を確定させる
+            fileTitleInput.blur();
         }
     });
 
@@ -2176,26 +3539,22 @@ if (fileTitleInput) {
 
         if (!newName || !currentFilePath) return;
 
-        // パスからファイル名（拡張子なし）を抽出して比較
         const separator = currentFilePath.includes('\\') ? '\\' : '/';
         const currentFileName = currentFilePath.split(separator).pop();
         const currentExt = currentFileName.includes('.') ? '.' + currentFileName.split('.').pop() : '';
         const currentNameWithoutExt = currentFileName.replace(currentExt, '');
 
-        // 変更がない場合は何もしない
         if (newName === currentNameWithoutExt) return;
 
         try {
             if (typeof window.electronAPI?.renameFile === 'function') {
+                const oldPath = currentFilePath; // 現在のパスを保存
                 const result = await window.electronAPI.renameFile(currentFilePath, newName);
 
                 if (result.success) {
-                    // リネーム後のタブ更新処理（共通化のため関数化推奨だがここではインライン展開）
-                    const oldPath = currentFilePath;
                     const newPath = result.path;
                     const newFileName = newPath.split(separator).pop();
 
-                    // 内部状態の更新
                     const fileData = openedFiles.get(oldPath);
                     if (fileData) {
                         fileData.fileName = newFileName;
@@ -2203,7 +3562,6 @@ if (fileTitleInput) {
                         openedFiles.delete(oldPath);
                     }
 
-                    // 変更状態の移行
                     if (fileModificationState.has(oldPath)) {
                         fileModificationState.set(newPath, fileModificationState.get(oldPath));
                         fileModificationState.delete(oldPath);
@@ -2212,7 +3570,6 @@ if (fileTitleInput) {
                     currentFilePath = newPath;
                     document.title = `${newFileName} - Markdown IDE`;
 
-                    // タブの更新
                     const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
                     if (tab) {
                         tab.dataset.filepath = newPath;
@@ -2224,14 +3581,13 @@ if (fileTitleInput) {
                         tab.innerHTML = `${newFileName} ${isDirty ? '● ' : ''}<span class="close-tab" data-filepath="${newPath}">×</span>`;
                     }
 
-                    // ファイルツリーの更新
                     initializeFileTreeWithState();
+                    updateRecentFilesAfterRename(oldPath, newPath); // Recent Filesも更新
 
                     console.log(`Renamed ${oldPath} to ${newPath}`);
                 } else {
                     console.error('Rename failed:', result.error);
                     alert(`ファイル名の変更に失敗しました: ${result.error}`);
-                    // 入力を元に戻す
                     fileTitleInput.value = currentNameWithoutExt;
                 }
             }
@@ -2242,28 +3598,23 @@ if (fileTitleInput) {
     });
 }
 
-// タブや内部状態を更新するヘルパー関数（ツリーからのリネーム用）
 function updateTabsAfterRename(oldPath, newPath, newName) {
-    // 内部状態の更新
     const fileData = openedFiles.get(oldPath);
     if (fileData) {
-        fileData.fileName = newName; // ファイル名だけを更新（拡張子込み）
+        fileData.fileName = newName;
         openedFiles.set(newPath, fileData);
         openedFiles.delete(oldPath);
     }
 
-    // 変更状態の移行
     if (fileModificationState.has(oldPath)) {
         fileModificationState.set(newPath, fileModificationState.get(oldPath));
         fileModificationState.delete(oldPath);
     }
 
-    // カレントファイルなら更新
     if (currentFilePath === oldPath) {
         currentFilePath = newPath;
         document.title = `${newName} - Markdown IDE`;
 
-        // タイトルバー入力欄の更新
         if (fileTitleInput) {
             const extIndex = newName.lastIndexOf('.');
             const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
@@ -2271,7 +3622,6 @@ function updateTabsAfterRename(oldPath, newPath, newName) {
         }
     }
 
-    // タブの更新
     const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
     if (tab) {
         tab.dataset.filepath = newPath;
@@ -2280,15 +3630,11 @@ function updateTabsAfterRename(oldPath, newPath, newName) {
             closeBtn.dataset.filepath = newPath;
         }
 
-        // ファイル名表示更新
         const isDirty = tab.innerHTML.includes('●');
-        // ファイル名が長すぎる場合の考慮が必要ならここで行うが、簡易的にそのまま
-        // タブ内のHTML構造を維持
         tab.childNodes[0].textContent = newName + ' ';
     }
 }
 
-// ツリーアイテムのリネーム開始関数
 function startRenaming(treeItem) {
     const labelSpan = treeItem.querySelector('.tree-label');
     if (!labelSpan) return;
@@ -2296,20 +3642,16 @@ function startRenaming(treeItem) {
     const originalName = treeItem.dataset.name;
     const originalPath = treeItem.dataset.path;
 
-    // 既存のラベルを非表示に
     labelSpan.style.display = 'none';
 
-    // 入力フィールド作成
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'rename-input'; // cssでスタイル定義
+    input.className = 'rename-input';
     input.value = originalName;
 
-    // 挿入
     treeItem.appendChild(input);
     input.focus();
 
-    // 拡張子を除いて選択状態にする（ファイルの場合）
     const lastDotIndex = originalName.lastIndexOf('.');
     if (lastDotIndex > 0) {
         input.setSelectionRange(0, lastDotIndex);
@@ -2320,35 +3662,24 @@ function startRenaming(treeItem) {
     let isCommitted = false;
 
     const finish = async (shouldCommit) => {
-        if (isCommitted) return; // 二重実行防止
+        if (isCommitted) return;
         isCommitted = true;
 
         const newName = input.value.trim();
 
-        // 入力欄を削除してラベルを戻す（成功したらあとでツリーリロードされるが、失敗時やキャンセルのために戻す処理は必要）
         input.remove();
         labelSpan.style.display = '';
 
         if (shouldCommit && newName && newName !== originalName) {
             try {
                 if (typeof window.electronAPI?.renameFile === 'function') {
-                    // renameFileは拡張子なしの名前を受け取る仕様になっている箇所があるか確認が必要だが、
-                    // main.jsの実装を見る限り、拡張子がない場合に補完するロジックが入っている。
-                    // ここではフルネーム（拡張子込み）を渡すことを想定して main.js 側が動くはず。
-                    // ただし、renderer.jsの既存のrenameFile呼び出し（タイトルバー）は拡張子を除いて渡している。
-                    // ここでは入力されたまま（拡張子込み）を渡すのが自然。
-                    // main.jsの `rename-file` は `newName` に拡張子がない場合のみ補完するので、
-                    // 拡張子付きで渡せばそのまま使われるはず。
-
                     const result = await window.electronAPI.renameFile(originalPath, newName);
                     if (result.success) {
                         showNotification(`名前を変更しました: ${newName}`, 'success');
 
-                        // タブなどの関連UI更新
                         updateTabsAfterRename(originalPath, result.path, newName);
+                        updateRecentFilesAfterRename(originalPath, result.path); // Recent Filesも更新
 
-                        // ツリーをリロードして整合性を保つ
-                        // ファイルシステム監視が動いているなら自動更新されるが、即時反映のため呼ぶ
                         initializeFileTreeWithState();
                     } else {
                         showNotification(`名前の変更に失敗しました: ${result.error}`, 'error');
@@ -2374,15 +3705,14 @@ function startRenaming(treeItem) {
     });
 
     input.addEventListener('blur', () => {
-        finish(true); // フォーカス外れたら確定
+        finish(true);
     });
 
-    input.addEventListener('click', (e) => e.stopPropagation()); // ツリーのクリックイベント（開閉）を防止
+    input.addEventListener('click', (e) => e.stopPropagation());
     input.addEventListener('dblclick', (e) => e.stopPropagation());
-    input.addEventListener('dragstart', (e) => e.stopPropagation()); // ドラッグ防止
+    input.addEventListener('dragstart', (e) => e.stopPropagation());
 }
 
-// ========== ★追加: トースト通知機能 ==========
 function showNotification(message, type = 'info') {
     const container = document.getElementById('notification-container');
     if (!container) return;
@@ -2393,12 +3723,10 @@ function showNotification(message, type = 'info') {
 
     container.appendChild(toast);
 
-    // アニメーション用
     requestAnimationFrame(() => {
         toast.classList.add('show');
     });
 
-    // 自動削除 (3秒後)
     setTimeout(() => {
         toast.classList.remove('show');
         toast.addEventListener('transitionend', () => {
@@ -2407,41 +3735,253 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// ========== ファイルエクスプローラのイベント設定（新規） ==========
 function setupFileExplorerEvents() {
     const fileContentContainer = document.getElementById('content-files');
     if (fileContentContainer) {
+
+        // ========== キーボードショートカット (Undo/Redo) ==========
+        fileContentContainer.addEventListener('keydown', async (e) => {
+            // 入力フォームなどがアクティブな場合は無視
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            // Ctrl+Z (Undo)
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                try {
+                    const result = await window.electronAPI.undoFileOperation();
+                    if (result.success) {
+                        showNotification(`元に戻しました: ${result.path || result.dest}`, 'success');
+
+                        // 作成取り消しの場合、タブを閉じる
+                        if (result.operation === 'delete') {
+                            const tab = document.querySelector(`[data-filepath="${CSS.escape(result.path)}"]`);
+                            if (tab) closeTab(tab, false);
+                        }
+                        // リネーム/移動取り消しの場合、タブ情報を更新する
+                        else if (result.operation === 'rename' || result.operation === 'move') {
+                            const fileName = result.dest.split(/[/\\]/).pop();
+                            updateTabsAfterRename(result.src, result.dest, fileName);
+                            updateRecentFilesAfterRename(result.src, result.dest);
+                        }
+
+                        initializeFileTreeWithState();
+                    } else if (result.message) {
+                        showNotification(result.message, 'info');
+                    }
+                } catch (err) {
+                    showNotification(`Undoエラー: ${err.message}`, 'error');
+                }
+            }
+
+            // Ctrl+Shift+Z or Ctrl+Y (Redo)
+            if (
+                ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && e.shiftKey) ||
+                ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
+            ) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                try {
+                    const result = await window.electronAPI.redoFileOperation();
+                    if (result.success) {
+                        showNotification(`やり直しました: ${result.path || result.dest}`, 'success');
+
+                        // リネーム/移動やり直しの場合、タブ情報を更新する
+                        if (result.operation === 'rename' || result.operation === 'move') {
+                            const fileName = result.dest.split(/[/\\]/).pop();
+                            updateTabsAfterRename(result.src, result.dest, fileName);
+                            updateRecentFilesAfterRename(result.src, result.dest);
+                        }
+
+                        initializeFileTreeWithState();
+                    } else if (result.message) {
+                        showNotification(result.message, 'info');
+                    }
+                } catch (err) {
+                    showNotification(`Redoエラー: ${err.message}`, 'error');
+                }
+            }
+        });
+
         fileContentContainer.addEventListener('click', (e) => {
-            // ツリーアイテムがクリックされた場合は何もしない（アイテムのリスナーで処理）
             if (e.target.closest('.tree-item')) return;
 
-            // 空き領域がクリックされた場合
             const container = document.getElementById('content-files');
             if (container) {
                 container.focus();
-                // 既存の選択状態を解除
                 const selectedItems = container.querySelectorAll('.tree-item.selected');
                 selectedItems.forEach(el => el.classList.remove('selected'));
             }
         });
+
+        // 空白部分での右クリックメニュー
+        fileContentContainer.addEventListener('contextmenu', (e) => {
+            // ツリーアイテム上のクリックは、initializeFileTree内のイベントリスナーに任せる
+            if (e.target.closest('.tree-item')) return;
+
+            e.preventDefault();
+
+            // 選択状態を解除（ルートフォルダに対する操作であることを視覚的に示す）
+            const container = document.getElementById('content-files');
+            if (container) {
+                container.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
+            }
+
+            showEmptySpaceContextMenu(e.pageX, e.pageY);
+        });
     }
 }
 
-// ========== 初期化 ==========
+// 設定画面のUIロジック
+function setupSyncSettings() {
+    if (!syncServiceSelect) return;
+
+    syncServiceSelect.addEventListener('change', (e) => {
+        const service = e.target.value;
+        appSettings.cloudSync = appSettings.cloudSync || {};
+        appSettings.cloudSync.service = service;
+
+        // 表示切り替え
+        syncSettingsDropbox.classList.toggle('hidden', service !== 'dropbox');
+        syncSettingsGDrive.classList.toggle('hidden', service !== 'gdrive');
+
+        saveSettings();
+    });
+
+    // 初期表示設定
+    const currentService = appSettings.cloudSync?.service || 'none';
+    syncServiceSelect.value = currentService;
+    syncSettingsDropbox.classList.toggle('hidden', currentService !== 'dropbox');
+    syncSettingsGDrive.classList.toggle('hidden', currentService !== 'gdrive');
+
+    // 連携状態表示
+    if (appSettings.cloudSync?.dropbox) {
+        updateAuthStatus('dropbox', !!appSettings.cloudSync.dropbox.accessToken);
+    }
+    if (appSettings.cloudSync?.gdrive) {
+        updateAuthStatus('gdrive', !!appSettings.cloudSync.gdrive.tokens);
+    }
+
+    // 認証ボタン (Dropbox)
+    btnAuthDropbox.addEventListener('click', async () => {
+        btnAuthDropbox.disabled = true;
+        btnAuthDropbox.textContent = '認証中...';
+
+        try {
+            // パターンB: 引数なしで呼び出す（バックエンド側のキーを使用）
+            const result = await window.electronAPI.authDropbox();
+
+            if (result.success) {
+                showNotification('Dropbox連携に成功しました', 'success');
+                updateAuthStatus('dropbox', true);
+                await loadSettings();
+            } else {
+                showNotification(`認証失敗: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        } finally {
+            btnAuthDropbox.disabled = false;
+            btnAuthDropbox.textContent = 'Dropboxと連携 (認証)';
+        }
+    });
+
+    // 認証ボタン (Google Drive)
+    btnAuthGDrive.addEventListener('click', async () => {
+        btnAuthGDrive.disabled = true;
+        btnAuthGDrive.textContent = '認証中...';
+
+        try {
+            const result = await window.electronAPI.authGDrive();
+            if (result.success) {
+                showNotification('Google Drive連携に成功しました', 'success');
+                updateAuthStatus('gdrive', true);
+                await loadSettings();
+            } else {
+                showNotification(`認証失敗: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`エラー: ${e.message}`, 'error');
+        } finally {
+            btnAuthGDrive.disabled = false;
+            btnAuthGDrive.textContent = 'Google Driveと連携 (認証)';
+        }
+    });
+}
+
+function updateAuthStatus(service, isAuthenticated) {
+    const el = document.getElementById(`${service}-status`);
+    if (el) {
+        el.textContent = isAuthenticated ? '連携済み ✅' : '未連携';
+        el.className = `auth-status ${isAuthenticated ? 'authenticated' : 'unauthenticated'}`;
+    }
+}
+
+// ツールバーの同期ボタン
+if (btnCloudSync) {
+    btnCloudSync.addEventListener('click', async () => {
+        // 設定チェック
+        if (!appSettings.cloudSync || appSettings.cloudSync.service === 'none') {
+            showNotification('設定画面で同期サービスを選択・認証してください', 'error');
+            openSettingsTab();
+            return;
+        }
+
+        btnCloudSync.classList.add('syncing');
+        if (syncStatusText) syncStatusText.textContent = '同期中...';
+
+        try {
+            const result = await window.electronAPI.startCloudSync();
+            if (result.success) {
+                showNotification('同期が完了しました', 'success');
+            } else {
+                showNotification(`同期エラー: ${result.error}`, 'error');
+            }
+        } catch (e) {
+            showNotification(`予期せぬエラー: ${e.message}`, 'error');
+        } finally {
+            btnCloudSync.classList.remove('syncing');
+            if (syncStatusText) syncStatusText.textContent = '';
+            // ファイルツリーを更新
+            initializeFileTreeWithState();
+        }
+    });
+}
+
 window.addEventListener('load', async () => {
     console.log('Markdown IDE loaded');
 
-    // 設定を読み込む
     await loadSettings();
+    await loadRecentFiles();
     setupSettingsListeners();
+    setupSyncSettings();
+
+    // 状態監視リスナー
+    if (window.electronAPI && window.electronAPI.onSyncStatusChange) {
+        window.electronAPI.onSyncStatusChange((status) => {
+            if (status === 'syncing') {
+                if (btnCloudSync) btnCloudSync.classList.add('syncing');
+                if (syncStatusText) syncStatusText.textContent = '同期中...';
+            } else if (status === 'idle') {
+                if (btnCloudSync) btnCloudSync.classList.remove('syncing');
+                if (syncStatusText) syncStatusText.textContent = '';
+            } else if (status === 'error') {
+                if (btnCloudSync) btnCloudSync.classList.remove('syncing');
+                if (syncStatusText) syncStatusText.textContent = 'エラー';
+                setTimeout(() => { if (syncStatusText) syncStatusText.textContent = ''; }, 3000);
+            }
+        });
+    }
 
     initEditor();
     showWelcomeReadme();
     initializeFileTree();
-    setupFileExplorerEvents(); // ★追加: 空き領域クリックイベントの設定
+    setupFileExplorerEvents();
     updateOutline();
     updateLeftPaneWidthVariable();
-    initToolbarOverflow(); // ツールバーのレスポンシブ初期化
+    initToolbarOverflow();
 
     if (isTerminalVisible) {
         initializeTerminal();
@@ -2452,32 +3992,209 @@ window.addEventListener('load', async () => {
         switchHeaderButtons(document.querySelector('.side-switch.active').dataset.target);
     }
 
-    // ★追加: ファイルシステム変更通知のリスナー
     if (typeof window.electronAPI?.onFileSystemChanged === 'function') {
         window.electronAPI.onFileSystemChanged((payload) => {
             console.log('File system change detected:', payload);
-            // デバウンス処理
             if (window.fileTreeUpdateTimeout) clearTimeout(window.fileTreeUpdateTimeout);
             window.fileTreeUpdateTimeout = setTimeout(() => {
                 initializeFileTreeWithState();
-            }, 500); // 頻繁な更新を防ぐため0.5秒待つ
+
+                // Gitパネルが表示されている場合はGitステータスも更新
+                // const gitContent = document.getElementById('content-git');
+                // if (gitContent && !gitContent.classList.contains('content-hidden')) {
+                //     if (typeof refreshGitStatus === 'function') refreshGitStatus();
+                // }
+                if (typeof refreshGitStatus === 'function') {
+                    refreshGitStatus();
+                }
+            }, 500);
         });
     }
+
+    // エディタのコンテキストメニューリスナー設定
+    if (editorContainer) {
+        editorContainer.addEventListener('contextmenu', (e) => {
+            if (!globalEditorView) return;
+            e.preventDefault();
+            window.electronAPI.showEditorContextMenu();
+        });
+    }
+
+    // Gitセクションの開閉（アコーディオン）機能
+    const setupGitToggle = (headerId, listId) => {
+        const header = document.getElementById(headerId);
+        const list = document.getElementById(listId);
+
+        if (header && list) {
+            header.addEventListener('click', () => {
+                const isHidden = list.style.display === 'none';
+
+                if (isHidden) {
+                    // 開く
+                    list.style.display = 'block';
+                    header.classList.remove('collapsed');
+                } else {
+                    // 閉じる
+                    list.style.display = 'none';
+                    header.classList.add('collapsed');
+                }
+            });
+        }
+    };
+
+    setupGitToggle('header-unstaged', 'git-unstaged');
+    setupGitToggle('header-staged', 'git-staged');
+
+    // ブランチ切り替え機能の初期化
+    setupGitBranchSwitching();
+
+    // メインプロセスからのコンテキストメニューコマンド受信
+    window.electronAPI.onEditorContextMenuCommand((command) => {
+        if (!globalEditorView) return;
+
+        if (typeof command === 'string') {
+            switch (command) {
+                case 'bold':
+                    toggleMark(globalEditorView, '**');
+                    break;
+                case 'insert-table':
+                    insertTable(globalEditorView);
+                    break;
+                case 'code-block':
+                    insertCodeBlock(globalEditorView);
+                    break;
+            }
+        } else if (typeof command === 'object' && command.action === 'highlight') {
+            toggleHighlightColor(globalEditorView, command.color);
+        }
+    });
 });
+
+// ブランチ切り替え機能のセットアップ
+function setupGitBranchSwitching() {
+    const branchBadge = document.getElementById('git-current-branch');
+    if (!branchBadge) return;
+
+    branchBadge.title = "クリックしてブランチを切り替え";
+
+    branchBadge.addEventListener('click', async (e) => {
+        if (!currentDirectoryPath) return;
+        e.stopPropagation();
+
+        // 既存のメニューがあれば閉じる
+        if (activeContextMenu) {
+            activeContextMenu.remove();
+            activeContextMenu = null;
+        }
+
+        try {
+            // ブランチ一覧を取得
+            const result = await window.electronAPI.gitGetBranches(currentDirectoryPath);
+            if (!result.success) {
+                showNotification(`ブランチ情報の取得に失敗: ${result.error}`, 'error');
+                return;
+            }
+
+            // メニューを表示
+            showBranchMenu(e.target, result.branches, result.current);
+
+        } catch (err) {
+            console.error(err);
+            showNotification(`エラー: ${err.message}`, 'error');
+        }
+    });
+}
+
+// ブランチ選択メニューの表示（リモート対応版）
+function showBranchMenu(targetElement, branches, currentBranch) {
+    const rect = targetElement.getBoundingClientRect();
+
+    const menu = document.createElement('div');
+    menu.className = 'branch-menu';
+    menu.style.top = `${rect.bottom + 5}px`;
+    menu.style.left = `${rect.left}px`;
+
+    branches.forEach(branch => {
+        const item = document.createElement('div');
+        item.className = 'branch-menu-item';
+
+        // 現在のブランチにはスタイルを適用
+        const isCurrent = branch === currentBranch;
+        if (isCurrent) {
+            item.classList.add('current');
+        }
+
+        // リモートブランチかどうかの判定
+        const isRemote = branch.startsWith('origin/');
+        const displayIcon = isRemote ? '☁ ' : '🌿 ';
+        const displayName = branch; // isRemote ? branch.replace('origin/', '') : branch;
+
+        item.innerHTML = `
+            <span>${displayIcon}${displayName}</span>
+            ${isCurrent ? '<span class="branch-check">✓</span>' : ''}
+        `;
+
+        item.addEventListener('click', async () => {
+            menu.remove();
+            activeContextMenu = null;
+
+            if (isCurrent) return;
+
+            try {
+                showNotification(`'${displayName}' に切り替えています...`, 'info');
+
+                const result = await window.electronAPI.gitCheckout(currentDirectoryPath, branch);
+
+                if (result.success) {
+                    showNotification(`切り替え完了: ${branch}`, 'success');
+                    refreshGitStatus();
+                    initializeFileTreeWithState();
+                    // 必要に応じて現在開いているファイルもリロード
+                    if (currentFilePath && openedFiles.has(currentFilePath)) {
+                        openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
+                    }
+                } else {
+                    showNotification(`切り替えエラー: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                showNotification(`エラー: ${e.message}`, 'error');
+            }
+        });
+
+        menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+}
 
 // ========== ファイルシステム操作 ==========
 
-// ファイルを開く
 async function openFile(filePath, fileName) {
+    // パスを正規化して統一（区切り文字の違いや相対パスの問題を解消）
+    const normalizedPath = path.resolve(filePath);
+
+    // 履歴に追加
+    addToRecentFiles(normalizedPath);
+
     try {
         if (openedFiles.has('README.md')) {
             closeWelcomeReadme();
         }
 
+        // 既に開いているかチェック（正規化されたパスを使用）
+        let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
+
+        // 既にタブがある場合は、ファイル読み込みをスキップして切り替えるだけにする
+        if (tab) {
+            switchToFile(normalizedPath);
+            return;
+        }
+
         let fileContent = '';
         if (typeof window.electronAPI?.loadFile === 'function') {
             try {
-                fileContent = await window.electronAPI.loadFile(filePath);
+                fileContent = await window.electronAPI.loadFile(normalizedPath);
             } catch (error) {
                 console.error('Failed to load file content:', error);
                 fileContent = `ファイルを読み込めません: ${error.message}`;
@@ -2486,17 +4203,16 @@ async function openFile(filePath, fileName) {
             fileContent = `ファイル: ${fileName}\n(内容は読み込めません)`;
         }
 
-        let tab = document.querySelector(`[data-filepath="${CSS.escape(filePath)}"]`);
         if (!tab) {
             tab = document.createElement('div');
             tab.className = 'tab';
-            tab.dataset.filepath = filePath;
-            tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${filePath}">×</span>`;
+            tab.dataset.filepath = normalizedPath;
+            tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
             editorTabsContainer.appendChild(tab);
-            openedFiles.set(filePath, { content: fileContent, fileName: fileName });
+            openedFiles.set(normalizedPath, { content: fileContent, fileName: fileName });
         }
 
-        switchToFile(filePath);
+        switchToFile(normalizedPath);
     } catch (error) {
         console.error('Failed to open file:', error);
     }
@@ -2535,30 +4251,40 @@ function closeWelcomeReadme() {
 }
 
 function switchToFile(filePath) {
-    currentFilePath = filePath;
-    const fileData = openedFiles.get(filePath);
-    const fileContent = fileData ? fileData.content : '';
-
-    if (globalEditorView) {
-        // ファイル切り替え時は ExternalChange アノテーションを付けて dispatch
-        globalEditorView.dispatch({
-            changes: { from: 0, to: globalEditorView.state.doc.length, insert: fileContent },
-            annotations: ExternalChange.of(true) // プログラムによる変更であることを明示
-        });
+    // 1. 現在開いているファイルの状態を保存する (切り替え前)
+    if (currentFilePath && globalEditorView && openedFiles.has(currentFilePath)) {
+        const currentFileData = openedFiles.get(currentFilePath);
+        // エディタの完全な状態(履歴含む)を保存
+        currentFileData.editorState = globalEditorView.state;
+        // 内容テキストも念のため更新
+        currentFileData.content = globalEditorView.state.doc.toString();
     }
 
-    // ファイル名入力欄の更新
+    // 2. 新しいファイルに切り替え
+    currentFilePath = filePath;
+    const fileData = openedFiles.get(filePath);
+
+    if (globalEditorView) {
+        if (fileData.editorState) {
+            // 保存された状態(履歴含む)があれば復元
+            globalEditorView.setState(fileData.editorState);
+        } else {
+            // なければ新規作成 (ファイルロード直後など)
+            const fileContent = fileData ? fileData.content : '';
+            const newState = createEditorState(fileContent, filePath);
+            globalEditorView.setState(newState);
+        }
+    }
+
+    // --- 以下は既存のUI更新処理 ---
     if (fileTitleInput) {
         const fileName = fileData ? fileData.fileName : filePath.split(/[\/\\]/).pop();
-        // 拡張子を除く
         const extIndex = fileName.lastIndexOf('.');
         const fileNameWithoutExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
         fileTitleInput.value = fileNameWithoutExt;
     }
 
-    // ビューの同期
     switchMainView('content-readme');
-
     updateOutline();
 
     if (isPdfPreviewVisible) {
@@ -2573,17 +4299,13 @@ function switchToFile(filePath) {
 }
 
 function closeTab(element, isSettings = false) {
-    // 要素削除
     if (element) element.remove();
 
     if (isSettings) {
-        // 設定タブを閉じた場合、直近のファイルに戻る
         switchToLastFileOrReadme();
     } else {
-        // ファイルタブを閉じた場合
         const filePath = element.dataset.filepath;
 
-        // READMEは特別扱いせず閉じる
         if (filePath) {
             openedFiles.delete(filePath);
             fileModificationState.delete(filePath);
@@ -2591,7 +4313,6 @@ function closeTab(element, isSettings = false) {
             if (currentFilePath === filePath) {
                 currentFilePath = null;
                 if (globalEditorView) {
-                    // タブを閉じてエディタをクリアする際も ExternalChange を付与
                     globalEditorView.dispatch({
                         changes: { from: 0, to: globalEditorView.state.doc.length, insert: "" },
                         annotations: ExternalChange.of(true)
@@ -2648,7 +4369,6 @@ async function saveCurrentFile(isSaveAs = false) {
     }
 }
 
-// ========== タブ管理：イベント委譲 ==========
 if (editorTabsContainer) {
     editorTabsContainer.addEventListener('click', (e) => {
         const closeBtn = e.target.closest('.close-tab');
@@ -2673,49 +4393,41 @@ if (editorTabsContainer) {
 
 // ========== ファイルツリー操作 ==========
 
-// ★追加: 展開状態を保存しながらファイルツリーを更新する関数
 async function initializeFileTreeWithState() {
     const fileTreeContainer = document.getElementById('file-tree-container');
     if (!fileTreeContainer) return;
 
-    // 現在開いているフォルダのパスを保存
     const expandedPaths = new Set();
     const items = fileTreeContainer.querySelectorAll('.tree-item');
     items.forEach(item => {
         const toggle = item.querySelector('.tree-toggle');
-        // トグルが「▶」ではなく「▼」になっており、かつ子要素が表示されているものを保存
         if (toggle && toggle.textContent === '▼' && item.nextElementSibling && item.nextElementSibling.style.display !== 'none') {
             expandedPaths.add(item.dataset.path);
         }
     });
-    // ルートディレクトリは常に展開対象
     if (currentDirectoryPath) expandedPaths.add(currentDirectoryPath);
 
-    // ツリーの再構築
     await initializeFileTree();
 
-    // 展開状態の復元
-    // 注: DOMが再構築されるため、新しいDOMに対して操作する必要がある
-    // initializeFileTreeは非同期でルート直下のみ読み込むため、深層のフォルダを開くには再帰的な処理が必要
-    // ここでは簡易的に、保存されたパスのリストを使って順番に開いていく
-
-    // パスの深さ順にソート（親フォルダから順に開くため）
     const sortedPaths = Array.from(expandedPaths).sort((a, b) => a.length - b.length);
 
-    // 新しいコンテナを取得（initializeFileTreeで置換されているため）
     const newContainer = document.getElementById('file-tree-container');
     if (!newContainer) return;
 
     for (const path of sortedPaths) {
-        // パスに対応する要素を探す
         const item = newContainer.querySelector(`.tree-item[data-path="${CSS.escape(path)}"]`);
         if (item) {
             const toggle = item.querySelector('.tree-toggle');
             if (toggle && toggle.textContent === '▶') {
-                // まだ開いていない場合は開く
                 await toggleFolder(item);
             }
         }
+    }
+
+    // ツリー更新時にGitステータスも更新
+    const gitContent = document.getElementById('content-git');
+    if (gitContent && !gitContent.classList.contains('content-hidden')) {
+        refreshGitStatus();
     }
 }
 
@@ -2746,28 +4458,22 @@ async function initializeFileTree() {
             if (rootChildren) rootChildren.innerHTML = '';
             await loadDirectoryTreeContents(rootItem, currentDirectoryPath);
 
-            // ★追加: ルートアイテムにもドラッグ＆ドロップイベントを追加
             rootItem.addEventListener('dragover', handleDragOver);
             rootItem.addEventListener('dragleave', handleDragLeave);
             rootItem.addEventListener('drop', handleDrop);
         }
 
-        // ★追加: コンテナ全体（余白含む）へのドロップ対応
         newFileTreeContainer.addEventListener('dragover', handleDragOver);
         newFileTreeContainer.addEventListener('drop', handleDrop);
 
-        // クリックイベント委譲
         newFileTreeContainer.addEventListener('click', (e) => {
             const item = e.target.closest('.tree-item');
 
-            // ★修正: アイテム以外（空き領域）のクリックはここでは無視し、親(#content-files)のリスナーに任せる
-            // stopPropagationしなければ親まで伝播する
             if (!item) {
                 return;
             }
 
             if (item.classList.contains('creation-mode')) return;
-            // リネーム用input内でのクリックは無視
             if (e.target.tagName.toLowerCase() === 'input') return;
 
             e.stopPropagation();
@@ -2782,12 +4488,10 @@ async function initializeFileTree() {
             }
         });
 
-        // コンテキストメニューイベント委譲
         newFileTreeContainer.addEventListener('contextmenu', (e) => {
             const item = e.target.closest('.tree-item');
             if (!item) return;
             if (item.classList.contains('creation-mode')) return;
-            // リネーム中はメニューを出さない
             if (item.querySelector('input')) return;
 
             e.preventDefault();
@@ -2847,10 +4551,7 @@ async function toggleFolder(folderElement) {
 
         childrenContainer.style.display = 'block';
 
-        // 常に最新の内容をロードするように変更（ファイル監視と同期しやすくするため）
-        // if (childrenContainer.children.length === 0) { 
         await loadDirectoryTreeContents(folderElement, folderPath);
-        // }
     }
 }
 
@@ -2915,27 +4616,22 @@ function getFileIconData(filename) {
 function handleDragStart(e) {
     const item = e.target.closest('.tree-item');
 
-    // ルートアイテム（pathがcurrentDirectoryPathと同じ）はドラッグ不可にする
     if (!item || !item.dataset.path || item.dataset.path === currentDirectoryPath) {
         e.preventDefault();
         return;
     }
 
-    // ドラッグするファイルのパスを設定
     e.dataTransfer.setData('text/plain', item.dataset.path);
     e.dataTransfer.effectAllowed = 'move';
-    e.stopPropagation(); // イベントバブリング防止
+    e.stopPropagation();
 }
 
 function handleDragOver(e) {
-    e.preventDefault(); // ドロップを許可するために必須
-    e.stopPropagation(); // イベントバブリング防止
+    e.preventDefault();
+    e.stopPropagation();
 
     const targetItem = e.target.closest('.tree-item');
     if (targetItem) {
-        // フォルダの上にある場合のみハイライト（ファイルの上にはドロップできないようにする...が、
-        // 親フォルダへのドロップとして扱うならファイル上でもOKかもしれない。
-        // ここではシンプルにフォルダのみをターゲットとする）
         if (!targetItem.classList.contains('file')) {
             targetItem.classList.add('drag-over');
             e.dataTransfer.dropEffect = 'move';
@@ -2943,7 +4639,6 @@ function handleDragOver(e) {
             e.dataTransfer.dropEffect = 'none';
         }
     } else {
-        // 余白（ルート）へのドロップを許可
         e.dataTransfer.dropEffect = 'move';
     }
 }
@@ -2957,7 +4652,7 @@ function handleDragLeave(e) {
 
 async function handleDrop(e) {
     e.preventDefault();
-    e.stopPropagation(); // イベントバブリング防止（これが二重実行防止の鍵）
+    e.stopPropagation();
 
     const targetItem = e.target.closest('.tree-item');
     if (targetItem) targetItem.classList.remove('drag-over');
@@ -2968,41 +4663,32 @@ async function handleDrop(e) {
     let destFolderPath;
 
     if (targetItem) {
-        // 移動先がフォルダでない場合はキャンセル（ファイルへのドロップは無視）
         if (targetItem.classList.contains('file')) return;
         destFolderPath = targetItem.dataset.path;
     } else {
-        // ターゲットがない（余白へのドロップ）場合、ルートディレクトリを移動先とする
         destFolderPath = currentDirectoryPath;
     }
 
     if (!destFolderPath) return;
 
-    // 自分自身やその子孫への移動を禁止するためのチェックはメインプロセスで行うか、ここで行う
-    if (srcPath === destFolderPath) return; // 自分自身へのドロップ
+    if (srcPath === destFolderPath) return;
 
-    // ファイル名を抽出 (区切り文字は / または \)
     const fileName = srcPath.split(/[/\\]/).pop();
 
-    // 移動先の区切り文字を推測 (destFolderPathに含まれるもの、なければ /)
     const destSep = destFolderPath.includes('\\') ? '\\' : '/';
 
-    // 移動先パスを作成 (重複するセパレータを防ぐ)
     let destPath = destFolderPath;
     if (!destPath.endsWith(destSep)) {
         destPath += destSep;
     }
     destPath += fileName;
 
-    // 移動実行
     if (srcPath !== destPath) {
         try {
             if (typeof window.electronAPI?.moveFile === 'function') {
                 const result = await window.electronAPI.moveFile(srcPath, destPath);
                 if (result.success) {
                     showNotification(`移動しました: ${fileName}`, 'success');
-                    // ファイルツリーの更新は onFileSystemChanged で行われるためここでは何もしない
-                    // 必要なら即時反映ロジックを追加
                 } else {
                     showNotification(`移動に失敗しました: ${result.error}`, 'error');
                 }
@@ -3015,9 +4701,6 @@ async function handleDrop(e) {
 }
 
 function createTreeElement(item, parentPath) {
-    // ★修正: item.path (フルパス) があればそれを優先して dataset.path に設定する
-    // メインプロセスから返ってくる item.path は既に path.join で正しく処理されているため
-    // 手動結合によるパス区切り文字の不整合を防ぐ
     const itemPath = item.path || `${parentPath}/${item.name}`;
 
     const container = document.createElement('div');
@@ -3025,7 +4708,6 @@ function createTreeElement(item, parentPath) {
     container.dataset.path = itemPath;
     container.dataset.name = item.name;
 
-    // ドラッグ&ドロップ属性とイベントリスナーを追加
     container.draggable = true;
     container.addEventListener('dragstart', handleDragStart);
     container.addEventListener('dragover', handleDragOver);
@@ -3141,8 +4823,8 @@ async function showCreationInput(isFolder) {
             return;
         }
 
-        const separator = (targetPath.endsWith('/') || targetPath.endsWith('\\')) ? '' : '/';
-        const newPath = targetPath + separator + name;
+        // path.joinを使用してパスを正しく結合
+        const newPath = path.join(targetPath, name);
 
         try {
             if (isFolder) {
@@ -3156,11 +4838,10 @@ async function showCreationInput(isFolder) {
             }
 
             safeRemove();
-            // ★修正: 自動リロードに任せるため、ここでの手動リロードは必須ではないが、
-            // 即時フィードバックのため残しておく（ただし、ウォッチャーとの競合はデバウンスで吸収）
             await reloadContainer(targetContainer, targetPath);
 
             if (!isFolder) {
+                // 新規作成したファイルを開く（正規化されたパスが渡される）
                 openFile(newPath, name);
             }
 
@@ -3172,8 +4853,63 @@ async function showCreationInput(isFolder) {
         }
     };
 
+    // ファイル名バリデーション
+    const validateFileName = () => {
+        const name = inputField.value.trim();
+
+        if (!name) return null;
+
+        // 不正な文字/形式チェック
+        // .で終わる、.のみ、..のみなどは禁止
+        if (name === '.' || name === '..' || name.endsWith('.')) {
+            return "ファイル名は不正です（末尾にドットは使用できません）";
+        }
+
+        // 禁止文字チェック (Windows/Linux/Mac共通の一般的な禁止文字)
+        if (/[\\/:*?"<>|]/.test(name)) {
+            return "次の文字は使用できません: \\ / : * ? \" < > |";
+        }
+
+        // 同名ファイルチェック
+        // targetContainerは現在表示中のフォルダの中身なので、DOMから既存の名前を探す
+        // 直下の子要素のみ対象とする
+        if (targetContainer) {
+            const siblings = Array.from(targetContainer.querySelectorAll(':scope > .tree-item:not(.creation-mode)'));
+            const exists = siblings.some(item => item.dataset.name === name);
+            if (exists) {
+                return `「${name}」は既に存在します。別の名前を指定してください。`;
+            }
+        }
+
+        return null;
+    };
+
+    // リアルタイムバリデーション
+    inputField.addEventListener('input', () => {
+        const error = validateFileName();
+        if (error) {
+            inputField.style.borderColor = '#e81123'; // エラー色(赤)
+            inputField.title = error; // ツールチップで理由表示
+        } else {
+            inputField.style.borderColor = ''; // デフォルトに戻す
+            inputField.title = '';
+        }
+    });
+
     inputField.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const error = validateFileName();
+            if (error) {
+                // エラーがある場合はトースト通知を出して中断
+                showNotification(error, 'error');
+                // 入力欄にフォーカスを戻す（念のため）
+                inputField.focus();
+                return;
+            }
+
             finishCreation();
         } else if (e.key === 'Escape') {
             if (!isCreating) safeRemove();
@@ -3182,7 +4918,13 @@ async function showCreationInput(isFolder) {
 
     inputField.addEventListener('blur', () => {
         if (!isCreating) {
-            setTimeout(safeRemove, 100);
+            // バリデーションチェックしてから実行
+            const name = inputField.value.trim();
+            if (name && !validateFileName()) {
+                finishCreation();
+            } else {
+                setTimeout(safeRemove, 100);
+            }
         }
     });
 }
@@ -3210,11 +4952,47 @@ if (document.getElementById('btn-new-folder')) {
     document.getElementById('btn-new-folder').addEventListener('click', () => showCreationInput(true));
 }
 
+// ========== フォントサイズ調整用ヘルパー ==========
+function adjustFontSize(delta) {
+    const currentSize = parseInt(appSettings.fontSize);
+    if (isNaN(currentSize)) return;
+
+    let newSize = currentSize + delta;
+    if (newSize < 8) newSize = 8; // Min size
+    if (newSize > 64) newSize = 64; // Max size
+
+    appSettings.fontSize = `${newSize}px`;
+
+    // UI反映
+    saveSettings();
+    applySettingsToUI();
+    updateEditorSettings();
+
+}
+
 // ========== ショートカットキーと削除機能 ==========
 document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         saveCurrentFile();
+    }
+
+    // フォントサイズ拡大縮小 (Zoom In/Out)
+    // Ctrl + + / Ctrl + = / Ctrl + ; (JIS)
+    if (e.ctrlKey || e.metaKey) {
+        if (e.key === '+' || e.key === ';' || e.key === '=') {
+            e.preventDefault();
+            adjustFontSize(2); // +2px
+        } else if (e.key === '-') {
+            e.preventDefault();
+            adjustFontSize(-2); // -2px
+        } else if (e.key === '0') {
+            e.preventDefault();
+            appSettings.fontSize = '16px'; // リセット
+            saveSettings();
+            applySettingsToUI();
+            updateEditorSettings();
+        }
     }
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
@@ -3260,62 +5038,12 @@ document.addEventListener('keydown', (e) => {
             const path = selectedItem.dataset.path;
             const name = selectedItem.dataset.name;
             if (path && name) {
-                showModalConfirm(name, () => {
-                    confirmAndDelete(path);
-                });
+                // 確認ポップアップを消して直接実行
+                confirmAndDelete(path);
             }
         }
     }
 });
-
-function showModalConfirm(itemName, onConfirm) {
-    const existingModal = document.querySelector('.modal-overlay');
-    if (existingModal) existingModal.remove();
-
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-
-    const content = document.createElement('div');
-    content.className = 'modal-content';
-
-    const message = document.createElement('div');
-    message.className = 'modal-message';
-    message.textContent = `「${itemName}」を本当に削除しますか？\n（フォルダの場合は中身も削除されます）`;
-
-    const buttons = document.createElement('div');
-    buttons.className = 'modal-buttons';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'modal-btn';
-    cancelBtn.textContent = 'キャンセル';
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'modal-btn primary';
-    deleteBtn.textContent = '削除';
-
-    buttons.appendChild(cancelBtn);
-    buttons.appendChild(deleteBtn);
-    content.appendChild(message);
-    content.appendChild(buttons);
-    overlay.appendChild(content);
-    document.body.appendChild(overlay);
-
-    const closeModal = () => {
-        overlay.remove();
-        if (globalEditorView) globalEditorView.focus();
-    };
-
-    cancelBtn.addEventListener('click', closeModal);
-
-    deleteBtn.addEventListener('click', () => {
-        onConfirm();
-        closeModal();
-    });
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeModal();
-    });
-}
 
 async function confirmAndDelete(path) {
     try {
@@ -3323,16 +5051,9 @@ async function confirmAndDelete(path) {
             const success = await window.electronAPI.deleteFile(path);
 
             if (success) {
-                // 削除成功時、開いているタブを確認して閉じる処理
-                // path は削除されたファイルまたはフォルダのパス
-
-                // 削除対象に含まれる開いているファイルを探す
                 const tabsToClose = [];
 
                 for (const [filePath, _] of openedFiles) {
-                    // 完全一致（ファイル削除）または前方一致（フォルダ削除でその中身）
-                    // 区切り文字を含めてチェックすることで、類似名の別ファイルを誤検知するのを防ぐ
-                    // 例: "test" フォルダ削除で "test-file.md" が消えないように
                     if (filePath === path ||
                         filePath.startsWith(path + '\\') ||
                         filePath.startsWith(path + '/')) {
@@ -3340,16 +5061,21 @@ async function confirmAndDelete(path) {
                     }
                 }
 
-                // 該当するタブを閉じる
                 tabsToClose.forEach(filePath => {
                     const tab = document.querySelector(`[data-filepath="${CSS.escape(filePath)}"]`);
                     if (tab) {
-                        // closeTab(element, isSettings)
                         closeTab(tab, false);
                     }
                 });
 
-                showNotification('削除しました', 'success');
+                // Recent Filesリストからも削除して保存・再描画
+                recentFiles = recentFiles.filter(item => item.path !== path);
+                saveRecentFiles();
+                if (document.getElementById('content-recent') && !document.getElementById('content-recent').classList.contains('content-hidden')) {
+                    renderRecentFiles();
+                }
+
+                showNotification('ゴミ箱に移動しました', 'success');
             } else {
                 showNotification('ファイルの削除に失敗しました（ファイルが見つからない可能性があります）', 'error');
             }
@@ -3362,7 +5088,7 @@ async function confirmAndDelete(path) {
 
 let activeContextMenu = null;
 
-function showContextMenu(x, y, path, name) {
+function showContextMenu(x, y, itemPath, name) {
     if (activeContextMenu) activeContextMenu.remove();
 
     const menu = document.createElement('div');
@@ -3370,14 +5096,14 @@ function showContextMenu(x, y, path, name) {
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
 
-    // ★追加: 名前の変更
     const renameOption = document.createElement('div');
     renameOption.className = 'context-menu-item';
     renameOption.textContent = '名前の変更';
     renameOption.addEventListener('click', () => {
         menu.remove();
         activeContextMenu = null;
-        const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(path)}"]`);
+        // Fix: Use itemPath instead of path module
+        const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(itemPath)}"]`);
         if (treeItem) {
             startRenaming(treeItem);
         }
@@ -3389,13 +5115,132 @@ function showContextMenu(x, y, path, name) {
     deleteOption.addEventListener('click', () => {
         menu.remove();
         activeContextMenu = null;
-        showModalConfirm(name, () => {
-            confirmAndDelete(path);
-        });
+        // 確認ポップアップを消して直接実行
+        confirmAndDelete(itemPath);
+    });
+
+    // --- 区切り線 ---
+    const separator = document.createElement('div');
+    separator.style.height = '1px';
+    separator.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
+    separator.style.margin = '4px 0';
+
+    // 相対パスをコピー
+    const copyRelPathOption = document.createElement('div');
+    copyRelPathOption.className = 'context-menu-item';
+    copyRelPathOption.textContent = '相対パスをコピー';
+    copyRelPathOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        const relPath = path.relative(currentDirectoryPath, itemPath);
+        navigator.clipboard.writeText(relPath);
+        showNotification('相対パスをコピーしました', 'success');
+    });
+
+    // 絶対パスをコピー
+    const copyAbsPathOption = document.createElement('div');
+    copyAbsPathOption.className = 'context-menu-item';
+    copyAbsPathOption.textContent = '絶対パスをコピー';
+    copyAbsPathOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        navigator.clipboard.writeText(itemPath);
+        showNotification('絶対パスをコピーしました', 'success');
+    });
+
+    // エクスプローラーで表示
+    const openExplorerOption = document.createElement('div');
+    openExplorerOption.className = 'context-menu-item';
+    openExplorerOption.textContent = 'エクスプローラーで表示';
+    openExplorerOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        window.electronAPI.showItemInFolder(itemPath);
     });
 
     menu.appendChild(renameOption);
     menu.appendChild(deleteOption);
+    menu.appendChild(separator);
+    menu.appendChild(copyRelPathOption);
+    menu.appendChild(copyAbsPathOption);
+    menu.appendChild(openExplorerOption);
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+}
+
+// 空白部分用のコンテキストメニュー表示
+function showEmptySpaceContextMenu(x, y) {
+    if (activeContextMenu) activeContextMenu.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    const newFileOption = document.createElement('div');
+    newFileOption.className = 'context-menu-item';
+    newFileOption.textContent = '新規ファイル';
+    newFileOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        showCreationInput(false); // 新規ファイル作成
+    });
+
+    const newFolderOption = document.createElement('div');
+    newFolderOption.className = 'context-menu-item';
+    newFolderOption.textContent = '新規フォルダ';
+    newFolderOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        showCreationInput(true); // 新規フォルダ作成
+    });
+
+    // --- 区切り線(ルートディレクトリ用) ---
+    const separator = document.createElement('div');
+    separator.style.height = '1px';
+    separator.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
+    separator.style.margin = '4px 0';
+
+    // 相対パスをコピー (ルートなので "." )
+    const copyRelPathOption = document.createElement('div');
+    copyRelPathOption.className = 'context-menu-item';
+    copyRelPathOption.textContent = '相対パスをコピー';
+    copyRelPathOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        navigator.clipboard.writeText('.');
+        showNotification('相対パス(.)をコピーしました', 'success');
+    });
+
+    // 絶対パスをコピー
+    const copyAbsPathOption = document.createElement('div');
+    copyAbsPathOption.className = 'context-menu-item';
+    copyAbsPathOption.textContent = '絶対パスをコピー';
+    copyAbsPathOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        navigator.clipboard.writeText(currentDirectoryPath);
+        showNotification('絶対パスをコピーしました', 'success');
+    });
+
+    // エクスプローラーで開く
+    const openExplorerOption = document.createElement('div');
+    openExplorerOption.className = 'context-menu-item';
+    openExplorerOption.textContent = 'エクスプローラーで開く';
+    openExplorerOption.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        window.electronAPI.openPath(currentDirectoryPath);
+    });
+
+    menu.appendChild(newFileOption);
+    menu.appendChild(newFolderOption);
+    menu.appendChild(separator);
+    menu.appendChild(copyRelPathOption);
+    menu.appendChild(copyAbsPathOption);
+    menu.appendChild(openExplorerOption);
+
     document.body.appendChild(menu);
     activeContextMenu = menu;
 }

@@ -12,7 +12,7 @@ window.electronAPI = {
   writeToTerminal: (terminalId, data) => ipcRenderer.send('pty:write', { terminalId, data }),
   resizeTerminal: (terminalId, cols, rows) => ipcRenderer.send('pty:resize', { terminalId, cols, rows }),
   saveTerminalState: () => ipcRenderer.invoke('terminal:save-state'),
-  
+
   onTerminalData: (callback) => {
     const handler = (event, payload) => callback(payload);
     ipcRenderer.on('pty:data', handler);
@@ -26,54 +26,100 @@ window.electronAPI = {
   executeCommand: (command, currentDir) => ipcRenderer.invoke('execute-command', command, currentDir),
   getCurrentDirectory: () => ipcRenderer.invoke('get-current-directory'),
   getCompletionCandidates: (prefix, currentDir) => ipcRenderer.invoke('get-completion-candidates', prefix, currentDir),
-  
+
   // Git operations
   gitStatus: (repoPath) => ipcRenderer.invoke('git-status', repoPath),
   gitAdd: (repoPath, filepath) => ipcRenderer.invoke('git-add', repoPath, filepath),
   gitRemove: (repoPath, filepath) => ipcRenderer.invoke('git-remove', repoPath, filepath),
+  gitReset: (repoPath, filepath) => ipcRenderer.invoke('git-reset', repoPath, filepath),
   gitCommit: (repoPath, message) => ipcRenderer.invoke('git-commit', repoPath, message),
+  gitStageAll: (repoPath) => ipcRenderer.invoke('git-stage-all', repoPath),
   gitPush: (repoPath) => ipcRenderer.invoke('git-push', repoPath),
   gitPull: (repoPath) => ipcRenderer.invoke('git-pull', repoPath),
+  gitInit: (repoPath) => ipcRenderer.invoke('git-init', repoPath),
+  gitGetBranches: (repoPath) => ipcRenderer.invoke('git-get-branches', repoPath),
+  gitCheckout: (repoPath, branchName) => ipcRenderer.invoke('git-checkout', repoPath, branchName),
+  gitFetch: (repoPath) => ipcRenderer.invoke('git-fetch', repoPath),
+
+  authGitHub: () => ipcRenderer.invoke('auth-github'),
   
+  // renderer.jsの呼び出し名に合わせて追加・マッピング
+  gitLog: (repoPath, depth) => ipcRenderer.invoke('git-log', repoPath, depth), // 旧APIとの互換性用
+  gitHistory: (repoPath, depth) => ipcRenderer.invoke('git-log', repoPath, depth), // renderer.jsが使用
+  gitGetCommitDetail: (repoPath, oid) => ipcRenderer.invoke('git-commit-detail', repoPath, oid), // 新規追加
+
+  // リセットとリバート
+  gitResetHead: (repoPath, oid) => ipcRenderer.invoke('git-reset-head', repoPath, oid),
+  gitRevertCommit: (repoPath, oid) => ipcRenderer.invoke('git-revert-commit', repoPath, oid),
+
   // File operations
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
   renameFile: (oldPath, newName) => ipcRenderer.invoke('rename-file', oldPath, newName),
-  moveFile: (srcPath, destPath) => ipcRenderer.invoke('move-file', srcPath, destPath), // ★追加
+  moveFile: (srcPath, destPath) => ipcRenderer.invoke('move-file', srcPath, destPath),
   listFiles: (dirPath) => ipcRenderer.invoke('list-files', dirPath),
   readDirectory: (dirPath) => ipcRenderer.invoke('read-directory', dirPath),
   deleteFile: (filepath) => ipcRenderer.invoke('delete-file', filepath),
   createDirectory: (dirPath) => ipcRenderer.invoke('create-directory', dirPath),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
-  
+
   // Window operations
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
-  
+
   // PDF
   generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
-  exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent), // ★追加
+  exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent),
 
   // Utility
-  fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url), // ★追加: URLタイトル取得
-  fetchUrlMetadata: (url) => ipcRenderer.invoke('fetch-url-metadata', url), // ★追加: URLメタデータ(OGP)取得
+  fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url),
+  fetchUrlMetadata: (url) => ipcRenderer.invoke('fetch-url-metadata', url),
 
   // Settings
   loadAppSettings: () => ipcRenderer.invoke('load-app-settings'),
   saveAppSettings: (settings) => ipcRenderer.invoke('save-app-settings', settings),
 
+  // Recent Files
+  loadRecentFiles: () => ipcRenderer.invoke('load-recent-files'),
+  saveRecentFiles: (files) => ipcRenderer.invoke('save-recent-files', files),
+
+  // Cloud Sync (引数なしに変更)
+  startCloudSync: () => ipcRenderer.invoke('sync:start'),
+  authDropbox: () => ipcRenderer.invoke('sync:auth-dropbox'),
+  authGDrive: () => ipcRenderer.invoke('sync:auth-gdrive'),
+  onSyncStatusChange: (callback) => {
+    const handler = (event, status) => callback(status);
+    ipcRenderer.on('sync:status-change', handler);
+    return () => ipcRenderer.removeListener('sync:status-change', handler);
+  },
+
   // Context Menu Helper
   showFileContextMenu: (filePath, isDirectory) => ipcRenderer.send('show-file-context-menu', filePath, isDirectory),
-  
-  // Open External Links (New)
+  showEditorContextMenu: () => ipcRenderer.send('show-editor-context-menu'),
+
+  onEditorContextMenuCommand: (callback) => {
+    const handler = (event, command) => callback(command);
+    ipcRenderer.on('editor-context-menu-command', handler);
+    return () => ipcRenderer.removeListener('editor-context-menu-command', handler);
+  },
+
+  // Open External Links
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+  // エクスプローラー連携機能
+  showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
+  openPath: (dirPath) => ipcRenderer.invoke('open-path', dirPath),
+
+  // ファイル操作のUndo/Redo ---
+  undoFileOperation: () => ipcRenderer.invoke('file:undo'),
+  redoFileOperation: () => ipcRenderer.invoke('file:redo'),
 
   // Event Listeners
   onInitiateRename: (callback) => ipcRenderer.on('initiate-rename', (_event, val) => callback(val)),
   onFileDeleted: (callback) => ipcRenderer.on('file-deleted', (_event, val) => callback(val)),
-  
-  // ★追加: ファイルシステムの変更を監視するイベントリスナー
+
+  // ファイルシステムの変更を監視するイベントリスナー
   onFileSystemChanged: (callback) => {
     const handler = (event, payload) => callback(payload);
     ipcRenderer.on('file-system-changed', handler);
