@@ -830,8 +830,18 @@ class TableWidget extends WidgetType {
                 this.isProgrammaticFocus = true;
                 target.focus({ preventScroll: false });
 
-                // キャレットを末尾に
-                if (target.firstChild || target.textContent) {
+                // キャレットをコンテンツスパン内の末尾に配置
+                // ドラッグハンドルやリサイザーではなく、実際のテキストコンテンツ内にキャレットを置く
+                const contentSpan = target.querySelector('.cm-cell-content');
+                if (contentSpan) {
+                    const s = window.getSelection();
+                    const r = document.createRange();
+                    r.selectNodeContents(contentSpan);
+                    r.collapse(false); // 末尾に移動
+                    s?.removeAllRanges();
+                    s?.addRange(r);
+                } else if (target.firstChild || target.textContent) {
+                    // フォールバック: コンテンツスパンがない場合
                     const s = window.getSelection();
                     const r = document.createRange();
                     r.selectNodeContents(target);
