@@ -1,7 +1,9 @@
+@charset "UTF-8";
 /* Markdown IDE - Styles */
 
 /* ========== Base & Reset ========== */
-html, body {
+html,
+body {
     margin: 0;
     padding: 0;
     height: 100vh;
@@ -21,15 +23,15 @@ html, body {
     --sidebar-border: #ccc;
     --topbar-bg: #eaf1f6;
     --topbar-border: #c9d6e2;
-    
+
     --main-bg: #ffffff;
     --text-color: #333;
-    
+
     --activitybar-width: 50px;
     --leftpane-width: 240px;
     --right-pane-width: 350px;
     --current-left-pane-width: 240px;
-    
+
     /* Toolbar Colors */
     --toolbar-bg: #f9f9f9;
     --toolbar-border: #ddd;
@@ -42,15 +44,22 @@ html, body {
     --cb-header-bg: #f6f8fa;
     --cb-body-bg: #f6f8fa;
     --cb-radius: 6px;
-    --cb-gutter-width: 3em; /* コードブロック行番号エリアの幅 */
+    --cb-gutter-width: 3em;
+    /* コードブロック行番号エリアの幅 */
 
     /* Editor Settings */
     --editor-font-size: 16px;
     --editor-font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-    --line-height: 1.6em; 
-    
+    --line-height: 1.6em;
+
     /* List Settings */
-    --list-indent-width: 2em; /* タブ幅相当（約4文字分）のインデント */
+    --list-indent-width: 2em;
+    /* タブ幅相当（約4文字分）のインデント */
+
+    /* Table Extension Vars */
+    --table-handle-color: #94a3b8;
+    --table-handle-hover: #22d3ee;
+    --table-drop-highlight: #22d3ee;
 }
 
 /* Dark Theme Overrides */
@@ -60,10 +69,10 @@ body[data-theme="dark"] {
     --sidebar-border: #333;
     --topbar-bg: #2d2d2d;
     --topbar-border: #1e1e1e;
-    
+
     --main-bg: #1e1e1e;
     --text-color: #d4d4d4;
-    
+
     --toolbar-bg: #2d2d2d;
     --toolbar-border: #1e1e1e;
     --toolbar-btn-bg: #333;
@@ -80,7 +89,9 @@ body[data-theme="dark"] {
 }
 
 /* 入力フォームとテキストエリアは選択・編集可能にする */
-input, textarea, select {
+input,
+textarea,
+select {
     user-select: text;
     -webkit-user-select: text;
     cursor: text;
@@ -134,7 +145,7 @@ input[type="number"]::-webkit-outer-spin-button {
     color: var(--text-color);
 }
 
-.top-bar button, 
+.top-bar button,
 .window-control-btn,
 .editor-tabs .tab {
     -webkit-app-region: no-drag;
@@ -196,6 +207,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .side-switch-group button:hover {
     background-color: rgba(0, 0, 0, 0.1);
 }
+
 body[data-theme="dark"] .side-switch-group button:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
@@ -251,11 +263,12 @@ body[data-theme="dark"] .side-switch-group button:hover {
 }
 
 .editor-tabs .tab .close-tab:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
     opacity: 1;
 }
+
 body[data-theme="dark"] .editor-tabs .tab .close-tab:hover {
-    background-color: rgba(255,255,255,0.2);
+    background-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Window Controls */
@@ -280,10 +293,11 @@ body[data-theme="dark"] .editor-tabs .tab .close-tab:hover {
 }
 
 .window-control-btn:not(.close):hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
 }
+
 body[data-theme="dark"] .window-control-btn:not(.close):hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .window-control-btn.close:hover {
@@ -415,13 +429,14 @@ body[data-theme="dark"] .window-control-btn:not(.close):hover {
 }
 
 .header-btn:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
     color: var(--text-color);
     border-radius: 3px;
     opacity: 1;
 }
+
 body[data-theme="dark"] .header-btn:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .left-pane-content {
@@ -429,17 +444,20 @@ body[data-theme="dark"] .header-btn:hover {
     overflow-y: auto;
     padding: 5px 0;
     font-size: 13px;
-    outline: none; /* デフォルトのフォーカス枠を消してカスタムスタイルを適用 */
+    outline: none;
+    /* デフォルトのフォーカス枠を消してカスタムスタイルを適用 */
 }
 
 /* ファイルエクスプローラーのフォーカススタイル */
 /* ファイルが選択されていない（.selectedクラスを持つ要素がない）場合のみ枠を表示 */
 #content-files:focus:not(:has(.tree-item.selected)) {
     outline: 1px solid #007acc;
-    outline-offset: -1px; /* 枠線を内側に */
+    outline-offset: -1px;
+    /* 枠線を内側に */
 }
 
-#content-git, #content-outline {
+#content-git,
+#content-outline {
     padding: 10px;
 }
 
@@ -465,10 +483,11 @@ body[data-theme="dark"] .header-btn:hover {
 }
 
 .tree-item:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
 }
+
 body[data-theme="dark"] .tree-item:hover {
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 /* ドラッグ&ドロップ用スタイル */
@@ -503,7 +522,8 @@ body[data-theme="dark"] .tree-item:hover {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    pointer-events: none; /* ドラッグイベントの邪魔にならないように */
+    pointer-events: none;
+    /* ドラッグイベントの邪魔にならないように */
 }
 
 .tree-children {
@@ -524,7 +544,8 @@ body[data-theme="dark"] .tree-item:hover {
     margin-left: 5px;
     border-radius: 2px;
     min-width: 0;
-    height: 20px; /* tree-itemの高さに合わせる */
+    height: 20px;
+    /* tree-itemの高さに合わせる */
 }
 
 /* Outline */
@@ -546,15 +567,16 @@ body[data-theme="dark"] .tree-item:hover {
 }
 
 .outline-item:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
     opacity: 1;
 }
+
 body[data-theme="dark"] .outline-item:hover {
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .outline-item.active {
-    background-color: rgba(0,122,204,0.2);
+    background-color: rgba(0, 122, 204, 0.2);
     color: inherit;
 }
 
@@ -622,7 +644,8 @@ body[data-theme="dark"] .outline-item:hover {
 
 /* File Title Bar (Obsidian-like) */
 .file-title-bar {
-    padding: 10px 40px 0 40px; /* エディタのパディングに合わせる */
+    padding: 10px 40px 0 40px;
+    /* エディタのパディングに合わせる */
     background-color: var(--main-bg);
     flex-shrink: 0;
     display: flex;
@@ -636,7 +659,8 @@ body[data-theme="dark"] .outline-item:hover {
 
 .file-title-input {
     width: 100%;
-    max-width: 900px; /* エディタのmax-widthに合わせる */
+    max-width: 900px;
+    /* エディタのmax-widthに合わせる */
     font-size: 1.5em;
     font-weight: bold;
     border: none;
@@ -673,7 +697,8 @@ body[data-theme="dark"] .outline-item:hover {
     width: 100%;
 }
 
-.toolbar-left, .toolbar-right {
+.toolbar-left,
+.toolbar-right {
     display: flex;
     gap: 4px;
     align-items: center;
@@ -755,10 +780,11 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu {
 }
 
 .toolbar-overflow-menu button:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
+
 body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
 }
 
 .toolbar-overflow-menu .separator {
@@ -771,7 +797,8 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     flex-shrink: 0;
 }
 
-.toolbar-dropdown-menu, .toolbar-icon-menu {
+.toolbar-dropdown-menu,
+.toolbar-icon-menu {
     display: none;
     position: absolute;
     top: 100%;
@@ -786,7 +813,8 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     padding: 4px 0;
 }
 
-.toolbar-dropdown-menu::before, .toolbar-icon-menu::before {
+.toolbar-dropdown-menu::before,
+.toolbar-icon-menu::before {
     content: "";
     position: absolute;
     top: -10px;
@@ -892,7 +920,11 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
 }
 
 /* LiveMark Styles */
-.cm-live-h1, .cm-live-h2, .cm-live-h3, .cm-live-bold, .cm-live-li::before {
+.cm-live-h1,
+.cm-live-h2,
+.cm-live-h3,
+.cm-live-bold,
+.cm-live-li::before {
     color: var(--text-color);
 }
 
@@ -900,12 +932,29 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     text-decoration: none !important;
 }
 
-.cm-live-h1 { font-size: 1.618em; }
-.cm-live-h2 { font-size: 1.462em; }
-.cm-live-h3 { font-size: 1.318em; }
-.cm-live-h4 { font-size: 1.188em; }
-.cm-live-h5 { font-size: 1.076em; }
-.cm-live-h6 { font-size: 1.0em; }
+.cm-live-h1 {
+    font-size: 1.618em;
+}
+
+.cm-live-h2 {
+    font-size: 1.462em;
+}
+
+.cm-live-h3 {
+    font-size: 1.318em;
+}
+
+.cm-live-h4 {
+    font-size: 1.188em;
+}
+
+.cm-live-h5 {
+    font-size: 1.076em;
+}
+
+.cm-live-h6 {
+    font-size: 1.0em;
+}
 
 .cm-live-quote {
     background: var(--cb-body-bg);
@@ -915,11 +964,23 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     margin: 0.5em 0;
     display: block;
 }
-body[data-theme="dark"] .cm-live-quote { color: #8b949e; }
 
-.cm-live-bold { font-weight: bold; }
-.cm-live-em { font-style: italic; }
-.cm-live-s { text-decoration: line-through; color: #6a737d; }
+body[data-theme="dark"] .cm-live-quote {
+    color: #8b949e;
+}
+
+.cm-live-bold {
+    font-weight: bold;
+}
+
+.cm-live-em {
+    font-style: italic;
+}
+
+.cm-live-s {
+    text-decoration: line-through;
+    color: #6a737d;
+}
 
 .cm-live-code {
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
@@ -929,16 +990,24 @@ body[data-theme="dark"] .cm-live-quote { color: #8b949e; }
     color: #e01e5a;
     font-size: 0.9em;
 }
-body[data-theme="dark"] .cm-live-code { color: #ff7b72; }
+
+body[data-theme="dark"] .cm-live-code {
+    color: #ff7b72;
+}
 
 .cm-live-link {
     color: #0366d6;
     text-decoration: underline;
     cursor: text;
 }
-body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 
-.cm-live-link:hover { text-decoration: underline; }
+body[data-theme="dark"] .cm-live-link {
+    color: #58a6ff;
+}
+
+.cm-live-link:hover {
+    text-decoration: underline;
+}
 
 .cm-hide-marker {
     font-size: 0;
@@ -953,7 +1022,7 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 }
 
 .cm-live-li::before {
-    content: '•';
+    content: '\2022'; /* 文字化け防止のためエスケープ表記に変更 */
     position: absolute;
     /* 0.5em(基本) + (インデントレベル * タブ幅) */
     left: calc(0.5em + (var(--indent-level, 0) * var(--list-indent-width)));
@@ -1009,19 +1078,23 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
     text-align: center;
     display: inline-block;
 }
-body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
+
+body[data-theme="dark"] .cm-live-ol-marker {
+    color: #58a6ff;
+}
 
 /* ★★★ Code Block Styles (Updated with Line Numbers) ★★★ */
 
 /* 共通設定 */
-.cm-code-block, 
+.cm-code-block,
 .cm-code-header,
 .cm-code-footer {
     background-color: var(--cb-body-bg);
     font-family: var(--editor-font-family-mono, monospace);
     box-sizing: border-box;
     margin: 0 !important;
-    position: relative; /* 行番号配置用 */
+    position: relative;
+    /* 行番号配置用 */
 }
 
 /* コードブロックの中身（行番号エリア分パディング確保） */
@@ -1030,7 +1103,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 }
 
 /* ヘッダーとフッターはパディングなしで通常の配置（ただし境界線を合わせる） */
-.cm-code-header, 
+.cm-code-header,
 .cm-code-footer {
     padding-left: 12px !important;
 }
@@ -1045,11 +1118,15 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     height: 100%;
     text-align: right;
     padding-right: 8px;
-    color: #888; /* 行番号の色 */
-    background-color: var(--cb-body-bg); /* 背景色（本体と同じ） */
-    border-right: 1px solid var(--cb-border-color); /* 境界線 */
+    color: #888;
+    /* 行番号の色 */
+    background-color: var(--cb-body-bg);
+    /* 背景色（本体と同じ） */
+    border-right: 1px solid var(--cb-border-color);
+    /* 境界線 */
     box-sizing: border-box;
-    pointer-events: none; /* 選択不可 */
+    pointer-events: none;
+    /* 選択不可 */
     font-size: 0.9em;
     opacity: 0.7;
 }
@@ -1085,7 +1162,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     border-right: 1px solid var(--cb-border-color);
     border-top-left-radius: var(--cb-radius);
     border-top-right-radius: var(--cb-radius);
-    
+
     display: flex !important;
     justify-content: flex-end !important;
     align-items: center;
@@ -1130,7 +1207,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 }
 
 .cm-code-copy-btn:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
     color: var(--text-color);
 }
 
@@ -1147,8 +1224,9 @@ body[data-theme="dark"] .cm-code-header {
 body[data-theme="dark"] .cm-code-copy-btn {
     color: #8b949e;
 }
+
 body[data-theme="dark"] .cm-code-copy-btn:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
     color: #c9d1d9;
 }
 
@@ -1304,7 +1382,8 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
     flex-shrink: 0;
 }
 
-#new-terminal-btn, #dropdown-toggle {
+#new-terminal-btn,
+#dropdown-toggle {
     background: none;
     border: none;
     color: #ccc;
@@ -1313,7 +1392,8 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
     font-size: 14px;
 }
 
-#new-terminal-btn:hover, #dropdown-toggle:hover {
+#new-terminal-btn:hover,
+#dropdown-toggle:hover {
     color: #fff;
 }
 
@@ -1405,7 +1485,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
 
 .pdf-page-canvas {
     background-color: #fff;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     margin-bottom: 20px;
     max-width: 100%;
 }
@@ -1419,7 +1499,8 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
     background: #007acc;
 }
 
-.resizer:hover, .resizer.resizing {
+.resizer:hover,
+.resizer.resizing {
     opacity: 1;
 }
 
@@ -1461,7 +1542,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
     position: fixed;
     background: var(--main-bg);
     border: 1px solid var(--sidebar-border);
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
     z-index: 1000;
     min-width: 120px;
     border-radius: 3px;
@@ -1487,7 +1568,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -1500,7 +1581,7 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
     padding: 20px;
     border-radius: 5px;
     width: 300px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
 }
 
 .modal-message {
@@ -1558,7 +1639,8 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
 }
 
 /* ========== Utilities ========== */
-.hidden, .content-hidden {
+.hidden,
+.content-hidden {
     display: none !important;
 }
 
@@ -1590,7 +1672,8 @@ body[data-theme="dark"] .cm-code-copy-btn:hover {
 }
 
 /* Resizing State */
-body.is-resizing-col, body.is-resizing-row {
+body.is-resizing-col,
+body.is-resizing-row {
     user-select: none;
 }
 
@@ -1602,7 +1685,8 @@ body.is-resizing-row {
     cursor: row-resize !important;
 }
 
-body.is-resizing-col *, body.is-resizing-row * {
+body.is-resizing-col *,
+body.is-resizing-row * {
     pointer-events: none !important;
 }
 
@@ -1627,7 +1711,8 @@ body.is-resizing-row .bottom-pane {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    pointer-events: none; /* クリックを透過 */
+    pointer-events: none;
+    /* クリックを透過 */
 }
 
 .notification-toast {
@@ -1635,7 +1720,7 @@ body.is-resizing-row .bottom-pane {
     color: #fff;
     padding: 12px 20px;
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     font-size: 14px;
     opacity: 0;
     transform: translateY(20px);
@@ -1675,13 +1760,17 @@ body:not([data-theme="dark"]) .notification-toast {
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0; /* 余白なし */
-    padding: 0; /* パディングなし */
+    margin: 0;
+    /* 余白なし */
+    padding: 0;
+    /* パディングなし */
     color: #888;
-    font-size: 0.75em; /* 少し小さくして行内に収める */
+    font-size: 0.75em;
+    /* 少し小さくして行内に収める */
     font-weight: normal;
     user-select: none;
-    height: var(--line-height); /* エディタの行高に合わせる */
+    height: var(--line-height);
+    /* エディタの行高に合わせる */
     box-sizing: border-box;
 }
 
@@ -1689,11 +1778,13 @@ body:not([data-theme="dark"]) .notification-toast {
 .cm-page-break-widget::after {
     content: "";
     flex: 1;
-    border-bottom: 1px dashed #ccc; /* 点線 */
+    border-bottom: 1px dashed #ccc;
+    /* 点線 */
     margin: 0 10px;
     opacity: 0.5;
     position: relative;
-    top: -1px; /* 垂直位置の微調整 */
+    top: -1px;
+    /* 垂直位置の微調整 */
 }
 
 body[data-theme="dark"] .cm-page-break-widget {
@@ -1827,8 +1918,15 @@ body[data-theme="dark"] .cm-bookmark-cover {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .5; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: .5;
+    }
 }
 
 .skeleton-box {
@@ -1838,4 +1936,136 @@ body[data-theme="dark"] .cm-bookmark-cover {
 
 body[data-theme="dark"] .skeleton-box {
     background-color: #374151;
+}
+
+/* ========== Table Extension Styles ========== */
+
+/* テーブルスタイル */
+.cm-md-table-widget th,
+.cm-md-table-widget td {
+    position: relative;
+}
+
+/* ドラッグハンドル共通 */
+.cm-drag-handle {
+    position: absolute;
+    background-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    /* ホバーで表示 */
+    transition: opacity 0.2s, background-color 0.2s;
+    z-index: 50;
+    /* リサイザー(10)より上に配置 */
+    border-radius: 2px;
+
+    /* ★重要: ハンドル上でテキスト選択を無効化し、ドラッグを優先させる */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: element;
+    cursor: grab;
+}
+
+/* ホバー時にハンドルを表示 */
+/* ヘッダーセル全体のホバー */
+.cm-md-table-widget th:hover .cm-drag-handle,
+/* 行（1列目）全体のホバー */
+.cm-md-table-widget tr:hover td:first-child .cm-drag-handle {
+    opacity: 1;
+}
+
+/* 列用ハンドル (上部) */
+.cm-drag-handle-col {
+    top: -8px;
+    /* 少し外側に配置 */
+    left: 0;
+    width: 100%;
+    height: 10px;
+    /* クリック判定エリアを確保 */
+    cursor: grab;
+
+    /* ドット柄の装飾 */
+    background-image: radial-gradient(circle, var(--table-handle-color) 1px, transparent 1px);
+    background-size: 4px 4px;
+    background-position: center;
+    background-repeat: repeat-x;
+}
+
+/* 行用ハンドル (左端) */
+.cm-drag-handle-row {
+    left: -10px;
+    /* 少し外側に配置 */
+    top: 0;
+    width: 10px;
+    /* クリック判定エリアを確保 */
+    height: 100%;
+    cursor: grab;
+
+    /* ドット柄の装飾 */
+    background-image: radial-gradient(circle, var(--table-handle-color) 1px, transparent 1px);
+    background-size: 4px 4px;
+    background-position: center;
+    background-repeat: repeat-y;
+}
+
+.cm-drag-handle:hover {
+    background-color: rgba(34, 211, 238, 0.3);
+    /* --accent-color */
+    opacity: 1 !important;
+    /* ハンドル自体のホバー時は強制表示 */
+}
+
+.cm-drag-handle:active {
+    cursor: grabbing;
+}
+
+/* ドロップターゲットのハイライト */
+/* 列ドロップ: 左側のボーダーを強調 */
+th.cm-drop-target {
+    position: relative;
+}
+
+th.cm-drop-target::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -2px;
+    height: 100%;
+    width: 4px;
+    background-color: var(--table-drop-highlight);
+    z-index: 60;
+    pointer-events: none;
+}
+
+/* 行ドロップ: 上側のボーダーを強調 */
+tr.cm-drop-target>td {
+    border-top: 2px solid var(--table-drop-highlight) !important;
+    background-color: rgba(34, 211, 238, 0.05) !important;
+}
+
+/* ドラッグ中のテーブル全体の状態 */
+/* .cm-table-dragging-active {
+    ドラッグ中はカーソルをgrabbingに
+} */
+
+/* リサイズハンドル (既存) */
+.cm-table-resizer {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    width: 4px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 20;
+    /* ハンドル(50)より下、コンテンツより上 */
+}
+
+body.cm-table-resizing {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.cm-table-selected {
+    background-color: rgba(0, 120, 255, 0.2) !important;
 }

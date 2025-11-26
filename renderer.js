@@ -11,6 +11,8 @@ const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUn
 const { javascript } = require("@codemirror/lang-javascript");
 const { oneDark } = require("@codemirror/theme-one-dark");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
+// ★追加: テーブル拡張機能の読み込み
+const { tableExtension, tableKeymap } = require("./tableExtensionVars.js");
 
 // プログラムによる変更を識別するためのアノテーション
 const ExternalChange = Annotation.define();
@@ -328,6 +330,12 @@ Markdown（マークダウン）は、手軽に文章の構造や装飾を書く
 1. 番号付きリスト
 2. 番号付きリスト
     1-1. ネストされた番号付きリスト
+
+## テーブル
+| Header 1 | Header 2 |
+| :--- | :--- |
+| Cell 1 | Cell 2 |
+| Cell 3 | Cell 4 |
 
 ## コード
 インラインの \`code\` や、コードブロックが書けます：
@@ -724,6 +732,12 @@ function initEditor() {
             themeCompartment.of(initialTheme),
             editorStyleCompartment.of(initialStyle),
             indentUnit.of("    "),
+            
+            // ★追加: テーブル拡張機能 (Widget)
+            tableExtension,
+            // ★追加: テーブル拡張機能 (Keymap) - 優先度を高く設定
+            Prec.high(tableKeymap),
+
             // カスタムキーマップを最高優先度で登録
             Prec.highest(keymap.of(obsidianLikeListKeymap)),
             // ペーストイベントハンドラを追加
