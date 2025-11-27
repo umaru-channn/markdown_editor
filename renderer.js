@@ -24,6 +24,14 @@ const rightPane = document.getElementById('right-pane');
 const rightActivityBar = document.querySelector('.right-activity-bar');
 const bottomPane = document.getElementById('bottom-pane');
 const centerPane = document.getElementById('center-pane');
+// DOM Elements for Sync - IDを修正
+const syncBtn = document.getElementById('btn-sync'); // 'sync-btn' から 'btn-sync' に修正
+const syncModal = document.getElementById('sync-modal');
+const modalClose = document.querySelector('.modal .close');
+const saveTokenBtn = document.getElementById('save-token-btn');
+const startSyncBtn = document.getElementById('start-sync-btn');
+const dropboxTokenInput = document.getElementById('dropbox-token-input');
+const syncStatusLog = document.getElementById('sync-status-log');
 
 // トップバー操作
 const btnToggleLeftPane = document.getElementById('btn-toggle-leftpane');
@@ -3265,3 +3273,84 @@ document.addEventListener('click', () => {
         activeContextMenu = null;
     }
 });
+
+// Syncボタンのリスナー登録 (DOMが存在する場合のみ)
+if (syncBtn) {
+    syncBtn.addEventListener('click', () => {
+        // 現在のトークンを表示
+        dropboxTokenInput.value = localStorage.getItem('dropbox_access_token') || '';
+        syncModal.style.display = 'block';
+    });
+}
+
+if (modalClose) {
+    modalClose.addEventListener('click', () => {
+        syncModal.style.display = 'none';
+    });
+}
+
+window.addEventListener('click', (event) => {
+    if (syncModal && event.target == syncModal) {
+        syncModal.style.display = 'none';
+    }
+});
+
+if (saveTokenBtn) {
+    saveTokenBtn.addEventListener('click', () => {
+        const token = dropboxTokenInput.value.trim();
+        if (token) {
+            if (window.dropboxSyncService) {
+                window.dropboxSyncService.setAccessToken(token);
+                logSync("Token saved locally.");
+            } else {
+                logSync("Dropbox service not loaded.");
+            }
+        } else {
+            logSync("Token is empty.");
+        }
+    });
+}
+
+if (startSyncBtn) {
+    startSyncBtn.addEventListener('click', async () => {
+        if (!currentDirectoryPath) {
+            logSync("Error: No folder opened locally. Please open a folder first.");
+            return;
+        }
+
+        startSyncBtn.disabled = true;
+        startSyncBtn.innerText = "Syncing...";
+        
+        if (window.dropboxSyncService) {
+            // 現在開いているディレクトリを同期のルートとする
+            window.dropboxSyncService.setBasePath(currentDirectoryPath);
+
+            try {
+                await window.dropboxSyncService.sync((message) => {
+                    logSync(message);
+                });
+                
+                // 同期完了後、ファイルリストをリフレッシュ
+                await initializeFileTree();
+                logSync("Sync finished successfully.");
+            } catch (error) {
+                logSync(`Error: ${error.message}`);
+                console.error(error);
+            } finally {
+                startSyncBtn.disabled = false;
+                startSyncBtn.innerText = "Sync Now";
+            }
+        } else {
+            logSync("Error: Dropbox service not found.");
+            startSyncBtn.disabled = false;
+            startSyncBtn.innerText = "Sync Now";
+        }
+    });
+}
+
+function logSync(message) {
+    if (!syncStatusLog) return;
+    const p = document.createElement('div');
+    p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    syncStatusLog.prepend(p); // 最新を上に
+}

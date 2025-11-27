@@ -1,8 +1,8 @@
 // preload.js
-const { ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
-// contextBridge ではなく window オブジェクトに直接割り当てる
-window.electronAPI = {
+// ElectronAPI オブジェクトの定義
+const electronAPI = {
   // --- Terminal APIs ---
   getTerminalConfig: () => ipcRenderer.invoke('terminal:get-config'),
   updateTerminalConfig: (updates) => ipcRenderer.invoke('terminal:update-config', updates),
@@ -39,7 +39,7 @@ window.electronAPI = {
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
   renameFile: (oldPath, newName) => ipcRenderer.invoke('rename-file', oldPath, newName),
-  moveFile: (srcPath, destPath) => ipcRenderer.invoke('move-file', srcPath, destPath), // ★追加
+  moveFile: (srcPath, destPath) => ipcRenderer.invoke('move-file', srcPath, destPath), 
   listFiles: (dirPath) => ipcRenderer.invoke('list-files', dirPath),
   readDirectory: (dirPath) => ipcRenderer.invoke('read-directory', dirPath),
   deleteFile: (filepath) => ipcRenderer.invoke('delete-file', filepath),
@@ -53,11 +53,11 @@ window.electronAPI = {
 
   // PDF
   generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
-  exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent), // ★追加
+  exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent), 
 
   // Utility
-  fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url), // ★追加: URLタイトル取得
-  fetchUrlMetadata: (url) => ipcRenderer.invoke('fetch-url-metadata', url), // ★追加: URLメタデータ(OGP)取得
+  fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url), 
+  fetchUrlMetadata: (url) => ipcRenderer.invoke('fetch-url-metadata', url), 
 
   // Settings
   loadAppSettings: () => ipcRenderer.invoke('load-app-settings'),
@@ -73,7 +73,7 @@ window.electronAPI = {
   onInitiateRename: (callback) => ipcRenderer.on('initiate-rename', (_event, val) => callback(val)),
   onFileDeleted: (callback) => ipcRenderer.on('file-deleted', (_event, val) => callback(val)),
 
-  // ★追加: ファイルシステムの変更を監視するイベントリスナー
+  // ファイルシステムの変更を監視するイベントリスナー
   onFileSystemChanged: (callback) => {
     const handler = (event, payload) => callback(payload);
     ipcRenderer.on('file-system-changed', handler);
@@ -81,4 +81,36 @@ window.electronAPI = {
   }
 };
 
-console.log('Preload script loaded - electronAPI exposed via window');
+// 従来の同期API用オブジェクト (APIの一部を再利用)
+const syncApi = {
+    // ★修正: load-fileの結果をオブジェクト { success, content } にラップして返す
+    // これにより dropboxSync.js の期待する形式に合わせ、Read Errorを回避します
+    readFile: async (filePath) => {
+        try {
+            const content = await ipcRenderer.invoke('load-file', filePath);
+            return { success: true, content };
+        } catch (error) {
+            console.error(`Read Error: ${filePath}`, error);
+            return { success: false, error: error.message };
+        }
+    },
+    saveFile: (data) => ipcRenderer.invoke('save-file', data.filePath, data.content), // 引数構造に合わせて調整
+    
+    // 同期用API
+    listFilesRecursive: (dirPath) => ipcRenderer.invoke('list-files-recursive', dirPath),
+    getFileStats: (filePath) => ipcRenderer.invoke('get-file-stats', filePath),
+    createDirectory: (dirPath) => ipcRenderer.invoke('create-directory', dirPath),
+    deleteFile: (filePath) => ipcRenderer.invoke('delete-file', filePath)
+};
+
+// contextBridgeを使ってメインワールドに公開
+try {
+  contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+  contextBridge.exposeInMainWorld('api', syncApi);
+} catch (error) {
+  // contextIsolation: false の場合のフォールバック
+  window.electronAPI = electronAPI;
+  window.api = syncApi;
+}
+
+console.log('Preload script loaded');

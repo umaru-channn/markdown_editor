@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="node_modules/katex/dist/katex.min.css" />
+    <!-- モーダル等のスタイル用にFontAwesomeが必要な場合は追加しますが、今回は既存スタイルに合わせてEmoji/テキストで実装します -->
 </head>
 
 <body>
@@ -60,6 +61,8 @@
             <!-- 左アクティビティバー -->
             <div class="activity-bar">
                 <div class="spacer"></div>
+                <!-- ★追加: Remotely Save (Dropbox) ボタン -->
+                <div class="icon" id="btn-sync" title="Remotely Save (Dropbox)">☁️</div>
                 <div class="icon" id="btn-zen" title="Zenモード">🧘</div>
                 <div class="icon" id="btn-settings" title="設定">⚙️</div>
             </div>
@@ -315,8 +318,31 @@
         </div>
     </div>
 
-    <!-- ★追加: 通知用コンテナ -->
+    <!-- 通知用コンテナ -->
     <div id="notification-container" class="notification-container"></div>
+
+    <!-- ★追加: Sync Settings Modal -->
+    <div id="sync-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>Remotely Save (Dropbox) Settings</span>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Dropbox Access Token:</p>
+                <input type="text" id="dropbox-token-input" placeholder="Paste your access token here...">
+                <p style="font-size: 0.8em; color: #aaa;">
+                    Dropbox Developers Console で "Generate Access Token" を行い、ここに貼り付けてください。<br>
+                    このトークンはローカルストレージにのみ保存されます。
+                </p>
+                <div id="sync-status-log" class="sync-log"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-token-btn" class="btn">Save Token</button>
+                <button id="start-sync-btn" class="btn">Sync Now</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
@@ -334,6 +360,9 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
         window.pdfjsLib = pdfjsLib;
     </script>
+    <!-- ★追加: Sync Service -->
+    <script src="dropboxSync.js"></script>
+    
     <script src="./renderer.js"></script>
 </body>
 

@@ -235,7 +235,8 @@ function createWindow() {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; img-src 'self' https: data:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:;"
+          // ★修正: connect-src に Dropbox API のドメインを追加
+          "default-src 'self'; connect-src 'self' https://api.dropboxapi.com https://content.dropboxapi.com; img-src 'self' https: data:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:;"
         ]
       }
     })
@@ -928,10 +929,8 @@ ipcMain.handle('delete-file', async (event, filepath) => {
 
 ipcMain.handle('create-directory', async (event, dirPath) => {
   try {
-    if (!fs.existsSync(dirPath)) {
-      fs.mkdirSync(dirPath, { recursive: true });
-    }
-    return true;
+    await fs.promises.mkdir(dirPath, { recursive: true });
+    return { success: true };
   } catch (error) {
     console.error('Failed to create directory:', error);
     throw error;
@@ -1288,3 +1287,50 @@ app.on('window-all-closed', function () {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+
+// --- 新規追加: 同期用ハンドラー ---
+
+// 指定ディレクトリ以下の全ファイルを再帰的に取得
+ipcMain.handle('list-files-recursive', async (event, dirPath) => {
+    try {
+        const getFiles = async (dir) => {
+            const dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+            const files = await Promise.all(dirents.map((dirent) => {
+                const res = path.resolve(dir, dirent.name);
+                return dirent.isDirectory() ? getFiles(res) : res;
+            }));
+            return Array.prototype.concat(...files);
+        };
+        
+        const allFiles = await getFiles(dirPath);
+        // ルートパスからの相対パスに変換して返す
+        const relativeFiles = allFiles.map(file => ({
+            fullPath: file,
+            relativePath: path.relative(dirPath, file).replace(/\\/g, '/') // Windows対応
+        }));
+        return { success: true, files: relativeFiles };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// ファイルの詳細情報（更新日時、サイズ）を取得
+ipcMain.handle('get-file-stats', async (event, filePath) => {
+    try {
+        const stats = await fs.promises.stat(filePath);
+        return { 
+            success: true, 
+            mtime: stats.mtime.getTime(), // ミリ秒
+            size: stats.size
+        };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// ディレクトリ作成（再帰的）の重複ハンドラーを削除済み (上部の同名ハンドラー優先)
+// create-directory はすでに登録済みのため、ここでは削除
+
+// ファイル削除（同期時の競合解決や削除反映用）
+// delete-file もすでに登録済みだが、実装が異なる可能性があるため確認
+// 上部にあるハンドラーと統合 (上部のハンドラーは fs.rmSync を使用しフォルダ削除にも対応しているため、そちらを使用)
