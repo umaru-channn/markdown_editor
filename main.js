@@ -973,7 +973,7 @@ function createWindow() {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; img-src 'self' https: data:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com;"
+          "default-src 'self'; img-src 'self' https: data: file:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com;"
         ]
       }
     })
@@ -2275,6 +2275,30 @@ ipcMain.handle('select-folder', async (event) => {
     }
   } catch (error) {
     console.error('Failed to select folder:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ファイル選択ダイアログ (ローカル画像用)
+ipcMain.handle('select-file', async (event) => {
+  try {
+    const mainWindow = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      title: '挿入するファイルを選択',
+      filters: [
+        { name: 'Images', extensions: ['jpg', 'png', 'gif', 'svg', 'webp', 'jpeg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      return { success: true, path: result.filePaths[0] };
+    } else {
+      return { success: false, path: null };
+    }
+  } catch (error) {
+    console.error('Failed to select file:', error);
     return { success: false, error: error.message };
   }
 });

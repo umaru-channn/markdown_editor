@@ -1,4 +1,5 @@
 /* livePreviewPlugin.js */
+const path = require('path');
 const { ViewPlugin, Decoration, WidgetType, keymap } = require("@codemirror/view");
 const { syntaxTree } = require("@codemirror/language");
 const { RangeSetBuilder } = require("@codemirror/state");
@@ -39,6 +40,31 @@ const LANGUAGE_LIST = [
     { label: "Scala", value: "scala" }
 ];
 
+// Altテキストからサイズを解析するヘルパー関数
+function parseAltText(rawAlt) {
+    if (!rawAlt) return { alt: "", width: null };
+
+    // パイプ(|)を探す
+    const pipeIndex = rawAlt.lastIndexOf('|');
+    if (pipeIndex === -1) return { alt: rawAlt, width: null };
+
+    // パイプの後ろが数字(または数字x数字)かチェック
+    const sizePart = rawAlt.substring(pipeIndex + 1);
+    const content = rawAlt.substring(0, pipeIndex);
+
+    // "100" または "100x200" の形式にマッチ (今回は幅だけを使用)
+    const match = sizePart.match(/^(\d+)(?:x(\d+))?$/);
+    if (match) {
+        return {
+            alt: content,
+            width: match[1]
+        };
+    }
+
+    // サイズ指定でない場合はそのままAltテキストとして扱う
+    return { alt: rawAlt, width: null };
+}
+
 function findLinkText(node, state) {
     let textStart = 0;
     let textEnd = 0;
@@ -62,7 +88,7 @@ function findLinkText(node, state) {
 function formatLanguageName(lang) {
     if (!lang) return "Plain Text";
     const l = lang.toLowerCase();
-    
+
     // LANGUAGE_LISTから検索
     const found = LANGUAGE_LIST.find(item => item.value === l);
     if (found) return found.label;
@@ -110,64 +136,124 @@ class HRWidget extends WidgetType {
 
 /* ImageWidget */
 class ImageWidget extends WidgetType {
-    constructor(alt, src) { super(); this.alt = alt; this.src = src; }
-
-    // 前回のウィジェットと同じ内容ならDOMを再利用する（これでリサイズ状態が維持される）
-    eq(other) {
-        return this.src === other.src && this.alt === other.alt;
+    constructor(alt, src, width) {
+        super();
+        this.alt = alt;
+        this.src = src;
+        this.width = width; // 幅情報を保持
     }
-    
-    toDOM() {
-        // 画像を包むラッパーコンテナ
+
+    eq(other) {
+        return this.src === other.src &&
+            this.alt === other.alt &&
+            this.width === other.width;
+    }
+
+    toDOM(view) {
         const wrapper = document.createElement("div");
         wrapper.className = "cm-image-wrapper";
-        
+
+        // Markdownから指定された幅があれば適用
+        if (this.width) {
+            wrapper.style.width = this.width + "px";
+        }
+
         const img = document.createElement("img");
         img.className = "cm-live-widget-image";
-        img.src = this.src;
-        img.alt = this.alt;
         
-        // リサイズ用のハンドル（右端）
+        // パス解決ロジック (ローカルファイル対応)
+        let imageSrc = this.src;
+        
+        // URLが http/https で始まらず、かつデータURIでもない場合
+        if (!/^https?:\/\//i.test(imageSrc) && !/^data:/i.test(imageSrc)) {
+            // renderer.js で設定した現在のディレクトリパスを取得
+            const currentDir = document.body.dataset.currentDir;
+            
+            if (currentDir) {
+                // 絶対パスでない場合は結合して絶対パス化
+                if (!path.isAbsolute(imageSrc)) {
+                    // path.joinで結合し、fileプロトコルを付与
+                    // Windowsパスのバックスラッシュも考慮してスラッシュに統一
+                    const absPath = path.join(currentDir, imageSrc);
+                    imageSrc = `file://${absPath.replace(/\\/g, '/')}`;
+                } else {
+                    // すでに絶対パスなら file:// をつけるだけ
+                    imageSrc = `file://${imageSrc.replace(/\\/g, '/')}`;
+                }
+            }
+        }
+        img.src = imageSrc;
+        img.alt = this.alt;
+
+        // 読み込み失敗時の表示崩れ防止
+        img.onerror = () => {
+            img.style.minWidth = "50px";
+            img.style.minHeight = "50px";
+            img.style.backgroundColor = "rgba(0,0,0,0.05)";
+        };
+
         const handle = document.createElement("div");
         handle.className = "cm-image-resize-handle";
-        
+
         wrapper.appendChild(img);
         wrapper.appendChild(handle);
-        
-        // ドラッグによるリサイズ処理
+
+        // リサイズ処理
         handle.addEventListener("mousedown", (e) => {
-            e.preventDefault(); // テキスト選択等を防止
+            e.preventDefault();
             e.stopPropagation();
-            
+
             const startX = e.clientX;
-            // 現在の幅を取得
-            const startWidth = wrapper.getBoundingClientRect().width;
-            
+            const startRect = wrapper.getBoundingClientRect();
+            const startWidth = startRect.width;
+            let currentWidth = startWidth;
+
             const onMouseMove = (moveEvent) => {
                 const diff = moveEvent.clientX - startX;
-                const newWidth = Math.max(50, startWidth + diff); // 最小幅50px
-                
-                // ラッパーの幅を更新（画像はwidth:100%で追従）
-                wrapper.style.width = `${newWidth}px`;
+                currentWidth = Math.max(50, startWidth + diff);
+                wrapper.style.width = `${currentWidth}px`;
             };
-            
+
             const onMouseUp = () => {
                 document.removeEventListener("mousemove", onMouseMove);
                 document.removeEventListener("mouseup", onMouseUp);
+
+                // リサイズ終了後にMarkdownテキストを更新
+                this.updateSizeInMarkdown(view, wrapper, Math.round(currentWidth));
             };
-            
+
             document.addEventListener("mousemove", onMouseMove);
             document.addEventListener("mouseup", onMouseUp);
         });
-        
+
         return wrapper;
     }
-    
-    // 基本的にCodeMirrorのエディタ操作（カーソル移動等）の影響を受けないようにする
-    // これにより、カーソル移動時のバグやちらつきを防止
-    ignoreEvent() {
-        return true;
+
+    // Markdown内の `![alt|size](url)` を書き換えるメソッド
+    updateSizeInMarkdown(view, wrapperDom, newWidth) {
+        const pos = view.posAtDOM(wrapperDom);
+        if (pos === null) return;
+
+        const tree = syntaxTree(view.state);
+        let node = tree.resolveInner(pos, 1);
+
+        // Imageノードを探す
+        while (node && node.name !== "Image" && node.name !== "Document") {
+            node = node.parent;
+        }
+
+        if (node && node.name === "Image") {
+            // 新しいテキストを構築: ![alt|newWidth](src)
+            const newAltText = `${this.alt}|${newWidth}`;
+            const newText = `![${newAltText}](${this.src})`;
+
+            view.dispatch({
+                changes: { from: node.from, to: node.to, insert: newText }
+            });
+        }
     }
+
+    ignoreEvent() { return true; }
 }
 
 class CheckboxWidget extends WidgetType {
@@ -190,7 +276,7 @@ class CheckboxWidget extends WidgetType {
 class CodeBlockLanguageWidget extends WidgetType {
     constructor(lang) { super(); this.lang = lang; }
     eq(other) { return other.lang === this.lang; }
-    
+
     toDOM(view) {
         const container = document.createElement("div");
         container.className = "cm-language-widget-container";
@@ -200,7 +286,7 @@ class CodeBlockLanguageWidget extends WidgetType {
         selectBtn.className = "cm-language-select-btn";
         selectBtn.innerHTML = `<span>${formatLanguageName(this.lang)}</span> <span class="arrow">▼</span>`;
         selectBtn.title = "言語を選択";
-        
+
         selectBtn.addEventListener("mousedown", (e) => {
             e.preventDefault(); // エディタのフォーカス喪失を防ぐ
             this.showDropdown(view, selectBtn);
@@ -211,7 +297,7 @@ class CodeBlockLanguageWidget extends WidgetType {
         copyBtn.className = "cm-code-copy-btn";
         copyBtn.textContent = "コピー";
         copyBtn.title = "コードをクリップボードにコピー";
-        
+
         // Widget内での直接イベントハンドリングに変更
         copyBtn.addEventListener("mousedown", (e) => {
             e.preventDefault();
@@ -239,7 +325,7 @@ class CodeBlockLanguageWidget extends WidgetType {
             const endLine = view.state.doc.lineAt(node.to);
             const codeStart = startLine.to + 1;
             const codeEnd = endLine.from;
-            
+
             if (codeStart < codeEnd) {
                 const codeText = view.state.sliceDoc(codeStart, codeEnd);
                 if (navigator.clipboard) {
@@ -264,13 +350,13 @@ class CodeBlockLanguageWidget extends WidgetType {
 
         const dropdown = document.createElement("div");
         dropdown.className = "cm-language-dropdown-portal";
-        
+
         const searchInput = document.createElement("input");
         searchInput.type = "text";
         searchInput.className = "cm-language-search";
         searchInput.placeholder = "言語を検索...";
         searchInput.spellcheck = false;
-        
+
         const listContainer = document.createElement("div");
         listContainer.className = "cm-language-list";
 
@@ -288,17 +374,17 @@ class CodeBlockLanguageWidget extends WidgetType {
                 // コードブロックの先頭行を取得
                 const line = view.state.doc.lineAt(node.from);
                 const lineText = line.text;
-                
+
                 // 正規表現で ```lang の部分を特定して置換
                 const match = lineText.match(/^(\s*`{3,})([\w-]*)/);
                 if (match) {
                     const prefix = match[1]; // "```"
                     const currentLang = match[2]; // "javascript"
-                    
+
                     // 言語指定部分の開始位置と終了位置
                     const start = line.from + prefix.length;
                     const end = start + currentLang.length;
-                    
+
                     view.dispatch({
                         changes: { from: start, to: end, insert: newLang }
                     });
@@ -309,7 +395,7 @@ class CodeBlockLanguageWidget extends WidgetType {
         const renderList = (filterText = "") => {
             listContainer.innerHTML = "";
             const lowerFilter = filterText.toLowerCase();
-            
+
             LANGUAGE_LIST.forEach(item => {
                 if (filterText && !item.label.toLowerCase().includes(lowerFilter) && !item.value.toLowerCase().includes(lowerFilter)) {
                     return;
@@ -319,7 +405,7 @@ class CodeBlockLanguageWidget extends WidgetType {
                 listItem.className = "cm-language-item";
                 const isSelected = (this.lang || "").toLowerCase() === item.value;
                 if (isSelected) listItem.classList.add("selected");
-                
+
                 listItem.innerHTML = `
                     <span class="label">${item.label}</span>
                     ${isSelected ? '<span class="check">✓</span>' : ''}
@@ -367,7 +453,7 @@ class CodeBlockLanguageWidget extends WidgetType {
 
         const rect = targetBtn.getBoundingClientRect();
         dropdown.style.top = `${rect.bottom + 4}px`;
-        
+
         // 右端揃えにするか左揃えにするか（画面からはみ出さないように）
         const dropdownWidth = 220; // CSSと合わせる
         if (rect.left + dropdownWidth > window.innerWidth - 20) {
@@ -384,13 +470,13 @@ class CodeBlockLanguageWidget extends WidgetType {
                 document.removeEventListener("mousedown", outsideClickListener);
             }
         };
-        
+
         setTimeout(() => {
             document.addEventListener("mousedown", outsideClickListener);
         }, 0);
     }
 
-    ignoreEvent() { return true; } 
+    ignoreEvent() { return true; }
 }
 
 /* --- 改ページ (Page Break) Widget --- */
@@ -611,7 +697,7 @@ function buildDecorations(view) {
             while ((match = highlightRegex.exec(lineText)) !== null) {
                 const start = line.from + match.index;
                 const end = start + match[0].length;
-                
+
                 // カーソルがハイライト内にあるか
                 const isCursorIn = (cursor >= start && cursor <= end);
 
@@ -828,10 +914,20 @@ function buildDecorations(view) {
                 }
                 else if (node.name === "Image") {
                     if (isCursorInNode) return false;
-                    const alt = findLinkText(node, state);
+
+                    // サイズ解析を行いWidgetに渡す
+                    const rawAlt = findLinkText(node, state);
+                    const { alt, width } = parseAltText(rawAlt); // 分割
+
                     const urlNode = (typeof n.getChild === "function") ? n.getChild("URL") : null;
                     const src = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to) : "";
-                    collectedDecos.push({ from: line.from, to: line.to, side: -1, deco: Decoration.replace({ widget: new ImageWidget(alt, src) }) });
+
+                    collectedDecos.push({
+                        from: line.from,
+                        to: line.to,
+                        side: -1,
+                        deco: Decoration.replace({ widget: new ImageWidget(alt, src, width) })
+                    });
                     processedLines.add(line.from);
                     return false;
                 }

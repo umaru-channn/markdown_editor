@@ -1455,6 +1455,45 @@ document.getElementById('highlight-btn')?.addEventListener('click', () => toggle
 
 document.getElementById('link-btn')?.addEventListener('click', () => insertLink(globalEditorView));
 document.getElementById('image-btn')?.addEventListener('click', () => insertImage(globalEditorView));
+// ローカル画像挿入ボタンの処理
+document.getElementById('local-image-btn')?.addEventListener('click', async () => {
+    if (!globalEditorView) return;
+    
+    try {
+        const result = await window.electronAPI.selectFile();
+        if (result.success && result.path) {
+            const absolutePath = result.path;
+            let insertPath = absolutePath;
+
+            // 可能であれば相対パスに変換
+            if (currentDirectoryPath) {
+                try {
+                    // Windows環境でのパス区切り文字対策も含めて相対パス化
+                    const relativePath = path.relative(currentDirectoryPath, absolutePath);
+                    // 画像パスとしてはスラッシュ区切りが望ましいため置換
+                    insertPath = relativePath.replace(/\\/g, '/');
+                } catch (e) {
+                    console.warn('Relative path calculation failed:', e);
+                }
+            }
+
+            const fileName = path.basename(absolutePath);
+            const insertText = `![${fileName}](${insertPath})`;
+            
+            const { state, dispatch } = globalEditorView;
+            const { from, to } = state.selection.main;
+            
+            dispatch({
+                changes: { from: from, to: to, insert: insertText },
+                selection: { anchor: from + insertText.length }
+            });
+            globalEditorView.focus();
+        }
+    } catch (e) {
+        console.error('Local image insertion failed:', e);
+        showNotification(`エラー: ${e.message}`, 'error');
+    }
+});
 document.getElementById('btn-table')?.addEventListener('click', () => insertTable(globalEditorView));
 
 document.getElementById('code-btn')?.addEventListener('click', () => insertCodeBlock(globalEditorView));
@@ -1592,6 +1631,15 @@ function handleToolbarResize() {
 
 // ========== 基本機能 ==========
 let autoSaveTimer = null; // 自動保存用タイマー
+
+// カレントディレクトリをDOMに保存してプラグインから参照可能にする
+function updateCurrentDirData() {
+    if (currentDirectoryPath) {
+        document.body.dataset.currentDir = currentDirectoryPath;
+    } else {
+        delete document.body.dataset.currentDir;
+    }
+}
 
 function onEditorInput(markAsDirty = true) {
     // 1. 未保存マークの更新
@@ -5128,6 +5176,8 @@ async function initializeFileTree() {
     try {
         if (typeof window.electronAPI?.getCurrentDirectory === 'function') {
             currentDirectoryPath = await window.electronAPI.getCurrentDirectory();
+            // ディレクトリ取得時にデータ属性を更新
+            updateCurrentDirData();
         } else {
             currentDirectoryPath = '.';
         }

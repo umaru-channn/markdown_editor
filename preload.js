@@ -82,6 +82,9 @@ window.electronAPI = {
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
 
+  // ファイル選択API
+  selectFile: () => ipcRenderer.invoke('select-file'),
+
   // PDF
   generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
   exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent),
