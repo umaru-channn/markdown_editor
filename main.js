@@ -3,6 +3,8 @@ const { app, BrowserWindow, ipcMain, dialog, session, shell, Menu, MenuItem } = 
 const path = require('node:path')
 const fs = require('fs')
 const { exec } = require('child_process')
+const util = require('util');
+const execPromise = util.promisify(exec); // execをPromise化
 const iconv = require('iconv-lite')
 const os = require('os')
 const git = require('isomorphic-git')
@@ -31,6 +33,22 @@ const GDRIVE_CLIENT_SECRET = process.env.GDRIVE_CLIENT_SECRET;
 const workingDirectories = new Map();
 // 各ウィンドウごとのファイルウォッチャーを保持
 const fileWatchers = new Map();
+
+// Gitコマンド実行用ヘルパー関数
+async function runGitCommand(dir, command) {
+  try {
+    // Windows環境での文字化け対策などが本来必要ですが、簡易化のため標準設定で実行
+    // 必要に応じて iconv-lite で stdout をデコードしてください
+    const { stdout, stderr } = await execPromise(`git ${command}`, { 
+      cwd: dir,
+      maxBuffer: 10 * 1024 * 1024 // 10MB (大きな出力に対応)
+    });
+    return { success: true, stdout, stderr };
+  } catch (error) {
+    console.error(`Git Command Error: ${command}`, error);
+    return { success: false, error: error.message || error.stderr };
+  }
+}
 
 // ========== Undo/Redo History Management ==========
 const fileHistory = {
@@ -1444,21 +1462,18 @@ ipcMain.handle('execute-command', async (event, command, currentDir) => {
   });
 });
 
-// Git operations
+// git-init: isomorphic-git から CLI へ変更
 ipcMain.handle('git-init', async (event, repoPath) => {
   try {
     const dir = repoPath;
     if (!dir) throw new Error('Invalid directory path');
 
-    await git.init({ fs, dir });
+    // "git init" を実行
+    const result = await runGitCommand(dir, 'init');
+    if (!result.success) throw new Error(result.error);
 
-    // 改行コードの自動変換を有効化 (LF ⇔ CRLF)
-    await git.setConfig({
-      fs,
-      dir,
-      path: 'core.autocrlf',
-      value: 'true'
-    });
+    // 改行コード設定 (core.autocrlf = true)
+    await runGitCommand(dir, 'config core.autocrlf true');
 
     return { success: true };
   } catch (error) {
@@ -1665,48 +1680,26 @@ ipcMain.handle('git-get-branches', async (event, repoPath) => {
   }
 });
 
-// git-checkout ハンドラ (リモートブランチからの作成に対応)
+// git-checkout: isomorphic-git から CLI へ変更
 ipcMain.handle('git-checkout', async (event, repoPath, branchName) => {
   try {
-    const dir = repoPath;
-
-    // リモートブランチ (origin/xxx) が指定された場合
-    if (branchName.startsWith('origin/')) {
-      const newBranchName = branchName.replace('origin/', '');
-
-      // ローカルに同名ブランチがまだない場合、リモートを追跡する形で新規作成
-      const locals = await git.listBranches({ fs, dir });
-      if (!locals.includes(newBranchName)) {
-        // リモートの最新コミットIDを取得
-        // isomorphic-gitでは refs/remotes/origin/xxx を参照する
-        // エラーハンドリングのため try-catch は呼び出し元任せにするかここで処理
-        try {
-          // リモートの参照先OIDを取得する（完全なref名を指定する必要がある場合がある）
-          // 簡易的に checkout 時に ref を指定するだけでも動くケースがあるが、
-          // 明示的に branch を作成してから checkout する方が確実
-          await git.branch({
-            fs,
-            dir,
-            ref: newBranchName,
-            checkout: true, // 同時にチェックアウト
-            object: `origin/${newBranchName}` // start point
-          });
-          return { success: true };
-        } catch (e) {
-          // 失敗した場合は通常のcheckoutを試みる（フォールバック）
-          console.warn("Smart checkout failed, trying normal checkout", e);
-        }
-      }
-      // ローカルに既にある場合は、そのローカルブランチ名でチェックアウト
-      branchName = newBranchName;
+    // UIから "origin/feature" のように渡された場合、"feature" に変換してCLIに渡す
+    // Git CLIは "git checkout feature" で自動的に "origin/feature" を追跡するローカルブランチを作成してくれます
+    let target = branchName;
+    if (target.startsWith('origin/')) {
+      target = target.replace('origin/', '');
     }
 
-    // 通常のチェックアウト
-    await git.checkout({
-      fs,
-      dir,
-      ref: branchName
-    });
+    // コマンド実行 (エラーならメッセージを返す)
+    const result = await runGitCommand(repoPath, `checkout "${target}"`);
+    
+    if (!result.success) {
+      // エラー出力に "Already on" (既にそのブランチ) が含まれていれば成功とみなす
+      if (result.error.includes('Already on')) {
+        return { success: true };
+      }
+      throw new Error(result.error);
+    }
 
     return { success: true };
   } catch (error) {
@@ -1748,57 +1741,63 @@ ipcMain.handle('git-commit-detail', async (event, repoPath, oid) => {
   }
 });
 
-// git-reset-head ハンドラ (Hard Reset相当)
+// git-reset-head: isomorphic-git から CLI へ変更
 ipcMain.handle('git-reset-head', async (event, repoPath, targetOid) => {
   try {
-    const dir = repoPath;
-    // 1. 現在のブランチ名を取得
-    const currentBranch = await git.currentBranch({ fs, dir });
+    // git reset --hard <commit-hash>
+    const result = await runGitCommand(repoPath, `reset --hard "${targetOid}"`);
     
-    if (currentBranch) {
-      // ブランチ上にいる場合: ブランチの参照先(Ref)を強制的に書き換える
-      await fs.promises.writeFile(
-        path.join(dir, '.git', 'refs', 'heads', currentBranch),
-        targetOid + '\n' // 末尾に改行を入れるのがGitの作法
-      );
-      
-      // 2. ワーキングディレクトリをその状態に合わせる (Force Checkout)
-      await git.checkout({
-        fs,
-        dir,
-        ref: currentBranch,
-        force: true // ローカルの変更を破棄して強制更新
-      });
-    } else {
-      // Detached HEADの場合: 単にそのコミットへチェックアウトするだけ
-      await git.checkout({
-        fs,
-        dir,
-        ref: targetOid,
-        force: true
-      });
-    }
+    if (!result.success) throw new Error(result.error);
 
     return { success: true };
   } catch (error) {
-    console.error('Git reset error:', error);
     return { success: false, error: error.message };
   }
 });
 
-// git-revert-commit ハンドラ (gitコマンドを使用)
+// (新規追加) ブランチ作成機能が必要な場合
+ipcMain.handle('git-create-branch', async (event, repoPath, newBranchName) => {
+  // git checkout -b <new-branch> (作成して切り替え)
+  return await runGitCommand(repoPath, `checkout -b "${newBranchName}"`);
+});
+
+// (新規追加) ブランチ削除機能が必要な場合
+ipcMain.handle('git-delete-branch', async (event, repoPath, branchName) => {
+  // git branch -d <branch>
+  return await runGitCommand(repoPath, `branch -d "${branchName}"`);
+});
+
+// git-revert-commit: コンフリクト時の安全策を追加
 ipcMain.handle('git-revert-commit', async (event, repoPath, oid) => {
-  return new Promise((resolve) => {
-    // 競合が発生しない場合は自動コミット (--no-edit)
-    exec(`git revert ${oid} --no-edit`, { cwd: repoPath }, (error, stdout, stderr) => {
-      if (error) {
-        // コンフリクトなどで失敗した場合
-        resolve({ success: false, error: stderr || error.message });
-      } else {
-        resolve({ success: true });
-      }
-    });
-  });
+  try {
+    // 1. revertを実行
+    const result = await runGitCommand(repoPath, `revert ${oid} --no-edit`);
+
+    if (result.success) {
+      return { success: true };
+    }
+
+    // 2. 失敗した場合、コンフリクトが原因かチェック
+    // エラーメッセージに "conflict" や "could not revert" が含まれる場合
+    if (result.error.includes('conflict') || result.error.includes('could not revert') || result.error.includes('error:')) {
+      
+      console.warn('Revert conflict detected. Aborting...');
+      
+      // 3. 重要: 中途半端な状態を破棄して元の状態に戻す (git revert --abort)
+      await runGitCommand(repoPath, 'revert --abort');
+
+      return { 
+        success: false, 
+        error: 'コンフリクト（競合）が発生したため、処理を中断し元に戻しました。\nこのコミット以降に、同じ箇所への変更が行われている可能性があります。' 
+      };
+    }
+
+    // その他のエラー
+    return { success: false, error: result.error };
+
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 // ヘルパー: 2つのコミット間の変更ファイル数をカウント

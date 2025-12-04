@@ -3023,6 +3023,145 @@ function hideCommitTooltip() {
     }
 }
 
+// ========== コンパクトな入力ダイアログ ==========
+function showCompactInputModal(message, placeholder, onConfirm) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.width = 'auto';
+    content.style.minWidth = '320px';
+    content.style.maxWidth = '400px';
+    content.style.padding = '15px 20px';
+    content.style.textAlign = 'center';
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'modal-message';
+    msgDiv.textContent = message;
+    msgDiv.style.marginBottom = '15px';
+    msgDiv.style.fontSize = '13px';
+    msgDiv.style.fontWeight = 'bold';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'search-input'; // 既存のスタイルを流用
+    input.style.width = '100%';
+    input.style.marginBottom = '20px';
+    input.style.padding = '6px';
+    input.style.boxSizing = 'border-box';
+    input.placeholder = placeholder || '';
+    
+    const buttons = document.createElement('div');
+    buttons.className = 'modal-buttons';
+    buttons.style.justifyContent = 'center';
+    buttons.style.gap = '15px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'modal-btn';
+    cancelBtn.textContent = 'キャンセル';
+    cancelBtn.style.minWidth = '80px';
+    cancelBtn.onclick = () => overlay.remove();
+
+    const okBtn = document.createElement('button');
+    okBtn.className = 'modal-btn primary';
+    okBtn.textContent = '作成';
+    okBtn.style.minWidth = '80px';
+    
+    const submit = () => {
+        const val = input.value.trim();
+        if (val) {
+            overlay.remove();
+            onConfirm(val);
+        }
+    };
+
+    okBtn.onclick = submit;
+    
+    // Enterキーで送信
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submit();
+        if (e.key === 'Escape') overlay.remove();
+    });
+
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(okBtn);
+
+    content.appendChild(msgDiv);
+    content.appendChild(input);
+    content.appendChild(buttons);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+
+    input.focus();
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+}
+
+// ========== コンパクトな確認ダイアログ (confirm代替) ==========
+function showCompactConfirmModal(message, onConfirm) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    
+    // スタイルを上書きしてコンパクトにする
+    content.style.width = 'auto';
+    content.style.minWidth = '320px';
+    content.style.maxWidth = '500px';
+    content.style.padding = '15px 20px';
+    content.style.textAlign = 'center';
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'modal-message';
+    msgDiv.textContent = message;
+    // 1行に収めるためのスタイル
+    msgDiv.style.marginBottom = '20px';
+    msgDiv.style.whiteSpace = 'nowrap';
+    msgDiv.style.overflow = 'hidden';
+    msgDiv.style.textOverflow = 'ellipsis';
+    msgDiv.style.fontSize = '13px';
+
+    const buttons = document.createElement('div');
+    buttons.className = 'modal-buttons';
+    buttons.style.justifyContent = 'center';
+    buttons.style.gap = '15px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'modal-btn';
+    cancelBtn.textContent = 'キャンセル';
+    cancelBtn.style.minWidth = '80px';
+    cancelBtn.onclick = () => overlay.remove();
+
+    const okBtn = document.createElement('button');
+    okBtn.className = 'modal-btn primary';
+    okBtn.textContent = 'OK';
+    okBtn.style.minWidth = '80px';
+    okBtn.onclick = () => {
+        overlay.remove();
+        onConfirm();
+    };
+
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(okBtn);
+
+    content.appendChild(msgDiv);
+    content.appendChild(buttons);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+
+    // エンターキー等ですぐ押せるようにフォーカス
+    okBtn.focus();
+
+    // 背景クリックで閉じる
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+}
+
 // コミット履歴用のコンテキストメニュー
 function showCommitContextMenu(x, y, commit) {
     if (activeContextMenu) activeContextMenu.remove();
@@ -3068,31 +3207,35 @@ function showCommitContextMenu(x, y, commit) {
     resetOption.className = 'context-menu-item';
     resetOption.textContent = '現在のブランチをここにリセット (Hard)';
     resetOption.title = '現在の変更をすべて破棄して、このコミットの状態に戻します';
-    resetOption.addEventListener('click', async () => {
+    
+    // confirm() から showCompactConfirmModal に変更
+    resetOption.addEventListener('click', () => {
         menu.remove();
         activeContextMenu = null;
 
-        if (!confirm(`現在の変更を破棄して、コミット ${commit.oid.substring(0, 7)} の状態に完全にリセットしますか？\nこの操作は取り消せません。`)) {
-            return;
-        }
+        const shortHash = commit.oid.substring(0, 7);
+        // メッセージを1行かつコンパクトに変更
+        const message = `コミット ${shortHash} へ強制的にリセットしますか？ (変更は破棄されます)`;
 
-        showNotification('リセット中...', 'info');
-        try {
-            // main.js で実装する gitResetHead を呼び出し
-            const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
-            if (result.success) {
-                showNotification('リセット完了', 'success');
-                refreshGitStatus();
-                initializeFileTreeWithState();
-                if (currentFilePath && openedFiles.has(currentFilePath)) {
-                    openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
+        showCompactConfirmModal(message, async () => {
+            showNotification('リセット中...', 'info');
+            try {
+                // main.js で実装する gitResetHead を呼び出し
+                const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
+                if (result.success) {
+                    showNotification('リセット完了', 'success');
+                    refreshGitStatus();
+                    initializeFileTreeWithState();
+                    if (currentFilePath && openedFiles.has(currentFilePath)) {
+                        openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
+                    }
+                } else {
+                    showNotification(`リセットエラー: ${result.error}`, 'error');
                 }
-            } else {
-                showNotification(`リセットエラー: ${result.error}`, 'error');
+            } catch (e) {
+                showNotification(`エラー: ${e.message}`, 'error');
             }
-        } catch (e) {
-            showNotification(`エラー: ${e.message}`, 'error');
-        }
+        });
     });
 
     // --- 追加: リバート項目 ---
@@ -3100,27 +3243,31 @@ function showCommitContextMenu(x, y, commit) {
     revertOption.className = 'context-menu-item';
     revertOption.textContent = 'このコミットを打ち消し (Revert)';
     revertOption.title = 'このコミットの変更を打ち消す新しいコミットを作成します';
-    revertOption.addEventListener('click', async () => {
+    
+    // confirm() から showCompactConfirmModal に変更
+    revertOption.addEventListener('click', () => {
         menu.remove();
         activeContextMenu = null;
 
-        if (!confirm(`コミット ${commit.oid.substring(0, 7)} を打ち消す新しいコミットを作成しますか？`)) {
-            return;
-        }
+        const shortHash = commit.oid.substring(0, 7);
+        // メッセージを1行かつコンパクトに変更
+        const message = `コミット ${shortHash} を打ち消すコミットを作成しますか？`;
 
-        showNotification('打ち消しコミットを作成中...', 'info');
-        try {
-            // main.js で実装する gitRevertCommit を呼び出し
-            const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
-            if (result.success) {
-                showNotification('打ち消しコミットを作成しました', 'success');
-                refreshGitStatus();
-            } else {
-                showNotification(`Revertエラー: ${result.error}`, 'error');
+        showCompactConfirmModal(message, async () => {
+            showNotification('打ち消しコミットを作成中...', 'info');
+            try {
+                // main.js で実装する gitRevertCommit を呼び出し
+                const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
+                if (result.success) {
+                    showNotification('打ち消しコミットを作成しました', 'success');
+                    refreshGitStatus();
+                } else {
+                    showNotification(`Revertエラー: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                showNotification(`エラー: ${e.message}`, 'error');
             }
-        } catch (e) {
-            showNotification(`エラー: ${e.message}`, 'error');
-        }
+        });
     });
 
     // ハッシュコピー項目
@@ -3587,7 +3734,7 @@ if (fileTitleInput) {
                     console.log(`Renamed ${oldPath} to ${newPath}`);
                 } else {
                     console.error('Rename failed:', result.error);
-                    alert(`ファイル名の変更に失敗しました: ${result.error}`);
+                    showNotification(`ファイル名の変更に失敗しました: ${result.error}`, 'error');
                     fileTitleInput.value = currentNameWithoutExt;
                 }
             }
@@ -4105,7 +4252,7 @@ function setupGitBranchSwitching() {
     });
 }
 
-// ブランチ選択メニューの表示（リモート対応版）
+// ブランチ選択メニューの表示（リモート対応・作成・削除機能付き）
 function showBranchMenu(targetElement, branches, currentBranch) {
     const rect = targetElement.getBoundingClientRect();
 
@@ -4114,9 +4261,49 @@ function showBranchMenu(targetElement, branches, currentBranch) {
     menu.style.top = `${rect.bottom + 5}px`;
     menu.style.left = `${rect.left}px`;
 
+    // --- 新規ブランチ作成項目 ---
+    const createItem = document.createElement('div');
+    createItem.className = 'branch-menu-item';
+    createItem.innerHTML = `<span style="color: #007acc; font-weight: bold;">+ 新規ブランチ作成</span>`;
+    createItem.addEventListener('click', () => {
+        menu.remove();
+        activeContextMenu = null;
+        showCompactInputModal('新規ブランチ名を入力してください', 'feature/new-func', async (newName) => {
+            if (!newName) return;
+            showNotification(`ブランチ作成中: ${newName}`, 'info');
+            try {
+                // 作成してチェックアウト
+                const result = await window.electronAPI.gitCreateBranch(currentDirectoryPath, newName);
+                if (result.success) {
+                    showNotification(`ブランチを作成・切り替えました: ${newName}`, 'success');
+                    refreshGitStatus();
+                    initializeFileTreeWithState();
+                } else {
+                    showNotification(`作成エラー: ${result.error}`, 'error');
+                }
+            } catch (e) {
+                showNotification(`エラー: ${e.message}`, 'error');
+            }
+        });
+    });
+    menu.appendChild(createItem);
+
+    // 区切り線
+    const sep = document.createElement('div');
+    sep.style.height = '1px';
+    sep.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
+    sep.style.margin = '4px 0';
+    menu.appendChild(sep);
+
+    // ブランチ一覧
     branches.forEach(branch => {
         const item = document.createElement('div');
         item.className = 'branch-menu-item';
+        
+        // コンテナのスタイル調整（削除ボタンを右端に配置するため）
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.justifyContent = 'space-between';
 
         // 現在のブランチにはスタイルを適用
         const isCurrent = branch === currentBranch;
@@ -4127,14 +4314,14 @@ function showBranchMenu(targetElement, branches, currentBranch) {
         // リモートブランチかどうかの判定
         const isRemote = branch.startsWith('origin/');
         const displayIcon = isRemote ? '☁ ' : '🌿 ';
-        const displayName = branch; // isRemote ? branch.replace('origin/', '') : branch;
+        const displayName = branch;
 
-        item.innerHTML = `
-            <span>${displayIcon}${displayName}</span>
-            ${isCurrent ? '<span class="branch-check">✓</span>' : ''}
-        `;
-
-        item.addEventListener('click', async () => {
+        // ブランチ名部分（クリックで切り替え）
+        const nameSpan = document.createElement('span');
+        nameSpan.innerHTML = `${displayIcon}${displayName} ${isCurrent ? '<span class="branch-check">✓</span>' : ''}`;
+        nameSpan.style.flex = '1'; // 残りの幅を埋める
+        
+        nameSpan.addEventListener('click', async () => {
             menu.remove();
             activeContextMenu = null;
 
@@ -4142,14 +4329,12 @@ function showBranchMenu(targetElement, branches, currentBranch) {
 
             try {
                 showNotification(`'${displayName}' に切り替えています...`, 'info');
-
                 const result = await window.electronAPI.gitCheckout(currentDirectoryPath, branch);
 
                 if (result.success) {
                     showNotification(`切り替え完了: ${branch}`, 'success');
                     refreshGitStatus();
                     initializeFileTreeWithState();
-                    // 必要に応じて現在開いているファイルもリロード
                     if (currentFilePath && openedFiles.has(currentFilePath)) {
                         openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
                     }
@@ -4160,6 +4345,45 @@ function showBranchMenu(targetElement, branches, currentBranch) {
                 showNotification(`エラー: ${e.message}`, 'error');
             }
         });
+
+        item.appendChild(nameSpan);
+
+        // 削除ボタン (ローカルかつ現在以外のブランチのみ)
+        if (!isRemote && !isCurrent) {
+            const deleteBtn = document.createElement('span');
+            deleteBtn.innerHTML = '🗑';
+            deleteBtn.title = 'このブランチを削除';
+            deleteBtn.style.cursor = 'pointer';
+            deleteBtn.style.fontSize = '12px';
+            deleteBtn.style.padding = '2px 6px';
+            deleteBtn.style.marginLeft = '8px';
+            deleteBtn.style.color = '#888';
+            deleteBtn.style.borderRadius = '3px';
+            
+            deleteBtn.onmouseover = () => { deleteBtn.style.color = '#d9534f'; deleteBtn.style.backgroundColor = 'rgba(0,0,0,0.1)'; };
+            deleteBtn.onmouseout = () => { deleteBtn.style.color = '#888'; deleteBtn.style.backgroundColor = 'transparent'; };
+
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // 切り替えイベントの発火を防ぐ
+                menu.remove();
+                activeContextMenu = null;
+
+                showCompactConfirmModal(`ブランチ '${branch}' を削除しますか？\n(マージされていない変更は失われる可能性があります)`, async () => {
+                    try {
+                        const result = await window.electronAPI.gitDeleteBranch(currentDirectoryPath, branch);
+                        if (result.success) {
+                            showNotification(`ブランチを削除しました: ${branch}`, 'success');
+                            refreshGitStatus();
+                        } else {
+                            showNotification(`削除エラー: ${result.error}`, 'error');
+                        }
+                    } catch (err) {
+                        showNotification(`エラー: ${err.message}`, 'error');
+                    }
+                });
+            });
+            item.appendChild(deleteBtn);
+        }
 
         menu.appendChild(item);
     });

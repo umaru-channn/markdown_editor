@@ -52,6 +52,10 @@ window.electronAPI = {
   gitResetHead: (repoPath, oid) => ipcRenderer.invoke('git-reset-head', repoPath, oid),
   gitRevertCommit: (repoPath, oid) => ipcRenderer.invoke('git-revert-commit', repoPath, oid),
 
+  // ブランチ操作
+  gitCreateBranch: (repoPath, branchName) => ipcRenderer.invoke('git-create-branch', repoPath, branchName),
+  gitDeleteBranch: (repoPath, branchName) => ipcRenderer.invoke('git-delete-branch', repoPath, branchName),
+
   // File operations
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
