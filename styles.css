@@ -2813,3 +2813,24 @@ body[data-theme="dark"] .git-ref-badge.current-branch {
     border-color: #238636;
     color: white;
 }
+
+/* ========== Status Bar Buttons ========== */
+.status-bar-item {
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    transition: background-color 0.2s;
+    font-weight: 600;
+    font-size: 11px;
+    user-select: none;
+}
+
+.status-bar-item:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.status-bar-item.hidden {
+    display: none !important;
+}

@@ -128,6 +128,8 @@ const btnGitPush = document.getElementById('git-push-btn');
 const btnGitRefresh = document.getElementById('btn-git-refresh');
 const btnGitStage = document.getElementById('btn-git-stage');
 const btnGitUnstage = document.getElementById('btn-git-unstage');
+// ステータスバーのブランチ表示用
+const statusBarBranch = document.getElementById('status-bar-branch');
 
 // Git履歴用要素
 const gitHistoryList = document.getElementById('git-history-list');
@@ -2643,6 +2645,9 @@ async function refreshGitStatus() {
     try {
         const result = await window.electronAPI.gitStatus(currentDirectoryPath);
 
+        // --- 追加: ステータスバーも同時に更新 ---
+        updateStatusBarGitInfo();
+
         if (result.success) {
             // リポジトリ有効時: UIを表示
             setGitViewMode(true);
@@ -3023,6 +3028,34 @@ function hideCommitTooltip() {
     }
 }
 
+// ========== ステータスバーのGit表示更新 ==========
+async function updateStatusBarGitInfo() {
+    if (!statusBarBranch) return;
+
+    // ディレクトリが開かれていない場合は非表示
+    if (!currentDirectoryPath) {
+        statusBarBranch.classList.add('hidden');
+        return;
+    }
+
+    try {
+        // ブランチ情報を取得（.gitがあるかどうかの確認も兼ねる）
+        const result = await window.electronAPI.gitGetBranches(currentDirectoryPath);
+
+        if (result.success && result.current) {
+            // 成功したら表示：アイコン + ブランチ名
+            statusBarBranch.textContent = `🌿 ${result.current}`;
+            statusBarBranch.classList.remove('hidden');
+        } else {
+            // Gitリポジトリでない、またはエラーの場合は非表示
+            statusBarBranch.classList.add('hidden');
+        }
+    } catch (e) {
+        // エラー時は非表示
+        statusBarBranch.classList.add('hidden');
+    }
+}
+
 // ========== コンパクトな入力ダイアログ ==========
 function showCompactInputModal(message, placeholder, onConfirm) {
     const overlay = document.createElement('div');
@@ -3051,7 +3084,7 @@ function showCompactInputModal(message, placeholder, onConfirm) {
     input.style.padding = '6px';
     input.style.boxSizing = 'border-box';
     input.placeholder = placeholder || '';
-    
+
     const buttons = document.createElement('div');
     buttons.className = 'modal-buttons';
     buttons.style.justifyContent = 'center';
@@ -3067,7 +3100,7 @@ function showCompactInputModal(message, placeholder, onConfirm) {
     okBtn.className = 'modal-btn primary';
     okBtn.textContent = '作成';
     okBtn.style.minWidth = '80px';
-    
+
     const submit = () => {
         const val = input.value.trim();
         if (val) {
@@ -3077,7 +3110,7 @@ function showCompactInputModal(message, placeholder, onConfirm) {
     };
 
     okBtn.onclick = submit;
-    
+
     // Enterキーで送信
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') submit();
@@ -3107,7 +3140,7 @@ function showCompactConfirmModal(message, onConfirm) {
 
     const content = document.createElement('div');
     content.className = 'modal-content';
-    
+
     // スタイルを上書きしてコンパクトにする
     content.style.width = 'auto';
     content.style.minWidth = '320px';
@@ -3189,7 +3222,7 @@ function showCommitContextMenu(x, y, commit) {
                 showNotification(`チェックアウト完了: ${commit.oid.substring(0, 7)}`, 'success');
                 refreshGitStatus();
                 initializeFileTreeWithState();
-                
+
                 // 現在開いているファイルがあればリロードして内容を反映
                 if (currentFilePath && openedFiles.has(currentFilePath)) {
                     openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
@@ -3207,7 +3240,7 @@ function showCommitContextMenu(x, y, commit) {
     resetOption.className = 'context-menu-item';
     resetOption.textContent = '現在のブランチをここにリセット (Hard)';
     resetOption.title = '現在の変更をすべて破棄して、このコミットの状態に戻します';
-    
+
     // confirm() から showCompactConfirmModal に変更
     resetOption.addEventListener('click', () => {
         menu.remove();
@@ -3243,7 +3276,7 @@ function showCommitContextMenu(x, y, commit) {
     revertOption.className = 'context-menu-item';
     revertOption.textContent = 'このコミットを打ち消し (Revert)';
     revertOption.title = 'このコミットの変更を打ち消す新しいコミットを作成します';
-    
+
     // confirm() から showCompactConfirmModal に変更
     revertOption.addEventListener('click', () => {
         menu.remove();
@@ -3282,14 +3315,14 @@ function showCommitContextMenu(x, y, commit) {
     });
 
     menu.appendChild(checkoutOption);
-    
+
     // 区切り線
     const sep1 = document.createElement('div');
     sep1.style.height = '1px';
     sep1.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
     sep1.style.margin = '4px 0';
     menu.appendChild(sep1);
-    
+
     menu.appendChild(resetOption);
     menu.appendChild(revertOption);
 
@@ -4139,6 +4172,9 @@ window.addEventListener('load', async () => {
         switchHeaderButtons(document.querySelector('.side-switch.active').dataset.target);
     }
 
+    // アプリ起動時にステータスバーのGit情報を更新
+    updateStatusBarGitInfo();
+
     if (typeof window.electronAPI?.onFileSystemChanged === 'function') {
         window.electronAPI.onFileSystemChanged((payload) => {
             console.log('File system change detected:', payload);
@@ -4217,39 +4253,55 @@ window.addEventListener('load', async () => {
     });
 });
 
-// ブランチ切り替え機能のセットアップ
+// ブランチ切り替え機能のセットアップ (サイドバー & ステータスバー)
 function setupGitBranchSwitching() {
-    const branchBadge = document.getElementById('git-current-branch');
-    if (!branchBadge) return;
-
-    branchBadge.title = "クリックしてブランチを切り替え";
-
-    branchBadge.addEventListener('click', async (e) => {
+    // 共通のクリックハンドラ
+    const handleBranchClick = async (e) => {
         if (!currentDirectoryPath) return;
         e.stopPropagation();
 
-        // 既存のメニューがあれば閉じる
+        // ★修正点: awaitの前にクリックされた要素を変数に保存しておく
+        const targetElement = e.currentTarget;
+
         if (activeContextMenu) {
             activeContextMenu.remove();
             activeContextMenu = null;
         }
 
         try {
-            // ブランチ一覧を取得
+            // 非同期処理 (ここで時間がかかると e.currentTarget が null になる)
             const result = await window.electronAPI.gitGetBranches(currentDirectoryPath);
+
             if (!result.success) {
                 showNotification(`ブランチ情報の取得に失敗: ${result.error}`, 'error');
                 return;
             }
 
-            // メニューを表示
-            showBranchMenu(e.target, result.branches, result.current);
+            // ★修正点: 保存しておいた targetElement を使用する
+            if (targetElement) {
+                showBranchMenu(targetElement, result.branches, result.current);
+            }
 
         } catch (err) {
             console.error(err);
             showNotification(`エラー: ${err.message}`, 'error');
         }
-    });
+    };
+
+    // 1. サイドバーのGitパネル内のバッジ
+    const branchBadge = document.getElementById('git-current-branch');
+    if (branchBadge) {
+        branchBadge.title = "クリックしてブランチを切り替え";
+        // 重複登録防止のため、一度削除してから追加（念のため）
+        branchBadge.removeEventListener('click', handleBranchClick);
+        branchBadge.addEventListener('click', handleBranchClick);
+    }
+
+    // 2. ステータスバーのブランチ表示
+    if (statusBarBranch) {
+        statusBarBranch.removeEventListener('click', handleBranchClick);
+        statusBarBranch.addEventListener('click', handleBranchClick);
+    }
 }
 
 // ブランチ選択メニューの表示（リモート対応・作成・削除機能付き）
@@ -4258,7 +4310,23 @@ function showBranchMenu(targetElement, branches, currentBranch) {
 
     const menu = document.createElement('div');
     menu.className = 'branch-menu';
-    menu.style.top = `${rect.bottom + 5}px`;
+
+    // ▼ 修正箇所: 表示位置の自動調整（ステータスバー対応）
+    // ターゲットが画面の下半分にある場合は上に、そうでない場合は下に表示する
+    if (rect.top > window.innerHeight / 2) {
+        // 上に表示 (bottomプロパティを使用)
+        menu.style.bottom = `${window.innerHeight - rect.top + 5}px`;
+        menu.style.top = 'auto';
+        // 画面上部にはみ出さないように高さを制限
+        menu.style.maxHeight = `${rect.top - 10}px`;
+    } else {
+        // 下に表示 (topプロパティを使用)
+        menu.style.top = `${rect.bottom + 5}px`;
+        menu.style.bottom = 'auto';
+        // 画面下部にはみ出さないように高さを制限
+        menu.style.maxHeight = `${window.innerHeight - rect.bottom - 10}px`;
+    }
+
     menu.style.left = `${rect.left}px`;
 
     // --- 新規ブランチ作成項目 ---
@@ -4299,7 +4367,7 @@ function showBranchMenu(targetElement, branches, currentBranch) {
     branches.forEach(branch => {
         const item = document.createElement('div');
         item.className = 'branch-menu-item';
-        
+
         // コンテナのスタイル調整（削除ボタンを右端に配置するため）
         item.style.display = 'flex';
         item.style.alignItems = 'center';
@@ -4320,7 +4388,7 @@ function showBranchMenu(targetElement, branches, currentBranch) {
         const nameSpan = document.createElement('span');
         nameSpan.innerHTML = `${displayIcon}${displayName} ${isCurrent ? '<span class="branch-check">✓</span>' : ''}`;
         nameSpan.style.flex = '1'; // 残りの幅を埋める
-        
+
         nameSpan.addEventListener('click', async () => {
             menu.remove();
             activeContextMenu = null;
@@ -4359,7 +4427,7 @@ function showBranchMenu(targetElement, branches, currentBranch) {
             deleteBtn.style.marginLeft = '8px';
             deleteBtn.style.color = '#888';
             deleteBtn.style.borderRadius = '3px';
-            
+
             deleteBtn.onmouseover = () => { deleteBtn.style.color = '#d9534f'; deleteBtn.style.backgroundColor = 'rgba(0,0,0,0.1)'; };
             deleteBtn.onmouseout = () => { deleteBtn.style.color = '#888'; deleteBtn.style.backgroundColor = 'transparent'; };
 
@@ -4653,6 +4721,10 @@ async function initializeFileTreeWithState() {
     if (gitContent && !gitContent.classList.contains('content-hidden')) {
         refreshGitStatus();
     }
+
+    // --- ステータスバーのブランチ表示を更新 ---
+    updateStatusBarGitInfo();
+
 }
 
 async function initializeFileTree() {
@@ -5161,6 +5233,18 @@ if (btnOpenFolder) {
             const result = await window.electronAPI.selectFolder();
             if (result.success && result.path) {
                 await initializeFileTree();
+
+                // フォルダ切替時にステータスバーのGit情報を更新
+                updateStatusBarGitInfo();
+
+                // Gitパネルが表示されている場合はGitステータスも更新
+                const gitContent = document.getElementById('content-git');
+                if (gitContent && !gitContent.classList.contains('content-hidden')) {
+                    if (typeof refreshGitStatus === 'function') {
+                        refreshGitStatus();
+                    }
+                }
+
             }
         } catch (error) {
             console.error('Failed to open folder:', error);
