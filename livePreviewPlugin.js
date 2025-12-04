@@ -108,16 +108,66 @@ class HRWidget extends WidgetType {
     ignoreEvent() { return false; }
 }
 
+/* ImageWidget */
 class ImageWidget extends WidgetType {
     constructor(alt, src) { super(); this.alt = alt; this.src = src; }
+
+    // 前回のウィジェットと同じ内容ならDOMを再利用する（これでリサイズ状態が維持される）
+    eq(other) {
+        return this.src === other.src && this.alt === other.alt;
+    }
+    
     toDOM() {
+        // 画像を包むラッパーコンテナ
+        const wrapper = document.createElement("div");
+        wrapper.className = "cm-image-wrapper";
+        
         const img = document.createElement("img");
         img.className = "cm-live-widget-image";
         img.src = this.src;
         img.alt = this.alt;
-        return img;
+        
+        // リサイズ用のハンドル（右端）
+        const handle = document.createElement("div");
+        handle.className = "cm-image-resize-handle";
+        
+        wrapper.appendChild(img);
+        wrapper.appendChild(handle);
+        
+        // ドラッグによるリサイズ処理
+        handle.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // テキスト選択等を防止
+            e.stopPropagation();
+            
+            const startX = e.clientX;
+            // 現在の幅を取得
+            const startWidth = wrapper.getBoundingClientRect().width;
+            
+            const onMouseMove = (moveEvent) => {
+                const diff = moveEvent.clientX - startX;
+                const newWidth = Math.max(50, startWidth + diff); // 最小幅50px
+                
+                // ラッパーの幅を更新（画像はwidth:100%で追従）
+                wrapper.style.width = `${newWidth}px`;
+            };
+            
+            const onMouseUp = () => {
+                document.removeEventListener("mousemove", onMouseMove);
+                document.removeEventListener("mouseup", onMouseUp);
+            };
+            
+            document.addEventListener("mousemove", onMouseMove);
+            document.addEventListener("mouseup", onMouseUp);
+        });
+        
+        return wrapper;
     }
-    ignoreEvent() { return false; }
+    
+    // 基本的にCodeMirrorのエディタ操作（カーソル移動等）の影響を受けないようにする
+    // これにより、カーソル移動時のバグやちらつきを防止
+    ignoreEvent() {
+        return true;
+    }
 }
 
 class CheckboxWidget extends WidgetType {

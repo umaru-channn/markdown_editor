@@ -156,7 +156,7 @@ let savedRightActivityBarState = true;
 // 設定管理
 let appSettings = {
     fontSize: '16px',
-    fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+    fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
     autoSave: true
 };
@@ -231,10 +231,22 @@ function switchMainView(targetId) {
         }
     });
 
-    // 4. ファイルタイトルバーの表示制御
-    if (targetId === 'content-readme' && currentFilePath !== 'README.md') {
-        if (fileTitleBar) fileTitleBar.classList.remove('hidden');
+    // 4. ツールバーとファイルタイトルバーの表示制御
+    const toolbar = document.querySelector('.toolbar');
+
+    if (targetId === 'content-readme') {
+        // エディタ画面: ツールバーを表示
+        if (toolbar) toolbar.classList.remove('hidden');
+
+        // タイトルバーはREADME以外で表示
+        if (currentFilePath !== 'README.md') {
+            if (fileTitleBar) fileTitleBar.classList.remove('hidden');
+        } else {
+            if (fileTitleBar) fileTitleBar.classList.add('hidden');
+        }
     } else {
+        // 設定画面など: ツールバーとタイトルバーを両方非表示
+        if (toolbar) toolbar.classList.add('hidden');
         if (fileTitleBar) fileTitleBar.classList.add('hidden');
     }
 }
@@ -260,6 +272,28 @@ async function saveSettings() {
     } catch (e) {
         console.error("Failed to save settings", e);
     }
+}
+
+function setupSettingsNavigation() {
+    const navItems = document.querySelectorAll('.settings-nav-item');
+    const sections = document.querySelectorAll('.settings-section');
+
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            // すべてのアクティブクラスを削除
+            navItems.forEach(nav => nav.classList.remove('active'));
+            sections.forEach(sec => sec.classList.remove('active'));
+
+            // クリックされた項目をアクティブ化
+            item.classList.add('active');
+
+            const targetSectionId = `settings-section-${item.dataset.section}`;
+            const targetSection = document.getElementById(targetSectionId);
+            if (targetSection) {
+                targetSection.classList.add('active');
+            }
+        });
+    });
 }
 
 function applySettingsToUI() {
@@ -1557,7 +1591,10 @@ function handleToolbarResize() {
 }
 
 // ========== 基本機能 ==========
+let autoSaveTimer = null; // 自動保存用タイマー
+
 function onEditorInput(markAsDirty = true) {
+    // 1. 未保存マークの更新
     if (markAsDirty && currentFilePath && currentFilePath !== 'README.md') {
         fileModificationState.set(currentFilePath, true);
         const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
@@ -1566,6 +1603,7 @@ function onEditorInput(markAsDirty = true) {
         }
     }
 
+    // 2. アウトラインとPDFプレビューの更新
     if (window.outlineUpdateTimeout) clearTimeout(window.outlineUpdateTimeout);
     window.outlineUpdateTimeout = setTimeout(() => {
         updateOutline();
@@ -1580,6 +1618,16 @@ function onEditorInput(markAsDirty = true) {
     }
 
     updateFileStats();
+
+    // 3. 自動保存の実装
+    if (appSettings.autoSave && currentFilePath && currentFilePath !== 'README.md') {
+        if (autoSaveTimer) clearTimeout(autoSaveTimer);
+        // 2秒間入力がなければ保存
+        autoSaveTimer = setTimeout(() => {
+            saveCurrentFile(false);
+            console.log('Auto-saved:', currentFilePath);
+        }, 2000);
+    }
 }
 
 function updateFileStats() {
@@ -2642,6 +2690,9 @@ async function refreshGitStatus() {
 
     if (btnGitRefresh) btnGitRefresh.classList.add('syncing');
 
+    // --- 追加: リモート設定ボタンの表示更新 ---
+    await setupGitRemoteUI();
+
     try {
         const result = await window.electronAPI.gitStatus(currentDirectoryPath);
 
@@ -3496,34 +3547,276 @@ if (btnGitPush) {
 }
 
 // ========== GitHub認証ボタンの実装 ==========
-const btnGithubAuth = document.getElementById('btn-github-auth');
-const authStatus = document.getElementById('github-auth-status');
+// const btnGithubAuth = document.getElementById('btn-github-auth');
+// const authStatus = document.getElementById('github-auth-status');
 
-if (btnGithubAuth) {
-    btnGithubAuth.addEventListener('click', async () => {
-        btnGithubAuth.disabled = true;
-        btnGithubAuth.textContent = '認証中...';
+// if (btnGithubAuth) {
+//     btnGithubAuth.addEventListener('click', async () => {
+//         btnGithubAuth.disabled = true;
+//         btnGithubAuth.textContent = '認証中...';
+
+//         try {
+//             const result = await window.electronAPI.authGitHub();
+
+//             if (result.success) {
+//                 showNotification('GitHub連携に成功しました', 'success');
+//                 btnGithubAuth.style.display = 'none'; // ボタンを隠す
+//                 if (authStatus) authStatus.style.display = 'block'; // 完了メッセージ表示
+//             } else {
+//                 showNotification(`認証失敗: ${result.error}`, 'error');
+//                 btnGithubAuth.innerHTML = '<svg height="16" viewBox="0 0 16 16" width="16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg> GitHubでサインイン';
+//             }
+//         } catch (e) {
+//             showNotification(`エラー: ${e.message}`, 'error');
+//             btnGithubAuth.disabled = false;
+//         } finally {
+//             if (btnGithubAuth.style.display !== 'none') {
+//                 btnGithubAuth.disabled = false;
+//             }
+//         }
+//     });
+// }
+
+/**
+ * Gitパネルにリモート設定ボタンを表示・更新する関数
+ */
+async function setupGitRemoteUI() {
+    // ボタンを追加する場所（Gitパネルのタイトル横など）
+    const gitContent = document.getElementById('content-git');
+    if (!gitContent || !currentDirectoryPath) return;
+
+    // 既存のボタンがあれば取得、なければ作成
+    let remoteBtn = document.getElementById('btn-git-remote-settings');
+
+    if (!remoteBtn) {
+        // ボタンを作成して配置（"Git: 変更" というタイトルの横あたりに追加）
+        const titleEl = gitContent.querySelector('strong'); // "Git: 変更" の要素
+        if (titleEl) {
+            const container = document.createElement('div');
+            container.style.display = 'flex';
+            container.style.justifyContent = 'space-between';
+            container.style.alignItems = 'center';
+            container.style.marginBottom = '10px';
+
+            // タイトルをコンテナに移動
+            titleEl.parentNode.insertBefore(container, titleEl);
+            container.appendChild(titleEl);
+
+            // リモート設定ボタン作成
+            remoteBtn = document.createElement('button');
+            remoteBtn.id = 'btn-git-remote-settings';
+            remoteBtn.className = 'git-action-btn-small'; // 既存のスタイルを流用
+            remoteBtn.style.fontSize = '12px';
+            remoteBtn.style.padding = '2px 8px';
+            remoteBtn.style.marginLeft = 'auto'; // 右寄せ
+
+            container.appendChild(remoteBtn);
+
+            // クリックイベント
+            remoteBtn.addEventListener('click', handleRemoteSettingsClick);
+        }
+    }
+
+    // 現在のURL状態を確認してボタンの表示を変える
+    try {
+        const result = await window.electronAPI.gitGetRemoteUrl(currentDirectoryPath);
+        if (result.success && result.url) {
+            remoteBtn.textContent = '⚙ Remote設定 (変更)';
+            remoteBtn.title = `現在のリモート: ${result.url}`;
+            remoteBtn.dataset.currentUrl = result.url;
+            remoteBtn.dataset.hasRemote = 'true';
+        } else {
+            remoteBtn.textContent = '➕ Remote追加';
+            remoteBtn.title = 'リモートリポジトリ(origin)が未設定です';
+            remoteBtn.dataset.currentUrl = '';
+            remoteBtn.dataset.hasRemote = 'false';
+        }
+    } catch (e) {
+        console.error('Remote check failed:', e);
+    }
+}
+
+/**
+ * リモート設定ボタンクリック時の処理
+ */
+function handleRemoteSettingsClick(e) {
+    const btn = e.target;
+    const hasRemote = btn.dataset.hasRemote === 'true';
+    const currentUrl = btn.dataset.currentUrl || '';
+
+    const title = hasRemote ? 'リモートURLを変更' : 'リモートURLを登録';
+    const placeholder = 'https://github.com/username/repo.git';
+
+    // 既存のモーダル機能を利用して入力させる
+    showCompactInputModal(`${title}\n(GitHubなどのリポジトリURLを入力)`, currentUrl || placeholder, async (inputUrl) => {
+        if (!inputUrl) return;
+
+        const url = inputUrl.trim();
+        let result;
 
         try {
-            const result = await window.electronAPI.authGitHub();
-
-            if (result.success) {
-                showNotification('GitHub連携に成功しました', 'success');
-                btnGithubAuth.style.display = 'none'; // ボタンを隠す
-                if (authStatus) authStatus.style.display = 'block'; // 完了メッセージ表示
+            if (hasRemote) {
+                // 変更 (set-url)
+                result = await window.electronAPI.gitSetRemoteUrl(currentDirectoryPath, url);
+                if (result.success) {
+                    showNotification('リモートURLを変更しました', 'success');
+                }
             } else {
-                showNotification(`認証失敗: ${result.error}`, 'error');
-                btnGithubAuth.innerHTML = '<svg height="16" viewBox="0 0 16 16" width="16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg> GitHubでサインイン';
+                // 新規登録 (add)
+                result = await window.electronAPI.gitAddRemote(currentDirectoryPath, url);
+                if (result.success) {
+                    showNotification('リモートURLを登録しました', 'success');
+                }
             }
-        } catch (e) {
-            showNotification(`エラー: ${e.message}`, 'error');
-            btnGithubAuth.disabled = false;
-        } finally {
-            if (btnGithubAuth.style.display !== 'none') {
-                btnGithubAuth.disabled = false;
+
+            if (!result.success) {
+                showNotification(`エラー: ${result.error}`, 'error');
+            } else {
+                // 表示を更新
+                setupGitRemoteUI();
             }
+        } catch (err) {
+            showNotification(`エラー: ${err.message}`, 'error');
         }
     });
+}
+
+/**
+ * Git操作用の拡張ボタン群を追加する関数（ヘッダー1列配置版）
+ */
+function setupGitExtraButtons() {
+    const gitHeader = document.getElementById('header-buttons-git');
+    if (!gitHeader) return;
+
+    // 重複追加防止: 既にボタンが追加されているかチェック
+    if (document.getElementById('btn-git-ignore-apply')) return;
+
+    // ヘッダーのスタイルを強制的に調整（横並び・折り返しなし）
+    gitHeader.style.display = 'flex';
+    gitHeader.style.flexWrap = 'nowrap';
+    gitHeader.style.alignItems = 'center';
+    gitHeader.style.gap = '2px'; // ボタン間の隙間を少し詰める
+    gitHeader.style.overflowX = 'auto'; // 幅が足りない場合はスクロール
+    gitHeader.style.overflowY = 'hidden';
+
+    // スクロールバーを隠す（見た目をスッキリさせる）
+    gitHeader.style.scrollbarWidth = 'none'; // Firefox
+    if (!document.getElementById('hide-scrollbar-style')) {
+        const style = document.createElement('style');
+        style.id = 'hide-scrollbar-style';
+        style.textContent = '#header-buttons-git::-webkit-scrollbar { display: none; }';
+        document.head.appendChild(style);
+    }
+
+    // ヘルパー: ヘッダー用ボタン作成
+    const createBtn = (id, icon, title, color, onClick) => {
+        const btn = document.createElement('button');
+        btn.id = id;
+        btn.className = 'header-btn'; // 既存のクラスを使用
+        btn.innerHTML = icon;
+        btn.title = title;
+
+        // 追加のスタイル調整（既存のボタンと合わせる）
+        btn.style.padding = '2px 4px';
+        btn.style.fontSize = '13px';
+        btn.style.minWidth = '24px'; // 押しやすい最小幅
+        btn.style.flexShrink = '0'; // 縮まないようにする
+        if (color) btn.style.color = color;
+
+        btn.addEventListener('click', () => onClick(btn));
+        return btn;
+    };
+
+    // --- 1. .gitignore再適用ボタン ---
+    const btnIgnore = createBtn('btn-git-ignore-apply', '👁️‍🗨️', '.gitignore再適用', null, async (btn) => {
+        showCompactConfirmModal('.gitignoreを再適用しますか？\n(キャッシュを削除して再コミットします)', async () => {
+            await executeGitAction(btn, () => window.electronAPI.gitApplyGitignore(currentDirectoryPath), '.gitignoreを適用しました');
+        });
+    });
+
+    // --- 2. 履歴全削除ボタン ---
+    const btnHistory = createBtn('btn-git-delete-history', '💥', '最新以外のコミットを全削除', '#d9534f', async (btn) => {
+        showCompactConfirmModal('【危険】履歴を全削除しますか？\n現在のファイル状態を「最初のコミット」として履歴をリセットします。', async () => {
+            await executeGitAction(btn, () => window.electronAPI.gitDeleteHistory(currentDirectoryPath), '履歴をリセットしました');
+        });
+    });
+
+    // --- 3. Amendボタン ---
+    const btnAmend = createBtn('btn-git-amend', 'ue', '直前のコミットに上書き (Amend)', null, async (btn) => {
+        // ▼ 事前チェック: ステージングがあるか確認
+        try {
+            const status = await window.electronAPI.gitStatus(currentDirectoryPath);
+            if (!status.success || !status.staged || status.staged.length === 0) {
+                showNotification('上書きする変更（ステージ済みファイル）がありません', 'error');
+                return; // ここで終了（ダイアログを出さない）
+            }
+        } catch (e) {
+            console.error(e);
+            return;
+        }
+
+        showCompactConfirmModal('直前のコミットを上書きしますか？\n(現在のステージング内容が含まれます)', async () => {
+            await executeGitAction(btn, () => window.electronAPI.gitCommitAmend(currentDirectoryPath), 'コミットを上書きしました');
+        });
+    });
+    // --- 4. Force Pushボタン ---
+    const btnForce = createBtn('btn-git-force-push', '🚀', '強制プッシュ (Force Push)', '#e2c08d', async (btn) => {
+        // ▼ 事前チェック: リモートがあるか確認
+        try {
+            const remote = await window.electronAPI.gitGetRemoteUrl(currentDirectoryPath);
+            if (!remote.success || !remote.url) {
+                showNotification('リモートリポジトリ(origin)が設定されていません', 'error');
+                return; // ここで終了
+            }
+        } catch (e) {
+            console.error(e);
+            return;
+        }
+
+        showCompactConfirmModal('強制プッシュしますか？\n(リモートの履歴が上書きされます)', async () => {
+            await executeGitAction(btn, () => window.electronAPI.gitPushForce(currentDirectoryPath), '強制プッシュ完了');
+        });
+    });
+
+    // 既存のボタン（ステージ、アンステージ、更新）の前に挿入する
+    // 順番: [Ignore] [History] [Amend] [Force] | [Stage] [Unstage] [Refresh]
+    gitHeader.insertBefore(btnForce, gitHeader.firstChild);
+    gitHeader.insertBefore(btnAmend, gitHeader.firstChild);
+    gitHeader.insertBefore(btnHistory, gitHeader.firstChild);
+    gitHeader.insertBefore(btnIgnore, gitHeader.firstChild);
+}
+
+// ヘルパー: ボタン作成
+function createHeaderBtn(icon, title, onClick) {
+    const btn = document.createElement('button');
+    btn.className = 'header-btn';
+    btn.innerHTML = icon;
+    btn.title = title;
+    btn.addEventListener('click', () => onClick(btn));
+    return btn;
+}
+
+// ヘルパー: Gitアクション実行ラッパー
+async function executeGitAction(btn, apiCall, successMsg) {
+    if (!currentDirectoryPath) return;
+    try {
+        btn.classList.add('syncing'); // 回転などのアニメーションがあれば
+        btn.disabled = true;
+
+        const result = await apiCall();
+
+        if (result.success) {
+            showNotification(successMsg, 'success');
+            refreshGitStatus(); // 画面更新
+        } else {
+            showNotification(`エラー: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showNotification(`予期せぬエラー: ${e.message}`, 'error');
+    } finally {
+        btn.classList.remove('syncing');
+        btn.disabled = false;
+    }
 }
 
 const outlineTree = document.getElementById('outline-tree');
@@ -4130,6 +4423,105 @@ if (btnCloudSync) {
     });
 }
 
+/**
+ * 左下のアカウントボタンのセットアップ
+ */
+// renderer.js の setupAccountButton 関数をこれに置き換えてください
+function setupAccountButton() {
+    const btnAccounts = document.getElementById('btn-accounts');
+    if (!btnAccounts) return;
+
+    // 非同期関数にする
+    btnAccounts.addEventListener('click', async (e) => {
+        e.stopPropagation();
+
+        if (activeContextMenu) {
+            activeContextMenu.remove();
+            activeContextMenu = null;
+            return;
+        }
+
+        // 現在のログインユーザーを取得
+        let user = null;
+        try {
+            user = await window.electronAPI.getGitHubUser();
+        } catch (err) {
+            console.error(err);
+        }
+
+        const menu = document.createElement('div');
+        menu.className = 'account-menu';
+
+        // 共通ヘッダー
+        const header = document.createElement('div');
+        header.className = 'account-menu-item';
+        header.style.pointerEvents = 'none';
+        header.style.fontSize = '11px';
+        header.style.opacity = '0.7';
+        header.style.borderBottom = '1px solid var(--sidebar-border)';
+        header.textContent = 'ACCOUNTS';
+        menu.appendChild(header);
+
+        if (user) {
+            // ▼▼▼ ログイン済みの場合 ▼▼▼
+
+            // ユーザー名表示 (VS Code風: ユーザー名 (GitHub))
+            const userItem = document.createElement('div');
+            userItem.className = 'account-menu-item';
+            // アイコンがあれば表示（オプション）
+            // userItem.innerHTML = `<img src="${user.avatar_url}" style="width:16px;height:16px;border-radius:50%;margin-right:5px;"> ${user.login} (GitHub)`;
+            userItem.innerHTML = `<span>${user.login} (GitHub)</span>`;
+            menu.appendChild(userItem);
+
+            // 区切り線
+            const sep = document.createElement('div');
+            sep.className = 'account-menu-separator';
+            menu.appendChild(sep);
+
+            // ログアウトボタン
+            const logoutItem = document.createElement('div');
+            logoutItem.className = 'account-menu-item';
+            logoutItem.textContent = 'ログアウト';
+            logoutItem.addEventListener('click', async () => {
+                menu.remove();
+                activeContextMenu = null;
+
+                await window.electronAPI.logoutGitHub();
+                showNotification('ログアウトしました', 'success');
+            });
+            menu.appendChild(logoutItem);
+
+        } else {
+            // ▼▼▼ 未ログインの場合 ▼▼▼
+
+            const signInItem = document.createElement('div');
+            signInItem.className = 'account-menu-item';
+            signInItem.innerHTML = '<span>GitHub 連携 (Sign in)</span>';
+
+            signInItem.addEventListener('click', async () => {
+                menu.remove();
+                activeContextMenu = null;
+
+                showNotification('GitHub認証を開始します...', 'info');
+                try {
+                    const result = await window.electronAPI.authGitHub();
+                    if (result.success) {
+                        showNotification('GitHub連携に成功しました！', 'success');
+                    } else {
+                        showNotification(`認証失敗: ${result.error}`, 'error');
+                    }
+                } catch (err) {
+                    showNotification(`エラー: ${err.message}`, 'error');
+                }
+            });
+            menu.appendChild(signInItem);
+        }
+
+        document.body.appendChild(menu);
+        activeContextMenu = menu;
+    });
+}
+
 window.addEventListener('load', async () => {
     console.log('Markdown IDE loaded');
 
@@ -4137,6 +4529,7 @@ window.addEventListener('load', async () => {
     await loadRecentFiles();
     setupSettingsListeners();
     setupSyncSettings();
+    setupSettingsNavigation(); // 設定画面のナビゲーション初期化
 
     // 状態監視リスナー
     if (window.electronAPI && window.electronAPI.onSyncStatusChange) {
@@ -4230,6 +4623,10 @@ window.addEventListener('load', async () => {
 
     // ブランチ切り替え機能の初期化
     setupGitBranchSwitching();
+    // .gitignoreボタンのセットアップ
+    setupGitExtraButtons();
+    // アカウントボタンのセットアップ
+    setupAccountButton();
 
     // メインプロセスからのコンテキストメニューコマンド受信
     window.electronAPI.onEditorContextMenuCommand((command) => {

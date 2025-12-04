@@ -42,11 +42,21 @@ window.electronAPI = {
   gitFetch: (repoPath) => ipcRenderer.invoke('git-fetch', repoPath),
 
   authGitHub: () => ipcRenderer.invoke('auth-github'),
-  
+  gitAddRemote: (repoPath, url) => ipcRenderer.invoke('git-add-remote', repoPath, url),
+  gitSetRemoteUrl: (repoPath, url) => ipcRenderer.invoke('git-set-remote-url', repoPath, url),
+  gitGetRemoteUrl: (repoPath) => ipcRenderer.invoke('git-get-remote-url', repoPath),
+  gitApplyGitignore: (repoPath) => ipcRenderer.invoke('git-apply-gitignore', repoPath),
+  gitDeleteHistory: (repoPath) => ipcRenderer.invoke('git-delete-history', repoPath),
+  gitCommitAmend: (repoPath) => ipcRenderer.invoke('git-commit-amend', repoPath),
+  gitPushForce: (repoPath) => ipcRenderer.invoke('git-push-force', repoPath),
+
   // renderer.jsの呼び出し名に合わせて追加・マッピング
   gitLog: (repoPath, depth) => ipcRenderer.invoke('git-log', repoPath, depth), // 旧APIとの互換性用
   gitHistory: (repoPath, depth) => ipcRenderer.invoke('git-log', repoPath, depth), // renderer.jsが使用
   gitGetCommitDetail: (repoPath, oid) => ipcRenderer.invoke('git-commit-detail', repoPath, oid), // 新規追加
+
+  getGitHubUser: () => ipcRenderer.invoke('get-github-user'),
+  logoutGitHub: () => ipcRenderer.invoke('logout-github'),
 
   // リセットとリバート
   gitResetHead: (repoPath, oid) => ipcRenderer.invoke('git-reset-head', repoPath, oid),

@@ -39,7 +39,7 @@ async function runGitCommand(dir, command) {
   try {
     // Windows環境での文字化け対策などが本来必要ですが、簡易化のため標準設定で実行
     // 必要に応じて iconv-lite で stdout をデコードしてください
-    const { stdout, stderr } = await execPromise(`git ${command}`, { 
+    const { stdout, stderr } = await execPromise(`git ${command}`, {
       cwd: dir,
       maxBuffer: 10 * 1024 * 1024 // 10MB (大きな出力に対応)
     });
@@ -132,7 +132,7 @@ function loadAppSettings() {
   // Default settings
   return {
     fontSize: '16px',
-    fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+    fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
     autoSave: true,
     cloudSync: {
@@ -1477,7 +1477,8 @@ ipcMain.handle('git-init', async (event, repoPath) => {
 
     return { success: true };
   } catch (error) {
-    return { success: false, error: error.message };
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
   }
 });
 
@@ -1531,6 +1532,107 @@ ipcMain.handle('git-status', async (event, repoPath) => {
     return { success: true, staged, unstaged };
   } catch (error) {
     return { success: false, error: error.message };
+  }
+});
+
+// .gitignoreの適用（キャッシュ削除 -> 再ステージ -> コミット）
+ipcMain.handle('git-apply-gitignore', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+
+    // 1. キャッシュを削除 (ファイルは消えません)
+    const rmResult = await runGitCommand(dir, 'rm -r --cached .');
+    if (!rmResult.success) throw new Error(`キャッシュ削除失敗: ${rmResult.error}`);
+
+    // 2. 再度ステージング (.gitignore が適用されます)
+    const addResult = await runGitCommand(dir, 'add .');
+    if (!addResult.success) throw new Error(`ステージング失敗: ${addResult.error}`);
+
+    // 3. コミット
+    const commitMsg = "Apply .gitignore rules"; // コミットメッセージ
+    const commitResult = await runGitCommand(dir, `commit -m "${commitMsg}"`);
+
+    // コミットする変更がなかった場合（Nothing to commit）はエラーにしない
+    if (!commitResult.success && !commitResult.stdout.includes('nothing to commit')) {
+      throw new Error(`コミット失敗: ${commitResult.error}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 1. 履歴を全削除して最新の状態を初期コミットにする（Delete history）
+ipcMain.handle('git-delete-history', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+
+    // 現在のブランチ名を取得
+    const branchRes = await runGitCommand(dir, 'branch --show-current');
+    if (!branchRes.success) throw new Error('ブランチ名の取得に失敗しました');
+    const currentBranch = branchRes.stdout.trim();
+
+    // 最新のコミットメッセージを取得（新しいコミットに引き継ぐため）
+    const msgRes = await runGitCommand(dir, 'log -1 --pretty=%B');
+    const commitMsg = msgRes.success ? msgRes.stdout.trim() : "Initial commit";
+
+    // 1. 一時的なOrphanブランチ（親を持たないブランチ）を作成
+    // これにより履歴がリセットされた状態になります
+    const tempBranch = "temp_reset_" + Date.now();
+    await runGitCommand(dir, `checkout --orphan ${tempBranch}`);
+
+    // 2. 全ファイルをステージング
+    await runGitCommand(dir, 'add -A');
+
+    // 3. コミット（以前のメッセージを使用）
+    const commitRes = await runGitCommand(dir, `commit -m "${commitMsg}"`);
+    if (!commitRes.success) throw new Error(`コミット失敗: ${commitRes.error}`);
+
+    // 4. 元のブランチを削除
+    await runGitCommand(dir, `branch -D ${currentBranch}`);
+
+    // 5. 現在のブランチを元の名前に変更
+    await runGitCommand(dir, `branch -m ${currentBranch}`);
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 2. 直前のコミットに上書き (Amend)
+ipcMain.handle('git-commit-amend', async (event, repoPath) => {
+  try {
+    // git commit --amend --no-edit
+    // (現在のステージング内容を直前のコミットに混ぜる。メッセージは変更しない)
+    const result = await runGitCommand(repoPath, 'commit --amend --no-edit');
+    if (!result.success) throw new Error(result.error);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 3. 強制プッシュ (Force Push)
+ipcMain.handle('git-push-force', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    // 現在のブランチ名を取得
+    const branchRes = await runGitCommand(dir, 'branch --show-current');
+    if (!branchRes.success) throw new Error('ブランチ名の取得に失敗しました');
+    const currentBranch = branchRes.stdout.trim();
+
+    // 強制プッシュ実行
+    const result = await runGitCommand(dir, `push origin ${currentBranch} --force`);
+    if (!result.success) throw new Error(result.error);
+
+    return { success: true };
+  } catch (error) {
+    // 作成した翻訳関数を通す
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
   }
 });
 
@@ -1692,7 +1794,7 @@ ipcMain.handle('git-checkout', async (event, repoPath, branchName) => {
 
     // コマンド実行 (エラーならメッセージを返す)
     const result = await runGitCommand(repoPath, `checkout "${target}"`);
-    
+
     if (!result.success) {
       // エラー出力に "Already on" (既にそのブランチ) が含まれていれば成功とみなす
       if (result.error.includes('Already on')) {
@@ -1703,7 +1805,8 @@ ipcMain.handle('git-checkout', async (event, repoPath, branchName) => {
 
     return { success: true };
   } catch (error) {
-    return { success: false, error: error.message };
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
   }
 });
 
@@ -1746,7 +1849,7 @@ ipcMain.handle('git-reset-head', async (event, repoPath, targetOid) => {
   try {
     // git reset --hard <commit-hash>
     const result = await runGitCommand(repoPath, `reset --hard "${targetOid}"`);
-    
+
     if (!result.success) throw new Error(result.error);
 
     return { success: true };
@@ -1780,15 +1883,15 @@ ipcMain.handle('git-revert-commit', async (event, repoPath, oid) => {
     // 2. 失敗した場合、コンフリクトが原因かチェック
     // エラーメッセージに "conflict" や "could not revert" が含まれる場合
     if (result.error.includes('conflict') || result.error.includes('could not revert') || result.error.includes('error:')) {
-      
+
       console.warn('Revert conflict detected. Aborting...');
-      
+
       // 3. 重要: 中途半端な状態を破棄して元の状態に戻す (git revert --abort)
       await runGitCommand(repoPath, 'revert --abort');
 
-      return { 
-        success: false, 
-        error: 'コンフリクト（競合）が発生したため、処理を中断し元に戻しました。\nこのコミット以降に、同じ箇所への変更が行われている可能性があります。' 
+      return {
+        success: false,
+        error: 'コンフリクト（競合）が発生したため、処理を中断し元に戻しました。\nこのコミット以降に、同じ箇所への変更が行われている可能性があります。'
       };
     }
 
@@ -1921,7 +2024,8 @@ ipcMain.handle('git-commit', async (event, repoPath, message) => {
     const sha = await git.commit({ fs, dir, message, author });
     return { success: true, sha };
   } catch (error) {
-    return { success: false, error: error.message };
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
   }
 });
 
@@ -2584,6 +2688,39 @@ ipcMain.handle('auth-github', async () => {
   }
 });
 
+// GitHubユーザー情報の取得
+ipcMain.handle('get-github-user', async () => {
+  const settings = loadAppSettings();
+  const token = settings.githubToken;
+  if (!token) return null; // トークンがない＝未ログイン
+
+  try {
+    // GitHub APIを叩いてユーザー情報を取得
+    const user = await got('https://api.github.com/user', {
+      headers: {
+        Authorization: `token ${token}`,
+        'User-Agent': 'Markdown-IDE'
+      }
+    }).json();
+
+    // 必要な情報だけ返す
+    return { name: user.name, login: user.login, avatar_url: user.avatar_url };
+  } catch (e) {
+    console.error('GitHub user fetch failed:', e.message);
+    // エラー（トークン期限切れ等）の場合はnullを返す
+    return null;
+  }
+});
+
+// GitHubログアウト（トークン削除）
+ipcMain.handle('logout-github', async () => {
+  const settings = loadAppSettings();
+  // delete ではなく null を代入して、確実に「無し」で上書きする
+  settings.githubToken = null;
+  saveAppSettings(settings);
+  return { success: true };
+});
+
 // 共通の認証ハンドラ (GitHubトークンを使用)
 const onAuthHandler = () => {
   // 1. 設定ファイルからトークンを読み込む
@@ -2612,8 +2749,8 @@ ipcMain.handle('git-fetch', async (event, repoPath) => {
     });
     return { success: true };
   } catch (error) {
-    if (error.code === 401) return { success: false, error: '認証エラー: サインインしてください。' };
-    return { success: false, error: error.message };
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
   }
 });
 
@@ -2641,8 +2778,8 @@ ipcMain.handle('git-pull', async (event, repoPath) => {
     });
     return { success: true };
   } catch (error) {
-    if (error.code === 401) return { success: false, error: '認証エラー: サインインしてください。' };
-    return { success: false, error: error.message };
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
   }
 });
 
@@ -2660,10 +2797,136 @@ ipcMain.handle('git-push', async (event, repoPath) => {
     });
     return { success: true };
   } catch (error) {
-    if (error.code === 401) return { success: false, error: '認証エラー: サインインしてください。' };
+    // 作成した翻訳関数を通す
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
+  }
+});
+
+// --- Git Remote操作 ---
+// リモートリポジトリの登録 (git remote add origin url)
+ipcMain.handle('git-add-remote', async (event, repoPath, url) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+    // .gitチェック
+    if (!fs.existsSync(path.join(dir, '.git'))) throw new Error('not a git repository');
+
+    // "origin" という名前でリモートを追加
+    await git.addRemote({ fs, dir, remote: 'origin', url: url });
+    return { success: true };
+  } catch (error) {
+    const jpError = getJapaneseGitErrorMessage(error.message || error.toString());
+    return { success: false, error: jpError };
+  }
+});
+
+// リモートリポジトリURLの変更 (git remote set-url origin url)
+ipcMain.handle('git-set-remote-url', async (event, repoPath, url) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+
+    // configファイルを直接書き換えてURLを更新
+    await git.setConfig({ fs, dir, path: 'remote.origin.url', value: url });
+    return { success: true };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
+
+// 現在のリモートリポジトリURLの取得
+ipcMain.handle('git-get-remote-url', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    if (!dir) return { success: false, error: 'No path' };
+
+    // originのURLを取得
+    const url = await git.getConfig({ fs, dir, path: 'remote.origin.url' });
+    return { success: true, url }; // urlがundefinedなら未設定
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Gitのエラーメッセージを日本語の分かりやすい説明に変換するヘルパー関数
+ */
+function getJapaneseGitErrorMessage(originalMessage) {
+  const msg = (originalMessage || '').toLowerCase();
+
+  // 1. Push 関連 (GitHub Push Protection / ルール違反)
+  if (msg.includes('repository rule violations') || msg.includes('push declined due to')) {
+    return '【プッシュ拒否】GitHubのセキュリティルールにより拒否されました。\n\n' +
+      '・APIキーやパスワード等の機密情報が含まれていませんか？\n' +
+      '・ブランチ保護ルールで直接プッシュが禁止されていませんか？\n\n' +
+      '（過去のコミット履歴に機密情報が含まれている場合も拒否されます）';
+  }
+
+  // 2. 競合 (Non-fast-forward)
+  if (msg.includes('not a simple fast-forward') || msg.includes('non-fast-forward') || msg.includes('fetch first')) {
+    return '【競合発生】リモートリポジトリの方が新しいためプッシュできません。\n\n' +
+      '先に「Pull（プル）」を行って、最新の状態を取り込んでください。';
+  }
+
+  // 3. コンフリクト (Merge/Pull)
+  if (msg.includes('conflict') || msg.includes('merge conflict')) {
+    return '【コンフリクト発生】自動マージに失敗しました。\n' +
+      '競合しているファイルを修正して、再度コミットしてください。';
+  }
+  if (msg.includes('overwritten by merge') || msg.includes('local changes would be overwritten')) {
+    return '【プル中断】ローカルの変更が上書きされるため中断しました。\n' +
+      '変更をコミットするか、退避（Stash）してからプルしてください。';
+  }
+  if (msg.includes('refusing to merge unrelated histories')) {
+    return '【マージ拒否】関連性のない履歴のためマージできません。\n' +
+      '異なるリポジトリ同士を統合しようとしている可能性があります。';
+  }
+
+  // 4. 認証エラー
+  if (msg.includes('401') || msg.includes('authentication failed') || msg.includes('auth failed') || msg.includes('logon failed') || msg.includes('the operation was canceled')) {
+    return '【認証エラー】GitHubへのログインに失敗しました。\n\n' +
+      '左下のアイコンから再度「GitHub連携」を行ってください。';
+  }
+
+  // 5. 権限エラー
+  if (msg.includes('403') || msg.includes('permission denied') || msg.includes('access denied')) {
+    return '【権限エラー】リポジトリへの操作権限がありません。\n\n' +
+      '正しいアカウントでログインしているか、リポジトリの設定を確認してください。';
+  }
+
+  // 6. ネットワークエラー
+  if (msg.includes('could not resolve host') || msg.includes('failed to connect') || msg.includes('network is unreachable')) {
+    return '【通信エラー】インターネット接続を確認してください。';
+  }
+
+  // 7. 設定未完了
+  if (msg.includes('please tell me who you are') || (msg.includes('user.email') && msg.includes('user.name'))) {
+    return '【設定エラー】ユーザー名とメールアドレスが設定されていません。\n' +
+      'Gitの設定（user.name, user.email）を行ってください。';
+  }
+
+  // 8. リポジトリ状態
+  if (msg.includes('not a git repository')) {
+    return '【エラー】ここはGitリポジトリではありません。\n' +
+      '「Git管理」タブから初期化を行ってください。';
+  }
+  if (msg.includes('repository not found')) {
+    return '【エラー】リポジトリが見つかりません。\nURLが正しいか確認してください。';
+  }
+  if (msg.includes('nothing to commit')) {
+    return 'コミットする変更がありません。';
+  }
+  if (msg.includes('remote origin already exists')) {
+    return '【エラー】リモート "origin" は既に登録されています。';
+  }
+  if (msg.includes('already on')) {
+    return '既にそのブランチにいます。';
+  }
+
+  // それ以外はそのままと日本語補足
+  return `エラーが発生しました:\n${originalMessage}`;
+}
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

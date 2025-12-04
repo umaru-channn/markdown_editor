@@ -5,7 +5,7 @@ html, body {
     margin: 0;
     padding: 0;
     height: 100vh;
-    font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+    font-family: "Segoe UI", "Meiryo", sans-serif;
     background-color: var(--main-bg);
     color: var(--text-color);
     overflow: hidden;
@@ -46,7 +46,7 @@ html, body {
 
     /* Editor Settings */
     --editor-font-size: 16px;
-    --editor-font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+    --editor-font-family: "Segoe UI", "Meiryo", sans-serif;
     --line-height: 1.6em; 
     
     /* List Settings */
@@ -1106,6 +1106,68 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 
 .cm-live-link:hover { text-decoration: underline; }
 
+/* 画像コンテナ */
+.cm-image-wrapper {
+    display: inline-block;
+    position: relative;
+    max-width: 100%;
+    margin: 10px 0;
+    vertical-align: top;
+    user-select: none;
+    
+    /* 追加: 画像読み込み失敗時のレイアウト崩れ防止 */
+    min-width: 50px;
+    min-height: 50px;
+    background-color: rgba(0, 0, 0, 0.03); /* 薄い背景色で領域を可視化 */
+    border: 1px solid transparent;         /* 境界線用スペース */
+}
+
+/* 読み込み失敗時（壊れた画像アイコン）のスタイル調整 */
+.cm-image-wrapper img {
+    min-width: 50px;
+    min-height: 50px;
+    display: block; /* 余計な隙間防止 */
+}
+
+/* 画像本体 */
+.cm-live-widget-image {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    border-radius: 3px;
+}
+
+/* リサイズハンドル */
+.cm-image-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -5px;
+    bottom: 0;
+    width: 15px;
+    cursor: col-resize;
+    z-index: 10;
+}
+
+/* ハンドルの可視化 */
+.cm-image-resize-handle::after {
+    content: "";
+    position: absolute;
+    right: 5px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: #007acc;
+    opacity: 0;
+    transition: opacity 0.2s;
+    border-radius: 2px;
+}
+
+.cm-image-wrapper:hover .cm-image-resize-handle::after,
+.cm-image-resize-handle:active::after {
+    opacity: 0.6;
+}
+
 .cm-hide-marker {
     font-size: 0;
     color: transparent;
@@ -1460,46 +1522,6 @@ body[data-theme="dark"] .cm-language-search:focus {
 
 body[data-theme="dark"] .cm-language-item:hover {
     background-color: rgba(255, 255, 255, 0.1);
-}
-
-/* Settings View */
-.settings-view-content {
-    padding: 20px 40px;
-    overflow-y: auto;
-    flex: 1;
-    background-color: var(--main-bg);
-    color: var(--text-color);
-}
-
-.settings-view-content h1 {
-    border-bottom: 2px solid var(--sidebar-border);
-    padding-bottom: 10px;
-}
-
-.settings-view-content h2 {
-    margin-top: 30px;
-    border-bottom: 1px solid var(--sidebar-border);
-    padding-bottom: 5px;
-}
-
-.settings-view-content .setting-item {
-    margin-bottom: 15px;
-}
-
-.settings-view-content .setting-item label {
-    display: block;
-    font-weight: bold;
-    margin-bottom: 5px;
-}
-
-.settings-view-content input[type="text"],
-.settings-view-content select {
-    padding: 5px;
-    border: 1px solid var(--sidebar-border);
-    background-color: var(--main-bg);
-    color: var(--text-color);
-    border-radius: 3px;
-    width: 300px;
 }
 
 /* ========== Right Pane / Bottom Pane ========== */
@@ -2833,4 +2855,243 @@ body[data-theme="dark"] .git-ref-badge.current-branch {
 
 .status-bar-item.hidden {
     display: none !important;
+}
+
+/* styles.css の末尾に追加 */
+
+/* アカウントメニュー (左下用) */
+.account-menu {
+    position: fixed;
+    bottom: 50px; /* 設定ボタンの少し上 */
+    left: 50px;   /* アクティビティバーの幅 */
+    background-color: var(--main-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    box-shadow: 2px 2px 10px rgba(0,0,0,0.2);
+    z-index: 2000;
+    min-width: 200px;
+    padding: 4px 0;
+    color: var(--text-color);
+}
+
+body[data-theme="dark"] .account-menu {
+    background-color: #252526;
+    border-color: #454545;
+}
+
+.account-menu-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.account-menu-item:hover {
+    background-color: #007acc;
+    color: white;
+}
+
+.account-menu-separator {
+    height: 1px;
+    background-color: var(--sidebar-border);
+    margin: 4px 0;
+}
+
+/* ========== Settings Panel Styles ========== */
+.settings-view-content {
+    flex: 1; /* これがないと高さが潰れます */
+    min-height: 0; /* Flexアイテムの最小高さ潰れ防止 */
+    padding: 0; /* パディングをリセット */
+    background-color: var(--main-bg);
+    color: var(--text-color);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.settings-container {
+    display: flex;
+    flex: 1;
+    height: 100%;
+}
+
+/* 左サイドバー */
+.settings-sidebar {
+    width: 200px;
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 0;
+    flex-shrink: 0;
+}
+
+.settings-sidebar-header {
+    padding: 0 20px 15px 20px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.settings-nav-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.settings-nav-item {
+    padding: 8px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-color);
+    border-left: 3px solid transparent;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.settings-nav-item:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+body[data-theme="dark"] .settings-nav-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.settings-nav-item.active {
+    background-color: rgba(0, 122, 204, 0.1);
+    color: #007acc;
+    border-left-color: #007acc;
+    font-weight: 600;
+}
+body[data-theme="dark"] .settings-nav-item.active {
+    background-color: rgba(0, 122, 204, 0.2);
+    color: #fff;
+    border-left-color: #007acc;
+}
+
+/* 右メインコンテンツ */
+.settings-main-content {
+    flex: 1;
+    padding: 30px 40px;
+    overflow-y: auto;
+    background-color: var(--main-bg);
+}
+
+.settings-section {
+    display: none; /* デフォルト非表示 */
+    animation: fadeIn 0.2s ease-in-out;
+    padding-bottom: 50px; /* 下部に少し余裕を持たせる */
+}
+
+.settings-section.active {
+    display: block; /* アクティブのみ表示 */
+}
+
+/* @keyframes fadeIn {
+    from { opacity: 0.5; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+} */
+
+.settings-section h2 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--sidebar-border);
+    font-size: 1.5em;
+    font-weight: 500;
+}
+
+.setting-item {
+    margin-bottom: 24px;
+}
+
+.setting-item label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-color);
+}
+
+.setting-item select,
+.setting-item input[type="text"] {
+    width: 100%;
+    max-width: 400px;
+    padding: 8px 10px;
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    background-color: var(--main-bg);
+    color: var(--text-color);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.setting-item select:focus,
+.setting-item input[type="text"]:focus {
+    border-color: #007acc;
+}
+
+/* カスタムチェックボックス (一般設定用) */
+.checkbox-label {
+    display: flex !important;
+    align-items: flex-start;
+    cursor: pointer;
+    font-weight: normal !important;
+}
+
+.checkbox-label input {
+    display: none;
+}
+
+.checkbox-custom {
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--sidebar-border);
+    border-radius: 3px;
+    margin-right: 10px;
+    position: relative;
+    flex-shrink: 0;
+    margin-top: 2px;
+    background-color: var(--main-bg);
+}
+
+.checkbox-label input:checked + .checkbox-custom {
+    background-color: #007acc;
+    border-color: #007acc;
+}
+
+.checkbox-label input:checked + .checkbox-custom::after {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 2px;
+    width: 4px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.label-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.label-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.label-desc {
+    font-size: 12px;
+    color: #888;
+    margin-top: 4px;
+    line-height: 1.4;
 }
