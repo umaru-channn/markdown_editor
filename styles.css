@@ -1,7 +1,8 @@
 /* Markdown IDE - Styles */
 
 /* ========== Base & Reset ========== */
-html, body {
+html,
+body {
     margin: 0;
     padding: 0;
     height: 100vh;
@@ -21,15 +22,15 @@ html, body {
     --sidebar-border: #ccc;
     --topbar-bg: #eaf1f6;
     --topbar-border: #c9d6e2;
-    
+
     --main-bg: #ffffff;
     --text-color: #333;
-    
+
     --activitybar-width: 50px;
     --leftpane-width: 240px;
     --right-pane-width: 350px;
     --current-left-pane-width: 240px;
-    
+
     /* Toolbar Colors */
     --toolbar-bg: #f9f9f9;
     --toolbar-border: #ddd;
@@ -42,15 +43,17 @@ html, body {
     --cb-header-bg: #f6f8fa;
     --cb-body-bg: #f6f8fa;
     --cb-radius: 6px;
-    --cb-gutter-width: 3em; /* コードブロック行番号エリアの幅 */
+    --cb-gutter-width: 3em;
+    /* コードブロック行番号エリアの幅 */
 
     /* Editor Settings */
     --editor-font-size: 16px;
     --editor-font-family: "Segoe UI", "Meiryo", sans-serif;
-    --line-height: 1.6em; 
-    
+    --line-height: 1.6em;
+
     /* List Settings */
-    --list-indent-width: 2em; /* タブ幅相当（約4文字分）のインデント */
+    --list-indent-width: 2em;
+    /* タブ幅相当（約4文字分）のインデント */
 }
 
 /* Dark Theme Overrides */
@@ -60,10 +63,10 @@ body[data-theme="dark"] {
     --sidebar-border: #333;
     --topbar-bg: #2d2d2d;
     --topbar-border: #1e1e1e;
-    
+
     --main-bg: #1e1e1e;
     --text-color: #d4d4d4;
-    
+
     --toolbar-bg: #2d2d2d;
     --toolbar-border: #1e1e1e;
     --toolbar-btn-bg: #333;
@@ -80,7 +83,9 @@ body[data-theme="dark"] {
 }
 
 /* 入力フォームとテキストエリアは選択・編集可能にする */
-input, textarea, select {
+input,
+textarea,
+select {
     user-select: text;
     -webkit-user-select: text;
     cursor: text;
@@ -134,7 +139,7 @@ input[type="number"]::-webkit-outer-spin-button {
     color: var(--text-color);
 }
 
-.top-bar button, 
+.top-bar button,
 .window-control-btn,
 .editor-tabs .tab {
     -webkit-app-region: no-drag;
@@ -196,6 +201,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .side-switch-group button:hover {
     background-color: rgba(0, 0, 0, 0.1);
 }
+
 body[data-theme="dark"] .side-switch-group button:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
@@ -251,11 +257,12 @@ body[data-theme="dark"] .side-switch-group button:hover {
 }
 
 .editor-tabs .tab .close-tab:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
     opacity: 1;
 }
+
 body[data-theme="dark"] .editor-tabs .tab .close-tab:hover {
-    background-color: rgba(255,255,255,0.2);
+    background-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Window Controls */
@@ -280,10 +287,11 @@ body[data-theme="dark"] .editor-tabs .tab .close-tab:hover {
 }
 
 .window-control-btn:not(.close):hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
 }
+
 body[data-theme="dark"] .window-control-btn:not(.close):hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .window-control-btn.close:hover {
@@ -415,13 +423,14 @@ body[data-theme="dark"] .window-control-btn:not(.close):hover {
 }
 
 .header-btn:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
     color: var(--text-color);
     border-radius: 3px;
     opacity: 1;
 }
+
 body[data-theme="dark"] .header-btn:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .left-pane-content {
@@ -429,17 +438,20 @@ body[data-theme="dark"] .header-btn:hover {
     overflow-y: auto;
     padding: 5px 0;
     font-size: 13px;
-    outline: none; /* デフォルトのフォーカス枠を消してカスタムスタイルを適用 */
+    outline: none;
+    /* デフォルトのフォーカス枠を消してカスタムスタイルを適用 */
 }
 
 /* ファイルエクスプローラーのフォーカススタイル */
 /* ファイルが選択されていない（.selectedクラスを持つ要素がない）場合のみ枠を表示 */
 #content-files:focus:not(:has(.tree-item.selected)) {
     outline: 1px solid #007acc;
-    outline-offset: -1px; /* 枠線を内側に */
+    outline-offset: -1px;
+    /* 枠線を内側に */
 }
 
-#content-git, #content-outline {
+#content-git,
+#content-outline {
     padding: 10px;
 }
 
@@ -465,10 +477,11 @@ body[data-theme="dark"] .header-btn:hover {
 }
 
 .tree-item:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
 }
+
 body[data-theme="dark"] .tree-item:hover {
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 /* ドラッグ&ドロップ用スタイル */
@@ -503,7 +516,8 @@ body[data-theme="dark"] .tree-item:hover {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    pointer-events: none; /* ドラッグイベントの邪魔にならないように */
+    pointer-events: none;
+    /* ドラッグイベントの邪魔にならないように */
 }
 
 .tree-children {
@@ -524,7 +538,8 @@ body[data-theme="dark"] .tree-item:hover {
     margin-left: 5px;
     border-radius: 2px;
     min-width: 0;
-    height: 20px; /* tree-itemの高さに合わせる */
+    height: 20px;
+    /* tree-itemの高さに合わせる */
 }
 
 /* Outline */
@@ -546,15 +561,16 @@ body[data-theme="dark"] .tree-item:hover {
 }
 
 .outline-item:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
     opacity: 1;
 }
+
 body[data-theme="dark"] .outline-item:hover {
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .outline-item.active {
-    background-color: rgba(0,122,204,0.2);
+    background-color: rgba(0, 122, 204, 0.2);
     color: inherit;
 }
 
@@ -584,6 +600,7 @@ body[data-theme="dark"] .outline-item:hover {
 .git-file-item:hover {
     background-color: rgba(0, 0, 0, 0.05);
 }
+
 body[data-theme="dark"] .git-file-item:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
@@ -622,9 +639,21 @@ body[data-theme="dark"] .git-file-item:hover {
     text-align: center;
 }
 
-.git-status-badge.modified { color: #e2c08d; } /* M: Yellow/Orange */
-.git-status-badge.added { color: #73c991; }    /* A: Green */
-.git-status-badge.deleted { color: #c74e39; }  /* D: Red */
+.git-status-badge.modified {
+    color: #e2c08d;
+}
+
+/* M: Yellow/Orange */
+.git-status-badge.added {
+    color: #73c991;
+}
+
+/* A: Green */
+.git-status-badge.deleted {
+    color: #c74e39;
+}
+
+/* D: Red */
 
 /* アクションボタン（+ / -）: ホバー時のみ表示 */
 .git-actions {
@@ -653,6 +682,7 @@ body[data-theme="dark"] .git-file-item:hover {
     background-color: rgba(0, 0, 0, 0.1);
     color: #007acc;
 }
+
 body[data-theme="dark"] .git-action-btn-small:hover {
     background-color: rgba(255, 255, 255, 0.1);
     color: #4daafc;
@@ -677,7 +707,8 @@ body[data-theme="dark"] .git-action-btn-small:hover {
     margin-bottom: 5px;
     color: var(--text-color);
     opacity: 0.8;
-    cursor: pointer; /* クリック可能に */
+    cursor: pointer;
+    /* クリック可能に */
     display: flex;
     align-items: center;
     user-select: none;
@@ -712,9 +743,11 @@ body[data-theme="dark"] .git-action-btn-small:hover {
     font-family: inherit;
     resize: none;
     overflow: hidden;
-    min-height: 30px; 
-    field-sizing: content; /* 内容に合わせて自動で高さを調整 */
-    background-color: var(--sidebar-bg); /* 背景色をサイドバーに合わせる */
+    min-height: 30px;
+    field-sizing: content;
+    /* 内容に合わせて自動で高さを調整 */
+    background-color: var(--sidebar-bg);
+    /* 背景色をサイドバーに合わせる */
     color: var(--text-color);
 }
 
@@ -787,7 +820,8 @@ body[data-theme="dark"] .git-action-btn-small:hover {
 
 /* File Title Bar (Obsidian-like) */
 .file-title-bar {
-    padding: 10px 40px 0 40px; /* エディタのパディングに合わせる */
+    padding: 10px 40px 0 40px;
+    /* エディタのパディングに合わせる */
     background-color: var(--main-bg);
     flex-shrink: 0;
     display: flex;
@@ -801,7 +835,8 @@ body[data-theme="dark"] .git-action-btn-small:hover {
 
 .file-title-input {
     width: 100%;
-    max-width: 900px; /* エディタのmax-widthに合わせる */
+    max-width: 900px;
+    /* エディタのmax-widthに合わせる */
     font-size: 1.5em;
     font-weight: bold;
     border: none;
@@ -838,7 +873,8 @@ body[data-theme="dark"] .git-action-btn-small:hover {
     width: 100%;
 }
 
-.toolbar-left, .toolbar-right {
+.toolbar-left,
+.toolbar-right {
     display: flex;
     gap: 4px;
     align-items: center;
@@ -920,10 +956,11 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu {
 }
 
 .toolbar-overflow-menu button:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
+
 body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
 }
 
 .toolbar-overflow-menu .separator {
@@ -1043,7 +1080,11 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
 }
 
 /* LiveMark Styles */
-.cm-live-h1, .cm-live-h2, .cm-live-h3, .cm-live-bold, .cm-live-li::before {
+.cm-live-h1,
+.cm-live-h2,
+.cm-live-h3,
+.cm-live-bold,
+.cm-live-li::before {
     color: var(--text-color);
 }
 
@@ -1051,30 +1092,62 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     text-decoration: none !important;
 }
 
-.cm-live-h1 { font-size: 1.618em; }
-.cm-live-h2 { font-size: 1.462em; }
-.cm-live-h3 { font-size: 1.318em; }
-.cm-live-h4 { font-size: 1.188em; }
-.cm-live-h5 { font-size: 1.076em; }
-.cm-live-h6 { font-size: 1.0em; }
+.cm-live-h1 {
+    font-size: 1.618em;
+}
+
+.cm-live-h2 {
+    font-size: 1.462em;
+}
+
+.cm-live-h3 {
+    font-size: 1.318em;
+}
+
+.cm-live-h4 {
+    font-size: 1.188em;
+}
+
+.cm-live-h5 {
+    font-size: 1.076em;
+}
+
+.cm-live-h6 {
+    font-size: 1.0em;
+}
 
 .cm-live-quote {
     background: var(--cb-body-bg);
     border-left: 4px solid var(--cb-border-color);
-    padding: 0 10px; /* 修正: 上下パディングを削除 */
+    padding: 0 10px;
+    /* 修正: 上下パディングを削除 */
     color: #6a737d;
-    margin: 0; /* 修正: マージンを削除して行番号ズレを防止 */
+    margin: 0;
+    /* 修正: マージンを削除して行番号ズレを防止 */
     display: block;
 }
-body[data-theme="dark"] .cm-live-quote { color: #8b949e; }
 
-.cm-live-bold { font-weight: bold; }
-.cm-live-em { font-style: italic; }
-.cm-live-s { text-decoration: line-through; color: #6a737d; }
+body[data-theme="dark"] .cm-live-quote {
+    color: #8b949e;
+}
+
+.cm-live-bold {
+    font-weight: bold;
+}
+
+.cm-live-em {
+    font-style: italic;
+}
+
+.cm-live-s {
+    text-decoration: line-through;
+    color: #6a737d;
+}
 
 /* ハイライト (==) */
 .cm-live-highlight {
-    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.7) 0); /* 蛍光マーカー風 */
+    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.7) 0);
+    /* 蛍光マーカー風 */
     /* または単色背景 */
     /* background-color: rgba(255, 255, 0, 0.4); */
     padding: 0 2px;
@@ -1095,16 +1168,24 @@ body[data-theme="dark"] .cm-live-highlight {
     color: #e01e5a;
     font-size: 0.9em;
 }
-body[data-theme="dark"] .cm-live-code { color: #ff7b72; }
+
+body[data-theme="dark"] .cm-live-code {
+    color: #ff7b72;
+}
 
 .cm-live-link {
     color: #0366d6;
     text-decoration: underline;
     cursor: text;
 }
-body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 
-.cm-live-link:hover { text-decoration: underline; }
+body[data-theme="dark"] .cm-live-link {
+    color: #58a6ff;
+}
+
+.cm-live-link:hover {
+    text-decoration: underline;
+}
 
 /* 画像コンテナ */
 .cm-image-wrapper {
@@ -1114,19 +1195,22 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
     margin: 10px 0;
     vertical-align: top;
     user-select: none;
-    
+
     /* 追加: 画像読み込み失敗時のレイアウト崩れ防止 */
     min-width: 50px;
     min-height: 50px;
-    background-color: rgba(0, 0, 0, 0.03); /* 薄い背景色で領域を可視化 */
-    border: 1px solid transparent;         /* 境界線用スペース */
+    background-color: rgba(0, 0, 0, 0.03);
+    /* 薄い背景色で領域を可視化 */
+    border: 1px solid transparent;
+    /* 境界線用スペース */
 }
 
 /* 読み込み失敗時（壊れた画像アイコン）のスタイル調整 */
 .cm-image-wrapper img {
     min-width: 50px;
     min-height: 50px;
-    display: block; /* 余計な隙間防止 */
+    display: block;
+    /* 余計な隙間防止 */
 }
 
 /* 画像本体 */
@@ -1171,6 +1255,29 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
 .cm-hide-marker {
     font-size: 0;
     color: transparent;
+}
+
+/* 編集画面内PDFプレビュー用スタイル */
+.cm-pdf-wrapper {
+    display: block;
+    /* PDFはブロック要素として表示 */
+    position: relative;
+    max-width: 100%;
+    margin: 10px 0;
+    user-select: none;
+    background-color: #525659;
+    /* PDFビューアっぽい背景色 */
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    height: 500px;
+    /* デフォルトの高さ */
+}
+
+.cm-live-widget-pdf {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
 }
 
 /* 箇条書きリスト */
@@ -1237,19 +1344,23 @@ body[data-theme="dark"] .cm-live-link { color: #58a6ff; }
     text-align: center;
     display: inline-block;
 }
-body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
+
+body[data-theme="dark"] .cm-live-ol-marker {
+    color: #58a6ff;
+}
 
 /* ★★★ Code Block Styles (Updated with Line Numbers) ★★★ */
 
 /* 共通設定 */
-.cm-code-block, 
+.cm-code-block,
 .cm-code-header,
 .cm-code-footer {
     background-color: var(--cb-body-bg);
     font-family: var(--editor-font-family-mono, monospace);
     box-sizing: border-box;
     margin: 0 !important;
-    position: relative; /* 行番号配置用 */
+    position: relative;
+    /* 行番号配置用 */
 }
 
 /* コードブロックの中身（行番号エリア分パディング確保） */
@@ -1258,7 +1369,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 }
 
 /* ヘッダーとフッターはパディングなしで通常の配置（ただし境界線を合わせる） */
-.cm-code-header, 
+.cm-code-header,
 .cm-code-footer {
     padding-left: 12px !important;
 }
@@ -1273,11 +1384,15 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     height: 100%;
     text-align: right;
     padding-right: 8px;
-    color: #888; /* 行番号の色 */
-    background-color: var(--cb-body-bg); /* 背景色（本体と同じ） */
-    border-right: 1px solid var(--cb-border-color); /* 境界線 */
+    color: #888;
+    /* 行番号の色 */
+    background-color: var(--cb-body-bg);
+    /* 背景色（本体と同じ） */
+    border-right: 1px solid var(--cb-border-color);
+    /* 境界線 */
     box-sizing: border-box;
-    pointer-events: none; /* 選択不可 */
+    pointer-events: none;
+    /* 選択不可 */
     font-size: 0.9em;
     opacity: 0.7;
 }
@@ -1313,9 +1428,10 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     border-right: 1px solid var(--cb-border-color);
     border-top-left-radius: var(--cb-radius);
     border-top-right-radius: var(--cb-radius);
-    
+
     display: flex !important;
-    justify-content: flex-end !important; /* 右寄せ */
+    justify-content: flex-end !important;
+    /* 右寄せ */
     align-items: center;
     position: relative;
 }
@@ -1341,7 +1457,8 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-right: 8px; /* 右端からの余白 */
+    margin-right: 8px;
+    /* 右端からの余白 */
     z-index: 10;
 }
 
@@ -1362,7 +1479,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 }
 
 .cm-language-select-btn:hover {
-    background-color: rgba(0,0,0,0.08);
+    background-color: rgba(0, 0, 0, 0.08);
     color: var(--text-color);
 }
 
@@ -1385,7 +1502,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 }
 
 .cm-code-copy-btn:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
     color: var(--text-color);
 }
 
@@ -1395,7 +1512,8 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 
 /* Notion-like Language Dropdown */
 .cm-language-dropdown-portal {
-    position: fixed; /* 画面に対して絶対配置 */
+    position: fixed;
+    /* 画面に対して絶対配置 */
     background-color: var(--main-bg);
     border: 1px solid var(--sidebar-border);
     border-radius: 4px;
@@ -1413,7 +1531,7 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
     width: 100%;
     padding: 6px 8px;
     border: 1px solid transparent;
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
     border-radius: 3px;
     font-size: 13px;
     color: var(--text-color);
@@ -1439,10 +1557,12 @@ body[data-theme="dark"] .cm-live-ol-marker { color: #58a6ff; }
 .cm-language-list::-webkit-scrollbar {
     width: 8px;
 }
+
 .cm-language-list::-webkit-scrollbar-thumb {
-    background-color: rgba(0,0,0,0.2);
+    background-color: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
+
 .cm-language-list::-webkit-scrollbar-track {
     background: transparent;
 }
@@ -1492,16 +1612,18 @@ body[data-theme="dark"] .cm-code-header {
 body[data-theme="dark"] .cm-language-select-btn {
     color: #8b949e;
 }
+
 body[data-theme="dark"] .cm-language-select-btn:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
     color: #c9d1d9;
 }
 
 body[data-theme="dark"] .cm-code-copy-btn {
     color: #666;
 }
+
 body[data-theme="dark"] .cm-code-copy-btn:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
     color: #c9d1d9;
 }
 
@@ -1515,6 +1637,7 @@ body[data-theme="dark"] .cm-language-search {
     background-color: #3c3c3c;
     color: #ccc;
 }
+
 body[data-theme="dark"] .cm-language-search:focus {
     background-color: #252526;
     border-color: #007acc;
@@ -1636,7 +1759,8 @@ body[data-theme="dark"] .cm-language-item:hover {
     flex-shrink: 0;
 }
 
-#new-terminal-btn, #dropdown-toggle {
+#new-terminal-btn,
+#dropdown-toggle {
     background: none;
     border: none;
     color: #ccc;
@@ -1645,7 +1769,8 @@ body[data-theme="dark"] .cm-language-item:hover {
     font-size: 14px;
 }
 
-#new-terminal-btn:hover, #dropdown-toggle:hover {
+#new-terminal-btn:hover,
+#dropdown-toggle:hover {
     color: #fff;
 }
 
@@ -1737,7 +1862,7 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 .pdf-page-canvas {
     background-color: #fff;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     margin-bottom: 20px;
     max-width: 100%;
 }
@@ -1751,7 +1876,8 @@ body[data-theme="dark"] .cm-language-item:hover {
     background: #007acc;
 }
 
-.resizer:hover, .resizer.resizing {
+.resizer:hover,
+.resizer.resizing {
     opacity: 1;
 }
 
@@ -1793,7 +1919,7 @@ body[data-theme="dark"] .cm-language-item:hover {
     position: fixed;
     background: var(--main-bg);
     border: 1px solid var(--sidebar-border);
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
     z-index: 1000;
     min-width: 120px;
     border-radius: 3px;
@@ -1819,7 +1945,7 @@ body[data-theme="dark"] .cm-language-item:hover {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -1832,7 +1958,7 @@ body[data-theme="dark"] .cm-language-item:hover {
     padding: 20px;
     border-radius: 5px;
     width: 300px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
 }
 
 .modal-message {
@@ -1843,7 +1969,8 @@ body[data-theme="dark"] .cm-language-item:hover {
 .modal-buttons {
     display: flex;
     justify-content: flex-end;
-    gap: 5px; /* 2025/12/02 */
+    gap: 5px;
+    /* 2025/12/02 */
 }
 
 .modal-btn {
@@ -1890,7 +2017,8 @@ body[data-theme="dark"] .cm-language-item:hover {
 }
 
 /* ========== Utilities ========== */
-.hidden, .content-hidden {
+.hidden,
+.content-hidden {
     display: none !important;
 }
 
@@ -1922,7 +2050,8 @@ body[data-theme="dark"] .cm-language-item:hover {
 }
 
 /* Resizing State */
-body.is-resizing-col, body.is-resizing-row {
+body.is-resizing-col,
+body.is-resizing-row {
     user-select: none;
 }
 
@@ -1934,7 +2063,8 @@ body.is-resizing-row {
     cursor: row-resize !important;
 }
 
-body.is-resizing-col *, body.is-resizing-row * {
+body.is-resizing-col *,
+body.is-resizing-row * {
     pointer-events: none !important;
 }
 
@@ -1959,7 +2089,8 @@ body.is-resizing-row .bottom-pane {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    pointer-events: none; /* クリックを透過 */
+    pointer-events: none;
+    /* クリックを透過 */
 }
 
 .notification-toast {
@@ -1967,7 +2098,7 @@ body.is-resizing-row .bottom-pane {
     color: #fff;
     padding: 12px 20px;
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     font-size: 14px;
     opacity: 0;
     transform: translateY(20px);
@@ -2007,13 +2138,17 @@ body:not([data-theme="dark"]) .notification-toast {
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0; /* 余白なし */
-    padding: 0; /* パディングなし */
+    margin: 0;
+    /* 余白なし */
+    padding: 0;
+    /* パディングなし */
     color: #888;
-    font-size: 0.75em; /* 少し小さくして行内に収める */
+    font-size: 0.75em;
+    /* 少し小さくして行内に収める */
     font-weight: normal;
     user-select: none;
-    height: var(--line-height); /* エディタの行高に合わせる */
+    height: var(--line-height);
+    /* エディタの行高に合わせる */
     box-sizing: border-box;
 }
 
@@ -2021,11 +2156,13 @@ body:not([data-theme="dark"]) .notification-toast {
 .cm-page-break-widget::after {
     content: "";
     flex: 1;
-    border-bottom: 1px dashed #ccc; /* 点線 */
+    border-bottom: 1px dashed #ccc;
+    /* 点線 */
     margin: 0 10px;
     opacity: 0.5;
     position: relative;
-    top: -1px; /* 垂直位置の微調整 */
+    top: -1px;
+    /* 垂直位置の微調整 */
 }
 
 body[data-theme="dark"] .cm-page-break-widget {
@@ -2159,8 +2296,15 @@ body[data-theme="dark"] .cm-bookmark-cover {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .5; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: .5;
+    }
 }
 
 .skeleton-box {
@@ -2214,8 +2358,13 @@ body[data-theme="dark"] .skeleton-box {
 
 /* Sync Button Animation */
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* ツールバー用とサイドバー用(.icon)の両方に対応 */
@@ -2230,7 +2379,7 @@ body[data-theme="dark"] .skeleton-box {
     padding: 15px;
     border: 1px solid var(--sidebar-border);
     border-radius: 5px;
-    background-color: rgba(0,0,0,0.02);
+    background-color: rgba(0, 0, 0, 0.02);
 }
 
 .sync-provider-settings h3 {
@@ -2243,7 +2392,8 @@ body[data-theme="dark"] .skeleton-box {
 .search-widget {
     position: absolute;
     top: 8px;
-    right: 24px; /* スクロールバーの幅を考慮 */
+    right: 24px;
+    /* スクロールバーの幅を考慮 */
     z-index: 2000;
     background-color: var(--main-bg);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -2303,10 +2453,12 @@ body[data-theme="dark"] .skeleton-box {
 .search-widget input {
     width: 100%;
     height: 26px;
-    background-color: var(--sidebar-bg); /* 入力欄背景を少し変える */
+    background-color: var(--sidebar-bg);
+    /* 入力欄背景を少し変える */
     border: 1px solid transparent;
     color: var(--text-color);
-    padding: 0 70px 0 6px; /* 右側にオプションボタン用の余白を開ける */
+    padding: 0 70px 0 6px;
+    /* 右側にオプションボタン用の余白を開ける */
     font-size: 13px;
     outline: none;
     border-radius: 2px;
@@ -2342,11 +2494,12 @@ body[data-theme="dark"] .skeleton-box {
     width: 20px;
     height: 20px;
     opacity: 0.7;
-    font-size: 11px; /* 文字アイコン用 */
+    font-size: 11px;
+    /* 文字アイコン用 */
 }
 
 .icon-btn:hover {
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
     opacity: 1;
 }
 
@@ -2375,7 +2528,8 @@ body[data-theme="dark"] .skeleton-box {
 
 /* 置換行のスタイル調整 */
 .replace-row {
-    padding-left: 20px; /* トグルアイコン分インデント */
+    padding-left: 20px;
+    /* トグルアイコン分インデント */
 }
 
 /* ダークモード対応 */
@@ -2407,17 +2561,20 @@ body[data-theme="dark"] .icon-btn.active {
 .cm-searchMatch {
     background-color: rgba(255, 235, 59, 0.4);
 }
-/* 現在のマッチを「青」にして選択状態のように見せる */  
+
+/* 現在のマッチを「青」にして選択状態のように見せる */
 .cm-searchMatch-selected {
-    background-color: #007acc !important; /* VS Code風の青 */
-    color: white !important; /* 文字色を白にして可読性確保 */
+    background-color: #007acc !important;
+    /* VS Code風の青 */
+    color: white !important;
+    /* 文字色を白にして可読性確保 */
     border: 1px solid #007acc;
     border-radius: 2px;
 }
 
 /* 選択範囲そのもの（Native Selection）と色が混ざらないように調整 */
 /* ★変更: 非フォーカス時も青系の色を維持するように変更 */
-.cm-content ::selection, 
+.cm-content ::selection,
 .cm-selectionBackground {
     background-color: rgba(0, 122, 204, 0.3) !important;
 }
@@ -2428,7 +2585,8 @@ body[data-theme="dark"] .cm-searchMatch {
 }
 
 body[data-theme="dark"] .cm-searchMatch-selected {
-    background-color: #264f78 !important; /* ダークモードでの濃い青 */
+    background-color: #264f78 !important;
+    /* ダークモードでの濃い青 */
     color: white !important;
     border: 1px solid #569cd6;
 }
@@ -2460,10 +2618,11 @@ body[data-theme="dark"] .cm-searchMatch-selected {
 }
 
 .recent-file-item:hover {
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
 }
+
 body[data-theme="dark"] .recent-file-item:hover {
-    background-color: rgba(255,255,255,0.05);
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .recent-file-name {
@@ -2541,7 +2700,8 @@ body[data-theme="dark"] .recent-file-info {
     margin-top: 10px;
     border-top: 1px solid var(--sidebar-border);
     padding-top: 10px;
-    min-height: 200px; /* ある程度の高さを確保 */
+    min-height: 200px;
+    /* ある程度の高さを確保 */
 }
 
 .git-history-list {
@@ -2559,6 +2719,7 @@ body[data-theme="dark"] .recent-file-info {
 .git-history-row:hover {
     background-color: rgba(0, 0, 0, 0.05);
 }
+
 body[data-theme="dark"] .git-history-row:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
@@ -2588,11 +2749,13 @@ body[data-theme="dark"] .git-history-row:hover {
     background-color: #007acc;
     border-radius: 50%;
     position: absolute;
-    top: 8px; /* 行の高さに合わせて調整 */
+    top: 8px;
+    /* 行の高さに合わせて調整 */
     left: 50%;
     transform: translateX(-50%);
     z-index: 2;
-    border: 2px solid var(--sidebar-bg); /* 背景色でくり抜いて見えるように */
+    border: 2px solid var(--sidebar-bg);
+    /* 背景色でくり抜いて見えるように */
 }
 
 body[data-theme="dark"] .git-timeline-dot {
@@ -2651,6 +2814,7 @@ body[data-theme="dark"] .git-ref-badge {
     color: #ccc;
     border-color: #555;
 }
+
 body[data-theme="dark"] .git-ref-badge.remote {
     background-color: #1f2428;
     color: #58a6ff;
@@ -2689,9 +2853,10 @@ body[data-theme="dark"] .git-ref-badge.remote {
     padding: 10px;
     width: 280px;
     z-index: 9999;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     font-size: 12px;
-    pointer-events: none; /* マウスイベントを邪魔しない */
+    pointer-events: none;
+    /* マウスイベントを邪魔しない */
 }
 
 body:not([data-theme="dark"]) .git-commit-tooltip {
@@ -2724,9 +2889,13 @@ body:not([data-theme="dark"]) .git-commit-tooltip {
 
 .git-tooltip-author {
     font-weight: bold;
-    color: #4daafc; /* VS Code Blue */
+    color: #4daafc;
+    /* VS Code Blue */
 }
-body:not([data-theme="dark"]) .git-tooltip-author { color: #007acc; }
+
+body:not([data-theme="dark"]) .git-tooltip-author {
+    color: #007acc;
+}
 
 .git-tooltip-date {
     color: #888;
@@ -2738,7 +2907,10 @@ body:not([data-theme="dark"]) .git-tooltip-author { color: #007acc; }
     color: #fff;
     font-weight: bold;
 }
-body:not([data-theme="dark"]) .git-tooltip-branch { color: #000; }
+
+body:not([data-theme="dark"]) .git-tooltip-branch {
+    color: #000;
+}
 
 .git-tooltip-stats {
     margin-bottom: 8px;
@@ -2749,20 +2921,24 @@ body:not([data-theme="dark"]) .git-tooltip-branch { color: #000; }
     color: #4daafc;
     text-decoration: none;
 }
-body:not([data-theme="dark"]) .git-tooltip-actions a { color: #007acc; }
+
+body:not([data-theme="dark"]) .git-tooltip-actions a {
+    color: #007acc;
+}
 
 /* ブランチバッジをクリック可能に */
 .git-branch-badge {
     cursor: pointer;
     transition: background-color 0.2s, transform 0.1s;
     user-select: none;
-    position: relative; /* メニュー位置の基準 */
+    position: relative;
+    /* メニュー位置の基準 */
 }
 
 .git-branch-badge:hover {
     background-color: #005a9e;
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .git-branch-badge:active {
@@ -2775,7 +2951,7 @@ body:not([data-theme="dark"]) .git-tooltip-actions a { color: #007acc; }
     background-color: var(--main-bg);
     border: 1px solid var(--sidebar-border);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     z-index: 2000;
     min-width: 150px;
     max-height: 300px;
@@ -2787,7 +2963,7 @@ body:not([data-theme="dark"]) .git-tooltip-actions a { color: #007acc; }
 body[data-theme="dark"] .branch-menu {
     background-color: #252526;
     border-color: #454545;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .branch-menu-item {
@@ -2808,11 +2984,14 @@ body[data-theme="dark"] .branch-menu {
     font-weight: bold;
     background-color: rgba(0, 122, 204, 0.1);
 }
+
 body[data-theme="dark"] .branch-menu-item.current {
     background-color: rgba(0, 122, 204, 0.2);
 }
+
 .branch-menu-item:hover.current {
-    background-color: #007acc; /* ホバー時は青背景 */
+    background-color: #007acc;
+    /* ホバー時は青背景 */
 }
 
 .branch-check {
@@ -2822,7 +3001,8 @@ body[data-theme="dark"] .branch-menu-item.current {
 
 /* 現在のブランチを強調（光らせる） */
 .git-ref-badge.current-branch {
-    background-color: #2da44e; /* GitHubの緑色 */
+    background-color: #2da44e;
+    /* GitHubの緑色 */
     color: white;
     border-color: #2da44e;
     font-weight: bold;
@@ -2862,12 +3042,14 @@ body[data-theme="dark"] .git-ref-badge.current-branch {
 /* アカウントメニュー (左下用) */
 .account-menu {
     position: fixed;
-    bottom: 50px; /* 設定ボタンの少し上 */
-    left: 50px;   /* アクティビティバーの幅 */
+    bottom: 50px;
+    /* 設定ボタンの少し上 */
+    left: 50px;
+    /* アクティビティバーの幅 */
     background-color: var(--main-bg);
     border: 1px solid var(--sidebar-border);
     border-radius: 4px;
-    box-shadow: 2px 2px 10px rgba(0,0,0,0.2);
+    box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
     z-index: 2000;
     min-width: 200px;
     padding: 4px 0;
@@ -2901,9 +3083,12 @@ body[data-theme="dark"] .account-menu {
 
 /* ========== Settings Panel Styles ========== */
 .settings-view-content {
-    flex: 1; /* これがないと高さが潰れます */
-    min-height: 0; /* Flexアイテムの最小高さ潰れ防止 */
-    padding: 0; /* パディングをリセット */
+    flex: 1;
+    /* これがないと高さが潰れます */
+    min-height: 0;
+    /* Flexアイテムの最小高さ潰れ防止 */
+    padding: 0;
+    /* パディングをリセット */
     background-color: var(--main-bg);
     color: var(--text-color);
     display: flex;
@@ -2958,6 +3143,7 @@ body[data-theme="dark"] .account-menu {
 .settings-nav-item:hover {
     background-color: rgba(0, 0, 0, 0.05);
 }
+
 body[data-theme="dark"] .settings-nav-item:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
@@ -2968,6 +3154,7 @@ body[data-theme="dark"] .settings-nav-item:hover {
     border-left-color: #007acc;
     font-weight: 600;
 }
+
 body[data-theme="dark"] .settings-nav-item.active {
     background-color: rgba(0, 122, 204, 0.2);
     color: #fff;
@@ -2983,13 +3170,16 @@ body[data-theme="dark"] .settings-nav-item.active {
 }
 
 .settings-section {
-    display: none; /* デフォルト非表示 */
+    display: none;
+    /* デフォルト非表示 */
     animation: fadeIn 0.2s ease-in-out;
-    padding-bottom: 50px; /* 下部に少し余裕を持たせる */
+    padding-bottom: 50px;
+    /* 下部に少し余裕を持たせる */
 }
 
 .settings-section.active {
-    display: block; /* アクティブのみ表示 */
+    display: block;
+    /* アクティブのみ表示 */
 }
 
 /* @keyframes fadeIn {
@@ -3061,12 +3251,12 @@ body[data-theme="dark"] .settings-nav-item.active {
     background-color: var(--main-bg);
 }
 
-.checkbox-label input:checked + .checkbox-custom {
+.checkbox-label input:checked+.checkbox-custom {
     background-color: #007acc;
     border-color: #007acc;
 }
 
-.checkbox-label input:checked + .checkbox-custom::after {
+.checkbox-label input:checked+.checkbox-custom::after {
     content: '';
     position: absolute;
     left: 6px;
@@ -3094,4 +3284,19 @@ body[data-theme="dark"] .settings-nav-item.active {
     color: #888;
     margin-top: 4px;
     line-height: 1.4;
+}
+
+/* 文字色変更ボタンのスタイル調整 */
+#color-btn {
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ボタンホバー時のエフェクト（既存のボタンスタイルに合わせて調整可） */
+#color-btn:hover {
+    background-color: #e0e0e0;
+    /* 薄いグレーなど */
 }

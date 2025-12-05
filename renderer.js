@@ -114,6 +114,8 @@ const fileStatsElement = document.getElementById('file-stats');
 const btnBulletList = document.getElementById('btn-bullet-list');
 const btnNumberList = document.getElementById('btn-number-list');
 const btnCheckList = document.getElementById('btn-check-list');
+const colorBtn = document.getElementById('color-btn');
+const colorPicker = document.getElementById('color-picker');
 
 // 最近使ったファイルリスト
 const btnRecentClear = document.getElementById('btn-recent-clear');
@@ -145,6 +147,9 @@ const btnAuthDropbox = document.getElementById('btn-auth-dropbox');
 const btnAuthGDrive = document.getElementById('btn-auth-gdrive');
 const syncStatusText = document.getElementById('sync-status-text');
 
+// ========= CodeMirror Compartments ==========
+const lineWrappingCompartment = new Compartment();
+
 // ========== 状態管理 ==========
 let globalEditorView = null; // CodeMirrorインスタンス
 let isPositionRight = true;
@@ -158,7 +163,8 @@ let appSettings = {
     fontSize: '16px',
     fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
-    autoSave: true
+    autoSave: true,
+    wordWrap: true,
 };
 
 // CodeMirror Compartments for dynamic reconfiguration
@@ -302,7 +308,9 @@ function applySettingsToUI() {
     const fontFamilyInput = document.getElementById('font-family');
     const themeInput = document.getElementById('theme');
     const autoSaveInput = document.getElementById('auto-save');
+    const wordWrapInput = document.getElementById('word-wrap');
 
+    if (wordWrapInput) wordWrapInput.checked = appSettings.wordWrap;
     if (fontSizeInput) fontSizeInput.value = appSettings.fontSize;
     if (fontFamilyInput) fontFamilyInput.value = appSettings.fontFamily;
     if (themeInput) themeInput.value = appSettings.theme;
@@ -373,6 +381,19 @@ function setupSettingsListeners() {
     document.getElementById('auto-save')?.addEventListener('change', (e) => {
         appSettings.autoSave = e.target.checked;
         saveSettings();
+    });
+    document.getElementById('word-wrap')?.addEventListener('change', (e) => {
+        appSettings.wordWrap = e.target.checked;
+        saveSettings();
+        
+        // エディタに即時反映
+        if (globalEditorView) {
+            globalEditorView.dispatch({
+                effects: lineWrappingCompartment.reconfigure(
+                    appSettings.wordWrap ? EditorView.lineWrapping : []
+                )
+            });
+        }
     });
 }
 
@@ -1140,6 +1161,8 @@ function createEditorState(content, filePath) {
             themeCompartment.of(initialTheme),
             editorStyleCompartment.of(initialStyle),
             indentUnit.of("    "),
+            // lineWrappingCompartment を使用して動的に設定
+            lineWrappingCompartment.of(appSettings.wordWrap ? EditorView.lineWrapping : []),
             Prec.highest(keymap.of(obsidianLikeListKeymap)),
             pasteHandler,
             history(),
@@ -1174,7 +1197,6 @@ function createEditorState(content, filePath) {
             keymap.of([...defaultKeymap, ...historyKeymap]),
             syntaxHighlighting(defaultHighlightStyle),
             languageCompartment.of(getLanguageExtensions(filePath)),
-            EditorView.lineWrapping,
             highlightActiveLine(),
             lineNumbers(),
             EditorView.updateListener.of(update => {
@@ -1432,7 +1454,7 @@ function insertCodeBlock(view) {
     view.focus();
 }
 
-// ========== ツールバーボタン イベントリスナー ==========
+// ==========ツールバー ボタン イベントリスナー ==========
 document.getElementById('btn-save')?.addEventListener('click', () => saveCurrentFile(false));
 document.getElementById('toolbar-undo')?.addEventListener('click', () => { if (globalEditorView) { undo(globalEditorView); globalEditorView.focus(); } });
 document.getElementById('toolbar-redo')?.addEventListener('click', () => { if (globalEditorView) { redo(globalEditorView); globalEditorView.focus(); } });
@@ -1458,7 +1480,7 @@ document.getElementById('image-btn')?.addEventListener('click', () => insertImag
 // ローカル画像挿入ボタンの処理
 document.getElementById('local-image-btn')?.addEventListener('click', async () => {
     if (!globalEditorView) return;
-    
+
     try {
         const result = await window.electronAPI.selectFile();
         if (result.success && result.path) {
@@ -1479,10 +1501,10 @@ document.getElementById('local-image-btn')?.addEventListener('click', async () =
 
             const fileName = path.basename(absolutePath);
             const insertText = `![${fileName}](${insertPath})`;
-            
+
             const { state, dispatch } = globalEditorView;
             const { from, to } = state.selection.main;
-            
+
             dispatch({
                 changes: { from: from, to: to, insert: insertText },
                 selection: { anchor: from + insertText.length }
@@ -1543,6 +1565,50 @@ if (btnExportPdf) {
             showNotification('予期せぬエラーが発生しました: ' + e.message, 'error');
         }
     });
+}
+
+// 1. ボタンをクリックしたら、隠しカラーピッカーを開く
+colorBtn.addEventListener('click', () => {
+    colorPicker.click();
+});
+
+// 2. カラーピッカーで色が選ばれたら、エディタに反映する
+colorPicker.addEventListener('input', (e) => {
+    const color = e.target.value;
+    applyTextColor(color);
+
+    // ボタンのアイコン色も選んだ色に合わせて更新すると直感的です
+    colorBtn.querySelector('span').style.borderColor = color;
+});
+
+// 3. 選択範囲のテキストを<span>タグで囲んで色をつける関数
+function applyTextColor(color) {
+    // エディタがまだ準備できていない場合は何もしない
+    if (!globalEditorView) return;
+
+    const state = globalEditorView.state;
+    if (!state) return;
+
+    const { from, to } = state.selection.main;
+    
+    // 選択範囲がない（カーソルのみ）場合は何もしない
+    if (from === to) return;
+
+    // 選択されているテキストを取得
+    const text = state.sliceDoc(from, to);
+
+    // HTMLタグ形式で色を指定
+    const coloredText = `<span style="color: ${color}">${text}</span>`;
+
+    // エディタの内容を書き換える
+    globalEditorView.dispatch({
+        changes: { from, to, insert: coloredText },
+        // 挿入後、カーソルを挿入テキストの直後に移動（選択解除）
+        selection: { anchor: from + coloredText.length }
+    });
+
+    // エディタにフォーカスを戻す
+    globalEditorView.focus();
 }
 
 // ========== ツールバーのレスポンシブ対応 (オーバーフローメニュー) ==========

@@ -135,6 +135,7 @@ function loadAppSettings() {
     fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
     autoSave: true,
+    wordWrap: true,
     cloudSync: {
       service: 'none',
       dropbox: { accessToken: null, refreshToken: null },
@@ -2279,7 +2280,7 @@ ipcMain.handle('select-folder', async (event) => {
   }
 });
 
-// ファイル選択ダイアログ (ローカル画像用)
+// ファイル選択ダイアログ (ローカル画像・PDF用)
 ipcMain.handle('select-file', async (event) => {
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
@@ -2287,7 +2288,8 @@ ipcMain.handle('select-file', async (event) => {
       properties: ['openFile'],
       title: '挿入するファイルを選択',
       filters: [
-        { name: 'Images', extensions: ['jpg', 'png', 'gif', 'svg', 'webp', 'jpeg'] },
+        // extensionsに 'pdf' を追加
+        { name: 'Media & Documents', extensions: ['jpg', 'png', 'gif', 'svg', 'webp', 'jpeg', 'pdf'] },
         { name: 'All Files', extensions: ['*'] }
       ]
     });

@@ -203,6 +203,11 @@
                         <button id="bold-btn" title="太字 (Ctrl+B)"><b>B</b></button>
                         <button id="italic-btn" title="斜体 (Ctrl+I)"><i>I</i></button>
                         <button id="strike-btn" title="取り消し線 (Ctrl+Shift+S)"><s>S</s></button>
+                        <button id="color-btn" class="toolbar-button" title="文字色を変更">
+                            <span style="border-bottom: 3px solid red; padding-bottom: 2px;">A</span>
+                        </button>
+                        <input type="color" id="color-picker"
+                            style="visibility: hidden; position: absolute; width: 0; height: 0;">
                         <button id="highlight-btn" title="ハイライト (==)">
                             <span
                                 style="background-color: #fff700; color: black; padding: 0 2px; border-radius: 2px; font-weight: bold; font-size: 10px;">H</span>
@@ -355,6 +360,16 @@
 
                             <div class="settings-section" id="settings-section-editor">
                                 <h2>エディタ (Editor)</h2>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="word-wrap">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">右端で折り返す (Word Wrap)</span>
+                                            <span class="label-desc">ウィンドウの幅に合わせてテキストを自動的に改行します。</span>
+                                        </div>
+                                    </label>
+                                </div>
                                 <div class="setting-item">
                                     <label for="font-size">フォントサイズ</label>
                                     <select id="font-size">

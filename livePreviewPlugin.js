@@ -134,6 +134,15 @@ class HRWidget extends WidgetType {
     ignoreEvent() { return false; }
 }
 
+/* --- 追加: <br>タグ用ウィジェット --- */
+class BrWidget extends WidgetType {
+    toDOM() {
+        const br = document.createElement("br");
+        return br;
+    }
+    ignoreEvent() { return false; }
+}
+
 /* ImageWidget */
 class ImageWidget extends WidgetType {
     constructor(alt, src, width) {
@@ -160,15 +169,15 @@ class ImageWidget extends WidgetType {
 
         const img = document.createElement("img");
         img.className = "cm-live-widget-image";
-        
+
         // パス解決ロジック (ローカルファイル対応)
         let imageSrc = this.src;
-        
+
         // URLが http/https で始まらず、かつデータURIでもない場合
         if (!/^https?:\/\//i.test(imageSrc) && !/^data:/i.test(imageSrc)) {
             // renderer.js で設定した現在のディレクトリパスを取得
             const currentDir = document.body.dataset.currentDir;
-            
+
             if (currentDir) {
                 // 絶対パスでない場合は結合して絶対パス化
                 if (!path.isAbsolute(imageSrc)) {
@@ -250,6 +259,197 @@ class ImageWidget extends WidgetType {
             view.dispatch({
                 changes: { from: node.from, to: node.to, insert: newText }
             });
+        }
+    }
+
+    ignoreEvent() { return true; }
+}
+
+/* PdfWidget (PDF全ページ表示・スクロール対応版) */
+class PdfWidget extends WidgetType {
+    constructor(alt, src, width) {
+        super();
+        this.alt = alt;
+        this.src = src;
+        this.width = width;
+    }
+
+    eq(other) {
+        return this.src === other.src &&
+            this.alt === other.alt &&
+            this.width === other.width;
+    }
+
+    toDOM(view) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "cm-pdf-wrapper";
+
+        // === スタイル設定: スクロール可能なビューワーにする ===
+        wrapper.style.display = "block";
+        wrapper.style.position = "relative";
+        wrapper.style.backgroundColor = "#525659"; // PDFリーダー風の背景色
+        wrapper.style.border = "1px solid #ccc";
+
+        // ★ここが重要: 高さを固定してスクロールバーを出す
+        wrapper.style.height = "600px";
+        wrapper.style.overflowY = "auto";
+        wrapper.style.overflowX = "hidden";
+        wrapper.style.marginBottom = "10px";
+
+        // 幅指定 (デフォルト600px)
+        const displayWidth = this.width ? parseInt(this.width) : 600;
+        wrapper.style.width = displayWidth + "px";
+        wrapper.style.maxWidth = "100%";
+
+        // ローディングメッセージ
+        const message = document.createElement("div");
+        message.textContent = "Loading PDF...";
+        message.style.color = "#f0f0f0";
+        message.style.padding = "20px";
+        message.style.textAlign = "center";
+        wrapper.appendChild(message);
+
+        // ページを縦に並べるコンテナ
+        const pagesContainer = document.createElement("div");
+        pagesContainer.style.display = "flex";
+        pagesContainer.style.flexDirection = "column";
+        pagesContainer.style.alignItems = "center";
+        pagesContainer.style.padding = "20px";
+        pagesContainer.style.gap = "10px"; // ページ間の隙間
+        wrapper.appendChild(pagesContainer);
+
+        // パス解決ロジック
+        let fileSrc = this.src;
+        if (!/^https?:\/\//i.test(fileSrc) && !/^data:/i.test(fileSrc)) {
+            const currentDir = document.body.dataset.currentDir;
+            if (currentDir) {
+                // pathモジュールが使えるか確認
+                if (typeof path !== 'undefined') {
+                    if (!path.isAbsolute(fileSrc)) {
+                        const absPath = path.join(currentDir, fileSrc);
+                        fileSrc = `file://${absPath.replace(/\\/g, '/')}`;
+                    } else {
+                        fileSrc = `file://${fileSrc.replace(/\\/g, '/')}`;
+                    }
+                }
+            }
+        }
+
+        // レンダリング実行
+        this.renderPdf(fileSrc, pagesContainer, message, displayWidth);
+
+        // リサイズ用ハンドル (幅変更)
+        const handle = document.createElement("div");
+        handle.className = "cm-image-resize-handle";
+        wrapper.appendChild(handle);
+
+        handle.addEventListener("mousedown", (e) => {
+            e.preventDefault(); e.stopPropagation();
+            const startX = e.clientX;
+            const startRect = wrapper.getBoundingClientRect();
+            const startWidth = startRect.width;
+            let currentWidth = startWidth;
+
+            const onMouseMove = (moveEvent) => {
+                const diff = moveEvent.clientX - startX;
+                currentWidth = Math.max(200, startWidth + diff);
+                wrapper.style.width = `${currentWidth}px`;
+            };
+
+            const onMouseUp = () => {
+                document.removeEventListener("mousemove", onMouseMove);
+                document.removeEventListener("mouseup", onMouseUp);
+                this.updateSizeInMarkdown(view, wrapper, Math.round(currentWidth));
+            };
+            document.addEventListener("mousemove", onMouseMove);
+            document.addEventListener("mouseup", onMouseUp);
+        });
+
+        return wrapper;
+    }
+
+    async renderPdf(url, container, message, displayWidth) {
+        if (!window.pdfjsLib) {
+            message.textContent = "Error: pdfjs-dist not loaded (check index.html)";
+            return;
+        }
+
+        try {
+            const loadingTask = window.pdfjsLib.getDocument(url);
+            const pdf = await loadingTask.promise;
+
+            message.style.display = "none"; // ロード完了で非表示
+
+            // 全ページをループして追加
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const canvas = document.createElement("canvas");
+                canvas.style.boxShadow = "0 2px 5px rgba(0,0,0,0.3)";
+                canvas.style.maxWidth = "100%";
+                // 最初は白紙で枠だけ確保しても良いが、今回は順次描画
+                container.appendChild(canvas);
+
+                await this.renderPage(pdf, pageNum, canvas, displayWidth);
+            }
+
+        } catch (e) {
+            console.error(e);
+            message.textContent = "PDF Load Error: " + e.message;
+            message.style.color = "#ffaaaa";
+        }
+    }
+
+    async renderPage(pdf, pageNum, canvas, displayWidth) {
+        const page = await pdf.getPage(pageNum);
+        const pixelRatio = window.devicePixelRatio || 1;
+
+        // 利用可能な幅（コンテナ幅 - パディング分）
+        const availableWidth = displayWidth - 40;
+        const viewportRaw = page.getViewport({ scale: 1.0 });
+
+        // 横幅に合わせてスケール計算
+        const scale = (availableWidth / viewportRaw.width) * pixelRatio;
+        const viewport = page.getViewport({ scale: scale });
+
+        // Canvasの内部サイズ（高解像度）
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        // 見た目のサイズ（CSS）
+        canvas.style.width = `${viewport.width / pixelRatio}px`;
+        canvas.style.height = `${viewport.height / pixelRatio}px`;
+
+        const context = canvas.getContext('2d');
+        await page.render({
+            canvasContext: context,
+            viewport: viewport
+        }).promise;
+    }
+
+    updateSizeInMarkdown(view, wrapperDom, newWidth) {
+        const pos = view.posAtDOM(wrapperDom);
+        if (pos === null) return;
+
+        // ※syntaxTreeのインポートが必要（@codemirror/language）
+        // renderer.js で syntaxTree が使えるか、もしくは livePreviewPlugin.js 内で import しているか確認してください
+        // もし syntaxTree が未定義なら、この機能は動きませんが表示には影響しません
+        try {
+            const { syntaxTree } = require("@codemirror/language");
+            const tree = syntaxTree(view.state);
+            let node = tree.resolveInner(pos, 1);
+            while (node && node.name !== "Image" && node.name !== "Document") {
+                node = node.parent;
+            }
+
+            if (node && node.name === "Image") {
+                const newAltText = `${this.alt}|${newWidth}`;
+                const newText = `![${newAltText}](${this.src})`;
+
+                view.dispatch({
+                    changes: { from: node.from, to: node.to, insert: newText }
+                });
+            }
+        } catch (e) {
+            console.warn("Resize update skipped:", e);
         }
     }
 
@@ -644,7 +844,7 @@ function buildDecorations(view) {
     const collectedDecos = [];
 
     for (const { from, to } of view.visibleRanges) {
-        // 1. まず各行のテキストベースでのチェック（改ページ検出、ブックマーク検出など）
+        // 1. テキストベースでのチェック（HTMLタグ、改ページ、ブックマーク等）
         for (let pos = from; pos < to;) {
             const line = state.doc.lineAt(pos);
 
@@ -657,7 +857,129 @@ function buildDecorations(view) {
             const isCursorOnLine = (cursor >= line.from && cursor <= line.to);
             const lineText = line.text;
 
-            // 改ページタグの検出
+            // --- HTMLタグの処理 ---
+
+            // 1. <br> タグ
+            const brRegex = /<br\s*\/?>/gi;
+            let brMatch;
+            while ((brMatch = brRegex.exec(lineText)) !== null) {
+                const start = line.from + brMatch.index;
+                const end = start + brMatch[0].length;
+                if (!isCursorOnLine) {
+                    collectedDecos.push({
+                        from: start,
+                        to: end,
+                        side: 1,
+                        deco: Decoration.replace({ widget: new BrWidget() })
+                    });
+                }
+            }
+
+            // 2. <img> タグ
+            const imgRegex = /<img\s+([^>]+)>/gi;
+            let imgMatch;
+            while ((imgMatch = imgRegex.exec(lineText)) !== null) {
+                const start = line.from + imgMatch.index;
+                const end = start + imgMatch[0].length;
+
+                if (cursor >= start && cursor <= end) continue;
+
+                const attrs = imgMatch[1];
+                const srcMatch = attrs.match(/src=["']([^"']+)["']/i);
+                const altMatch = attrs.match(/alt=["']([^"']+)["']/i);
+                const widthMatch = attrs.match(/width=["']([^"']+)["']/i);
+
+                if (srcMatch) {
+                    const src = srcMatch[1];
+                    const alt = altMatch ? altMatch[1] : "";
+                    const width = widthMatch ? widthMatch[1].replace('px', '') : null;
+
+                    collectedDecos.push({
+                        from: start,
+                        to: end,
+                        side: -1,
+                        deco: Decoration.replace({ widget: new ImageWidget(alt, src, width) })
+                    });
+                }
+            }
+
+            // 3. <font color="...">text</font>
+            const fontRegex = /<font\s+color=["']([^"']+)["']>(.*?)<\/font>/gi;
+            let fontMatch;
+            while ((fontMatch = fontRegex.exec(lineText)) !== null) {
+                const start = line.from + fontMatch.index;
+                const end = start + fontMatch[0].length;
+                const color = fontMatch[1];
+                const content = fontMatch[2];
+                const contentStart = start + fontMatch[0].indexOf(content);
+                const contentEnd = contentStart + content.length;
+
+                if (cursor >= start && cursor <= end) continue;
+
+                collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                collectedDecos.push({ from: contentStart, to: contentEnd, side: 1, deco: Decoration.mark({ attributes: { style: `color: ${color}` } }) });
+                collectedDecos.push({ from: contentEnd, to: end, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+            }
+
+            // 4. <span style="...">text</span>
+            const spanRegex = /<span\s+style=["']([^"']+)["']>(.*?)<\/span>/gi;
+            let spanMatch;
+            while ((spanMatch = spanRegex.exec(lineText)) !== null) {
+                const start = line.from + spanMatch.index;
+                const end = start + spanMatch[0].length;
+                const styleStr = spanMatch[1];
+                const content = spanMatch[2];
+                const contentStart = start + spanMatch[0].indexOf(content);
+                const contentEnd = contentStart + content.length;
+
+                if (cursor >= start && cursor <= end) continue;
+
+                collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                collectedDecos.push({ from: contentStart, to: contentEnd, side: 1, deco: Decoration.mark({ attributes: { style: styleStr } }) });
+                collectedDecos.push({ from: contentEnd, to: end, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+            }
+
+            // 5. インライン装飾タグ (b, i, u, s, mark, etc)
+            const styleTags = [
+                { tag: 'b', class: 'cm-live-bold' },
+                { tag: 'strong', class: 'cm-live-bold' },
+                { tag: 'i', class: 'cm-live-em' },
+                { tag: 'em', class: 'cm-live-em' },
+                { tag: 'u', style: 'text-decoration: underline;' },
+                { tag: 's', class: 'cm-live-s' },
+                { tag: 'del', class: 'cm-live-s' },
+                { tag: 'mark', class: 'cm-live-highlight' },
+                { tag: 'sub', style: 'vertical-align: sub; font-size: smaller;' },
+                { tag: 'sup', style: 'vertical-align: super; font-size: smaller;' },
+                { tag: 'small', style: 'font-size: smaller;' },
+                { tag: 'big', style: 'font-size: larger;' },
+                { tag: 'kbd', style: 'background-color: #eee; border-radius: 3px; border: 1px solid #b4b4b4; padding: 1px 4px; font-family: monospace; font-size: 0.9em;' },
+                { tag: 'var', style: 'font-style: italic; font-family: "Times New Roman", serif;' },
+                { tag: 'cite', style: 'font-style: italic; color: #666;' },
+                { tag: 'code', style: 'background-color: rgba(0, 0, 0, 0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; color: #e01e5a;' }
+            ];
+
+            styleTags.forEach(({ tag, class: className, style }) => {
+                const regex = new RegExp(`<${tag}>(.*?)<\\/${tag}>`, 'gi');
+                let match;
+                while ((match = regex.exec(lineText)) !== null) {
+                    const start = line.from + match.index;
+                    const end = start + match[0].length;
+                    const contentStart = start + match[0].indexOf(match[1]);
+                    const contentEnd = contentStart + match[1].length;
+
+                    if (cursor >= start && cursor <= end) continue;
+
+                    collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                    const attrs = {};
+                    if (className) attrs.class = className;
+                    if (style) attrs.attributes = { style };
+                    collectedDecos.push({ from: contentStart, to: contentEnd, side: 1, deco: Decoration.mark(attrs) });
+                    collectedDecos.push({ from: contentEnd, to: end, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                }
+            });
+
+            // 改ページ
             const pageBreakRegex = /^\s*<div\s+class=["']page-break["']>\s*<\/div>\s*$/i;
             if (pageBreakRegex.test(lineText)) {
                 if (!isCursorOnLine) {
@@ -673,10 +995,9 @@ function buildDecorations(view) {
                 }
             }
 
-            // "@card URL" の形式の行をブックマークカード化する
+            // ブックマーク
             const bookmarkRegex = /^@card\s+(https?:\/\/[^\s]+)$/;
             const bookmarkMatch = lineText.trim().match(bookmarkRegex);
-
             if (bookmarkMatch) {
                 if (!isCursorOnLine) {
                     collectedDecos.push({
@@ -691,52 +1012,30 @@ function buildDecorations(view) {
                 }
             }
 
-            // ハイライト (==text==) の検出
+            // ハイライト (==)
             const highlightRegex = /==([^=]+)==/g;
             let match;
             while ((match = highlightRegex.exec(lineText)) !== null) {
                 const start = line.from + match.index;
                 const end = start + match[0].length;
-
-                // カーソルがハイライト内にあるか
                 const isCursorIn = (cursor >= start && cursor <= end);
-
                 if (!isCursorIn) {
-                    // マーカー (==) を隠す (開始)
-                    collectedDecos.push({
-                        from: start,
-                        to: start + 2,
-                        side: 0,
-                        deco: Decoration.mark({ class: "cm-hide-marker" })
-                    });
-                    // テキスト部分を光らせる
-                    collectedDecos.push({
-                        from: start + 2,
-                        to: end - 2,
-                        side: 1,
-                        deco: Decoration.mark({ class: "cm-live-highlight" })
-                    });
-                    // マーカー (==) を隠す (終了)
-                    collectedDecos.push({
-                        from: end - 2,
-                        to: end,
-                        side: 0,
-                        deco: Decoration.mark({ class: "cm-hide-marker" })
-                    });
+                    collectedDecos.push({ from: start, to: start + 2, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                    collectedDecos.push({ from: start + 2, to: end - 2, side: 1, deco: Decoration.mark({ class: "cm-live-highlight" }) });
+                    collectedDecos.push({ from: end - 2, to: end, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                 }
             }
 
             pos = line.to + 1;
         }
 
-        // 2. 構文木ベースのチェック
+        // 2. 構文木ベースのチェック (Markdown記法)
         syntaxTree(state).iterate({
             from,
             to,
             enter: (node) => {
                 const n = node.node || node;
                 const line = state.doc.lineAt(node.from);
-
                 const isCursorOnLine = (cursor >= line.from && cursor <= line.to);
                 const isCursorInNode = (cursor >= node.from && cursor <= node.to);
 
@@ -773,8 +1072,7 @@ function buildDecorations(view) {
                 else if (/^ATXHeading[1-6]$/.test(node.name)) {
                     const level = parseInt(node.name.replace("ATXHeading", ""), 10);
                     const headingText = state.doc.sliceString(node.from, node.to);
-                    const validHeadingRegex = new RegExp(`^#{${level}}\\s`);
-                    if (!validHeadingRegex.test(headingText)) { return false; }
+                    if (!new RegExp(`^#{${level}}\\s`).test(headingText)) { return false; }
                     const markerLength = level + 1;
                     const textStart = node.from + markerLength;
                     const textEnd = node.to;
@@ -788,16 +1086,11 @@ function buildDecorations(view) {
                 }
                 else if (node.name === "ListItem") {
                     const lineText = state.doc.sliceString(line.from, line.to);
-                    const validListRegex = /^\s*([-*+]|\d+\.)\s/;
-                    if (!validListRegex.test(lineText)) { return false; }
-
+                    if (!/^\s*([-*+]|\d+\.)\s/.test(lineText)) { return false; }
                     const listMark = n.firstChild;
                     if (!listMark) return true;
-
-                    // インデントレベルの計算
                     const indentLevel = calculateIndentLevel(lineText);
                     const indentStyle = `--indent-level: ${indentLevel};`;
-
                     const taskMarker = n.getChild("TaskMarker");
                     const parent = n.parent;
                     const isOrdered = parent && parent.name === "OrderedList";
@@ -805,22 +1098,17 @@ function buildDecorations(view) {
                     if (taskMarker) {
                         collectedDecos.push({ from: line.from, to: line.from, side: -1, deco: Decoration.line({ class: "cm-live-task", attributes: { style: indentStyle } }) });
                         if (listMark.name === "ListMark") {
-                            // 行頭からマークまで隠す
                             collectedDecos.push({ from: line.from, to: listMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                         }
                     } else if (isOrdered) {
                         collectedDecos.push({ from: line.from, to: line.from, side: -1, deco: Decoration.line({ class: "cm-live-ol", attributes: { style: indentStyle } }) });
                         collectedDecos.push({ from: listMark.from, to: listMark.to, side: 0, deco: Decoration.mark({ class: "cm-live-ol-marker" }) });
-
-                        // 行頭の空白だけ隠す
                         const indentMatch = lineText.match(/^\s*/);
                         if (indentMatch && indentMatch[0].length > 0) {
                             collectedDecos.push({ from: line.from, to: line.from + indentMatch[0].length, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                         }
-
                     } else {
                         collectedDecos.push({ from: line.from, to: line.from, side: -1, deco: Decoration.line({ class: "cm-live-li", attributes: { style: indentStyle } }) });
-                        // 行頭からマークまで隠す
                         collectedDecos.push({ from: line.from, to: listMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     }
                     processedLines.add(line.from);
@@ -835,77 +1123,33 @@ function buildDecorations(view) {
                     const startLine = state.doc.lineAt(node.from);
                     const endLine = state.doc.lineAt(node.to);
                     let relativeLine = 1;
-
                     for (let l = startLine.number; l <= endLine.number; l++) {
                         const lineObj = state.doc.line(l);
                         if (processedLines.has(lineObj.from)) continue;
-
                         const isHeader = (l === startLine.number);
                         const isFooter = (l === endLine.number);
-
                         let className = "cm-code-block";
                         let attrs = {};
-
                         if (!isHeader && !isFooter) {
                             attrs = { "data-code-line": String(relativeLine++) };
                             className += " cm-code-with-linenum";
                         }
-
                         if (isCursorInNode) {
                             if (isHeader) className += " cm-code-block-first-active";
                             if (isFooter) className += " cm-code-block-last-active";
-
-                            collectedDecos.push({
-                                from: lineObj.from,
-                                to: lineObj.from,
-                                side: -1,
-                                deco: Decoration.line({ class: className, attributes: attrs })
-                            });
-                        }
-                        else {
+                            collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: className, attributes: attrs }) });
+                        } else {
                             if (isHeader) {
-                                collectedDecos.push({
-                                    from: lineObj.from,
-                                    to: lineObj.from,
-                                    side: -1,
-                                    deco: Decoration.line({ class: "cm-code-header" })
-                                });
-                                collectedDecos.push({
-                                    from: lineObj.from,
-                                    to: lineObj.to,
-                                    side: 0,
-                                    deco: Decoration.mark({ class: "cm-transparent-text" })
-                                });
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: "cm-code-header" }) });
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.to, side: 0, deco: Decoration.mark({ class: "cm-transparent-text" }) });
                                 const match = lineObj.text.match(/^(\s*`{3,})([\w-]+)?/);
                                 const lang = match && match[2] ? match[2] : "";
-                                collectedDecos.push({
-                                    from: lineObj.to,
-                                    to: lineObj.to,
-                                    side: 1,
-                                    deco: Decoration.widget({ widget: new CodeBlockLanguageWidget(lang), side: 1 })
-                                });
-                            }
-                            else if (isFooter) {
-                                collectedDecos.push({
-                                    from: lineObj.from,
-                                    to: lineObj.from,
-                                    side: -1,
-                                    deco: Decoration.line({ class: "cm-code-footer" })
-                                });
-                                collectedDecos.push({
-                                    from: lineObj.from,
-                                    to: lineObj.to,
-                                    side: 0,
-                                    deco: Decoration.mark({ class: "cm-transparent-text" })
-                                });
-                            }
-                            else {
-                                collectedDecos.push({
-                                    from: lineObj.from,
-                                    to: lineObj.from,
-                                    side: -1,
-                                    deco: Decoration.line({ class: className, attributes: attrs })
-                                });
+                                collectedDecos.push({ from: lineObj.to, to: lineObj.to, side: 1, deco: Decoration.widget({ widget: new CodeBlockLanguageWidget(lang), side: 1 }) });
+                            } else if (isFooter) {
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: "cm-code-footer" }) });
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.to, side: 0, deco: Decoration.mark({ class: "cm-transparent-text" }) });
+                            } else {
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: className, attributes: attrs }) });
                             }
                         }
                         processedLines.add(lineObj.from);
@@ -914,26 +1158,22 @@ function buildDecorations(view) {
                 }
                 else if (node.name === "Image") {
                     if (isCursorInNode) return false;
-
-                    // サイズ解析を行いWidgetに渡す
                     const rawAlt = findLinkText(node, state);
-                    const { alt, width } = parseAltText(rawAlt); // 分割
-
+                    const { alt, width } = parseAltText(rawAlt);
                     const urlNode = (typeof n.getChild === "function") ? n.getChild("URL") : null;
                     const src = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to) : "";
-
-                    collectedDecos.push({
-                        from: line.from,
-                        to: line.to,
-                        side: -1,
-                        deco: Decoration.replace({ widget: new ImageWidget(alt, src, width) })
-                    });
+                    let widget;
+                    if (src.toLowerCase().endsWith('.pdf')) {
+                        widget = new PdfWidget(alt, src, width);
+                    } else {
+                        widget = new ImageWidget(alt, src, width);
+                    }
+                    collectedDecos.push({ from: line.from, to: line.to, side: -1, deco: Decoration.replace({ widget: widget }) });
                     processedLines.add(line.from);
                     return false;
                 }
                 else if (node.name === "Link") {
                     if (isCursorInNode) return false;
-                    const text = findLinkText(node, state);
                     const urlNode = (typeof n.getChild === "function") ? n.getChild("URL") : null;
                     if (!urlNode) return true;
                     const url = state.doc.sliceString(urlNode.from, urlNode.to);
@@ -957,31 +1197,28 @@ function buildDecorations(view) {
                     collectedDecos.push({ from: endMark.from, to: endMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     return false;
                 }
-            },
-            leave: (node) => {
-                if (cursor >= node.from && cursor <= node.to) { return; }
-                const n = node.node || node;
-                let startMark, endMark;
-
-                if (node.name === "Strikethrough") {
-                    startMark = (typeof n.getChild === "function") ? n.getChild("StrikethroughMark") : null;
-                    endMark = n.lastChild;
+                else if (node.name === "Strikethrough") {
+                    if (isCursorInNode) return;
+                    let startMark = (typeof n.getChild === "function") ? n.getChild("StrikethroughMark") : null;
+                    let endMark = n.lastChild;
                     if (!startMark || !endMark) return;
                     collectedDecos.push({ from: startMark.from, to: startMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     collectedDecos.push({ from: startMark.to, to: endMark.from, side: 1, deco: Decoration.mark({ class: "cm-live-s" }) });
                     collectedDecos.push({ from: endMark.from, to: endMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                 }
                 else if (node.name === "StrongEmphasis") {
-                    startMark = (typeof n.getChild === "function") ? n.getChild("EmphasisMark") : null;
-                    endMark = n.lastChild;
+                    if (isCursorInNode) return;
+                    let startMark = (typeof n.getChild === "function") ? n.getChild("EmphasisMark") : null;
+                    let endMark = n.lastChild;
                     if (!startMark || !endMark) return;
                     collectedDecos.push({ from: startMark.from, to: startMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     collectedDecos.push({ from: startMark.to, to: endMark.from, side: 1, deco: Decoration.mark({ class: "cm-live-bold" }) });
                     collectedDecos.push({ from: endMark.from, to: endMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                 }
                 else if (node.name === "Emphasis") {
-                    startMark = (typeof n.getChild === "function") ? n.getChild("EmphasisMark") : null;
-                    endMark = n.lastChild;
+                    if (isCursorInNode) return;
+                    let startMark = (typeof n.getChild === "function") ? n.getChild("EmphasisMark") : null;
+                    let endMark = n.lastChild;
                     if (!startMark || !endMark) return;
                     collectedDecos.push({ from: startMark.from, to: startMark.to, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     collectedDecos.push({ from: startMark.to, to: endMark.from, side: 1, deco: Decoration.mark({ class: "cm-live-em" }) });
