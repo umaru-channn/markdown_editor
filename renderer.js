@@ -15,6 +15,7 @@ const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dro
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit, StreamLanguage, LanguageSupport } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
+const { closeBrackets } = require("@codemirror/autocomplete");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
 const { tablePlugin } = require("./tablePlugin.js");
 
@@ -147,9 +148,6 @@ const btnAuthDropbox = document.getElementById('btn-auth-dropbox');
 const btnAuthGDrive = document.getElementById('btn-auth-gdrive');
 const syncStatusText = document.getElementById('sync-status-text');
 
-// ========= CodeMirror Compartments ==========
-const lineWrappingCompartment = new Compartment();
-
 // ========== 状態管理 ==========
 let globalEditorView = null; // CodeMirrorインスタンス
 let isPositionRight = true;
@@ -165,12 +163,36 @@ let appSettings = {
     theme: 'light',
     autoSave: true,
     wordWrap: true,
+    windowTransparency: 0,
+    tabSize: 4,
+    insertSpaces: true,
+    showLineNumbers: true,
+    autoCloseBrackets: true,
+    highlightActiveLine: true,
+    defaultImageLocation: '.',
+    // PDF設定のデフォルト値
+    pdfOptions: {
+        pageSize: 'A4',
+        marginsType: 0,
+        printBackground: true,
+        displayHeaderFooter: false,
+        landscape: false,
+        enableToc: false,
+        includeTitle: false,
+        pageRanges: ''
+    }
 };
 
 // CodeMirror Compartments for dynamic reconfiguration
 const themeCompartment = new Compartment();
 const editorStyleCompartment = new Compartment();
 const languageCompartment = new Compartment(); // 言語設定用のCompartment
+const lineWrappingCompartment = new Compartment();
+const indentUnitCompartment = new Compartment();
+const tabSizeCompartment = new Compartment();
+const lineNumbersCompartment = new Compartment();
+const activeLineCompartment = new Compartment();
+const autoCloseBracketsCompartment = new Compartment();
 
 // ========== PDF Preview State ==========
 let isPdfPreviewVisible = false;
@@ -259,6 +281,16 @@ function switchMainView(targetId) {
 
 // ========== 設定関連の関数 ==========
 
+// 透明度を適用する関数
+function applyWindowOpacity(transparency) {
+    if (window.electronAPI && window.electronAPI.setWindowOpacity) {
+        // 透明度(0-90)を不透明度(1.0-0.1)に変換して送信
+        // 0% -> 1.0 (不透明), 90% -> 0.1 (透明)
+        const opacity = 1.0 - (transparency / 100);
+        window.electronAPI.setWindowOpacity(opacity);
+    }
+}
+
 async function loadSettings() {
     try {
         const settings = await window.electronAPI.loadAppSettings();
@@ -267,6 +299,11 @@ async function loadSettings() {
         }
         applySettingsToUI();
         updateEditorSettings();
+
+        // 起動時に透明度を適用
+        if (appSettings.windowTransparency !== undefined) {
+            applyWindowOpacity(appSettings.windowTransparency);
+        }
     } catch (e) {
         console.error("Failed to load settings", e);
     }
@@ -309,12 +346,34 @@ function applySettingsToUI() {
     const themeInput = document.getElementById('theme');
     const autoSaveInput = document.getElementById('auto-save');
     const wordWrapInput = document.getElementById('word-wrap');
+    const tabSizeInput = document.getElementById('tab-size');
+    const insertSpacesInput = document.getElementById('insert-spaces');
+    const showLineNumbersInput = document.getElementById('show-line-numbers');
+    const autoCloseBracketsInput = document.getElementById('auto-close-brackets');
+    const highlightActiveLineInput = document.getElementById('highlight-active-line');
+    const defaultImageLocationInput = document.getElementById('default-image-location');
 
     if (wordWrapInput) wordWrapInput.checked = appSettings.wordWrap;
     if (fontSizeInput) fontSizeInput.value = appSettings.fontSize;
     if (fontFamilyInput) fontFamilyInput.value = appSettings.fontFamily;
     if (themeInput) themeInput.value = appSettings.theme;
     if (autoSaveInput) autoSaveInput.checked = appSettings.autoSave;
+    if (tabSizeInput) tabSizeInput.value = appSettings.tabSize;
+    if (insertSpacesInput) insertSpacesInput.checked = appSettings.insertSpaces;
+    if (showLineNumbersInput) showLineNumbersInput.checked = appSettings.showLineNumbers;
+    if (autoCloseBracketsInput) autoCloseBracketsInput.checked = appSettings.autoCloseBrackets;
+    if (highlightActiveLineInput) highlightActiveLineInput.checked = appSettings.highlightActiveLine;
+    if (defaultImageLocationInput) defaultImageLocationInput.value = appSettings.defaultImageLocation || '.';
+
+    // 透明度スライダーへの反映
+    const opacityInput = document.getElementById('window-opacity');
+    const opacityValue = document.getElementById('window-opacity-value');
+    if (opacityInput && opacityValue) {
+        // 設定値があれば使用、なければ0
+        const val = appSettings.windowTransparency !== undefined ? appSettings.windowTransparency : 0;
+        opacityInput.value = val;
+        opacityValue.textContent = `${val}%`;
+    }
 
     // ステータスバーのフォントサイズ更新
     const statusFontSize = document.getElementById('status-font-size');
@@ -327,6 +386,27 @@ function applySettingsToUI() {
         document.body.setAttribute('data-theme', 'dark');
     } else {
         document.body.removeAttribute('data-theme');
+    }
+
+    // PDF設定の反映
+    if (appSettings.pdfOptions) {
+        const pdfPageSize = document.getElementById('pdf-page-size');
+        const pdfLandscape = document.getElementById('pdf-landscape');
+        const pdfMargins = document.getElementById('pdf-margins');
+        const pdfBackground = document.getElementById('pdf-print-background');
+        const pdfHeaderFooter = document.getElementById('pdf-header-footer');
+        const pdfToc = document.getElementById('pdf-toc');
+        const pdfIncludeTitle = document.getElementById('pdf-include-title');
+        const pdfPageRanges = document.getElementById('pdf-page-ranges');
+
+        if (pdfPageSize) pdfPageSize.value = appSettings.pdfOptions.pageSize || 'A4';
+        if (pdfLandscape) pdfLandscape.checked = appSettings.pdfOptions.landscape || false;
+        if (pdfMargins) pdfMargins.value = appSettings.pdfOptions.marginsType !== undefined ? appSettings.pdfOptions.marginsType : 0;
+        if (pdfBackground) pdfBackground.checked = appSettings.pdfOptions.printBackground !== undefined ? appSettings.pdfOptions.printBackground : true;
+        if (pdfHeaderFooter) pdfHeaderFooter.checked = appSettings.pdfOptions.displayHeaderFooter || false;
+        if (pdfToc) pdfToc.checked = appSettings.pdfOptions.enableToc || false;
+        if (pdfIncludeTitle) pdfIncludeTitle.checked = appSettings.pdfOptions.includeTitle || false;
+        if (pdfPageRanges) pdfPageRanges.value = appSettings.pdfOptions.pageRanges || '';
     }
 
     // CSS変数の更新 (エディタ以外のフォント等)
@@ -355,6 +435,24 @@ function updateEditorSettings() {
     });
 }
 
+// インデント設定をエディタに適用する関数
+function updateIndentSettings() {
+    if (!globalEditorView) return;
+
+    const size = parseInt(appSettings.tabSize, 10);
+    const useSpaces = appSettings.insertSpaces;
+
+    // スペース挿入ならスペースN個、そうでなければタブ文字
+    const indentString = useSpaces ? " ".repeat(size) : "\t";
+
+    globalEditorView.dispatch({
+        effects: [
+            indentUnitCompartment.reconfigure(indentUnit.of(indentString)),
+            tabSizeCompartment.reconfigure(EditorState.tabSize.of(size))
+        ]
+    });
+}
+
 // 設定画面のイベントリスナー
 function setupSettingsListeners() {
     document.getElementById('font-size')?.addEventListener('change', (e) => {
@@ -378,14 +476,42 @@ function setupSettingsListeners() {
         updateEditorSettings();
     });
 
+    // 透明度スライダーのリスナー
+    const opacityInput = document.getElementById('window-opacity');
+    if (opacityInput) {
+        opacityInput.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value, 10);
+            
+            // 数値表示の更新
+            const opacityValue = document.getElementById('window-opacity-value');
+            if (opacityValue) opacityValue.textContent = `${val}%`;
+
+            // 設定の更新と適用
+            appSettings.windowTransparency = val;
+            applyWindowOpacity(val);
+        });
+
+        // 変更確定時（マウスを離した時）に保存
+        opacityInput.addEventListener('change', () => {
+            saveSettings();
+        });
+    }
+
     document.getElementById('auto-save')?.addEventListener('change', (e) => {
         appSettings.autoSave = e.target.checked;
         saveSettings();
     });
+
+    // 画像保存場所設定
+    document.getElementById('default-image-location')?.addEventListener('change', (e) => {
+        appSettings.defaultImageLocation = e.target.value;
+        saveSettings();
+    });
+
     document.getElementById('word-wrap')?.addEventListener('change', (e) => {
         appSettings.wordWrap = e.target.checked;
         saveSettings();
-        
+
         // エディタに即時反映
         if (globalEditorView) {
             globalEditorView.dispatch({
@@ -395,6 +521,92 @@ function setupSettingsListeners() {
             });
         }
     });
+
+    // タブ幅変更
+    document.getElementById('tab-size')?.addEventListener('change', (e) => {
+        appSettings.tabSize = parseInt(e.target.value, 10);
+        saveSettings();
+        updateIndentSettings();
+    });
+
+    // スペース挿入切り替え
+    document.getElementById('insert-spaces')?.addEventListener('change', (e) => {
+        appSettings.insertSpaces = e.target.checked;
+        saveSettings();
+        updateIndentSettings();
+    });
+
+    // 行番号表示切り替え
+    document.getElementById('show-line-numbers')?.addEventListener('change', (e) => {
+        appSettings.showLineNumbers = e.target.checked;
+        saveSettings();
+
+        // エディタに即時反映
+        if (globalEditorView) {
+            globalEditorView.dispatch({
+                effects: lineNumbersCompartment.reconfigure(
+                    appSettings.showLineNumbers ? lineNumbers() : []
+                )
+            });
+        }
+    });
+
+    // 括弧自動閉鎖切り替え
+    document.getElementById('auto-close-brackets')?.addEventListener('change', (e) => {
+        appSettings.autoCloseBrackets = e.target.checked;
+        saveSettings();
+
+        if (globalEditorView) {
+            globalEditorView.dispatch({
+                effects: autoCloseBracketsCompartment.reconfigure(
+                    appSettings.autoCloseBrackets ? closeBrackets() : []
+                )
+            });
+        }
+    });
+
+    // 現在行ハイライト切り替え
+    document.getElementById('highlight-active-line')?.addEventListener('change', (e) => {
+        appSettings.highlightActiveLine = e.target.checked;
+        saveSettings();
+
+        if (globalEditorView) {
+            globalEditorView.dispatch({
+                effects: activeLineCompartment.reconfigure(
+                    appSettings.highlightActiveLine ? highlightActiveLine() : []
+                )
+            });
+        }
+    });
+
+    // PDF設定のリスナー
+    const updatePdfSettings = () => {
+        appSettings.pdfOptions = {
+            pageSize: document.getElementById('pdf-page-size').value,
+            marginsType: parseInt(document.getElementById('pdf-margins').value),
+            printBackground: document.getElementById('pdf-print-background').checked,
+            displayHeaderFooter: document.getElementById('pdf-header-footer').checked,
+            landscape: document.getElementById('pdf-landscape').checked,
+            enableToc: document.getElementById('pdf-toc').checked,
+            includeTitle: document.getElementById('pdf-include-title').checked,
+            pageRanges: document.getElementById('pdf-page-ranges').value.trim()
+        };
+        saveSettings();
+
+        // プレビューが表示中なら更新する
+        if (isPdfPreviewVisible) {
+            generatePdfPreview();
+        }
+    };
+
+    document.getElementById('pdf-page-size')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-landscape')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-margins')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-print-background')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-header-footer')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-toc')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-include-title')?.addEventListener('change', updatePdfSettings);
+    document.getElementById('pdf-page-ranges')?.addEventListener('input', updatePdfSettings); // inputイベントでリアルタイム反映
 }
 
 // 設定タブを開く処理（重複防止対応）
@@ -416,6 +628,68 @@ function openSettingsTab() {
 
     // ビューを切り替え
     switchMainView('content-settings');
+}
+
+/**
+ * MarkdownをHTMLに変換する（目次・タイトル生成オプション対応）
+ * @param {string} markdown - 生のMarkdownテキスト
+ * @param {object} pdfOptions - PDF設定オブジェクト
+ * @param {string} title - ★追加: 文書タイトル（ファイル名）を受け取る
+ */
+async function convertMarkdownToHtml(markdown, pdfOptions, title) {
+    // 1. 特殊記法の事前処理
+    const processed = await processMarkdownForExport(markdown);
+
+    // markedのレンダラーと目次配列を初期化
+    const renderer = new marked.Renderer();
+    const toc = [];
+
+    // ★変更: 目次生成が有効な場合のみ、見出しの収集ロジックを設定する
+    // (以前はここで早期リターンしていましたが、タイトル処理のために削除しました)
+    if (pdfOptions && pdfOptions.enableToc) {
+        renderer.heading = (text, level, raw) => {
+            const anchor = raw.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-');
+            toc.push({ anchor: anchor, level: level, text: text });
+            return `<h${level} id="${anchor}">${text}</h${level}>\n`;
+        };
+    }
+
+    // 本文のHTML変換 (rendererを渡すことで、上記の設定があれば反映される)
+    const bodyHtml = marked.parse(processed, {
+        breaks: true,
+        gfm: true,
+        renderer: renderer
+    });
+
+    let resultHtml = bodyHtml;
+
+    // 目次の構築と追加
+    if (pdfOptions && pdfOptions.enableToc && toc.length > 0) {
+        let tocHtml = `
+        <div class="toc">
+            <div class="toc-title">目次</div>
+            <ul class="toc-list">
+        `;
+        toc.forEach(item => {
+            tocHtml += `
+                <li class="toc-item toc-level-${item.level}">
+                    <a href="#${item.anchor}" class="toc-link">${item.text}</a>
+                </li>
+            `;
+        });
+        tocHtml += `</ul></div>`; // 閉じタグの修正を含む
+
+        // 目次を本文の前に追加
+        resultHtml = tocHtml + resultHtml;
+    }
+
+    // ★追加: タイトルを含める設定がONの場合、先頭に追加する
+    if (pdfOptions && pdfOptions.includeTitle && title) {
+        const titleHtml = `<h1 class="pdf-title">${title}</h1>`;
+        resultHtml = titleHtml + resultHtml;
+    }
+
+    return resultHtml;
 }
 
 // ========== CodeMirror Initialization (LiveMark機能の統合) ==========
@@ -916,6 +1190,183 @@ const pasteHandler = EditorView.domEventHandlers({
             showPasteOptionModal(text, view);
             return true;
         }
+
+        // 画像貼り付け処理
+        const items = event.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                event.preventDefault();
+                const file = items[i].getAsFile();
+
+                // ファイルが保存されていない（パスがない）場合は警告
+                if (!currentFilePath) {
+                    showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
+                    return true;
+                }
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const arrayBuffer = e.target.result;
+                    try {
+                        const targetDir = path.dirname(currentFilePath);
+                        // バッファをUint8Arrayにして送信
+                        const result = await window.electronAPI.saveClipboardImage(new Uint8Array(arrayBuffer), targetDir);
+
+                        if (result.success) {
+                            const insertText = `![image](${result.relativePath})\n`;
+                            view.dispatch(view.state.replaceSelection(insertText));
+                            showNotification('画像を保存しました', 'success');
+                        } else {
+                            showNotification(`保存失敗: ${result.error}`, 'error');
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        showNotification(`エラー: ${err.message}`, 'error');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+                return true;
+            }
+        }
+
+        return false;
+    }
+});
+
+// ★修正: 高機能ドロップハンドラー (dragover追加)
+const dropHandler = EditorView.domEventHandlers({
+    // ★追加: これがないとドラッグ時に駐車禁止マークが出てドロップできません
+    dragover(event, view) {
+        event.preventDefault();
+        return false;
+    },
+    drop(event, view) {
+        const { dataTransfer } = event;
+        
+        // -------------------------------------------------
+        // ケース1: ファイルがドロップされた場合 (ローカルファイル)
+        // -------------------------------------------------
+        if (dataTransfer.files && dataTransfer.files.length > 0) {
+            event.preventDefault(); 
+
+            const imageFiles = [];
+            const textFiles = [];
+
+            for (let i = 0; i < dataTransfer.files.length; i++) {
+                const file = dataTransfer.files[i];
+                if (file.type.startsWith('image/')) {
+                    imageFiles.push(file);
+                } else {
+                    textFiles.push(file);
+                }
+            }
+
+            // A. 画像ファイルの処理
+            if (imageFiles.length > 0) {
+                if (!currentFilePath || currentFilePath === 'README.md') {
+                    showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
+                    return true;
+                }
+
+                imageFiles.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const arrayBuffer = e.target.result;
+                        try {
+                            const targetDir = path.dirname(currentFilePath);
+                            const result = await window.electronAPI.saveClipboardImage(new Uint8Array(arrayBuffer), targetDir);
+
+                            if (result.success) {
+                                const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+                                const insertPos = pos !== null ? pos : view.state.selection.main.head;
+                                const insertText = `![image](${result.relativePath})\n`;
+                                
+                                view.dispatch({
+                                    changes: { from: insertPos, insert: insertText },
+                                    selection: { anchor: insertPos + insertText.length }
+                                });
+                                showNotification('画像を保存しました', 'success');
+                            } else {
+                                showNotification(`保存失敗: ${result.error}`, 'error');
+                            }
+                        } catch (err) {
+                            console.error(err);
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+                });
+            }
+
+            // B. テキストファイル等の処理
+            if (textFiles.length > 0) {
+                const file = textFiles[0];
+                if (file.path) {
+                    openFile(file.path, file.name);
+                }
+            }
+            return true;
+        }
+
+        // -------------------------------------------------
+        // ケース2: Webページからの画像ドラッグ (HTML/URL)
+        // -------------------------------------------------
+        const html = dataTransfer.getData('text/html');
+        if (html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const img = doc.querySelector('img');
+            
+            if (img && img.src) {
+                event.preventDefault();
+
+                if (!currentFilePath || currentFilePath === 'README.md') {
+                    showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
+                    return true;
+                }
+
+                (async () => {
+                    try {
+                        const targetDir = path.dirname(currentFilePath);
+                        
+                        if (img.src.startsWith('data:')) {
+                            const response = await fetch(img.src);
+                            const blob = await response.blob();
+                            const arrayBuffer = await blob.arrayBuffer();
+                            const result = await window.electronAPI.saveClipboardImage(new Uint8Array(arrayBuffer), targetDir);
+                            if (result.success) insertImageLink(result.relativePath);
+                        } 
+                        else {
+                            showNotification('Web画像をダウンロード中...', 'info');
+                            const result = await window.electronAPI.downloadImage(img.src, targetDir);
+                            if (result.success) {
+                                insertImageLink(result.relativePath);
+                                showNotification('Web画像を保存しました', 'success');
+                            } else {
+                                showNotification(`画像保存失敗: ${result.error}`, 'error');
+                            }
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        showNotification(`エラー: ${e.message}`, 'error');
+                    }
+                })();
+
+                function insertImageLink(relPath) {
+                    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+                    const insertPos = pos !== null ? pos : view.state.selection.main.head;
+                    const insertText = `![image](${relPath})\n`;
+                    view.dispatch({
+                        changes: { from: insertPos, insert: insertText },
+                        selection: { anchor: insertPos + insertText.length }
+                    });
+                }
+                return true;
+            }
+        }
+
+        // -------------------------------------------------
+        // ケース3: 通常のテキストドラッグ
+        // -------------------------------------------------
         return false;
     }
 });
@@ -1153,6 +1604,7 @@ function createEditorState(content, filePath) {
         "&": { height: "100%" },
         ".cm-scroller": { fontFamily: 'inherit' }
     });
+    const indentString = appSettings.insertSpaces ? " ".repeat(appSettings.tabSize) : "\t";
 
     return EditorState.create({
         doc: content,
@@ -1160,11 +1612,12 @@ function createEditorState(content, filePath) {
             EditorState.phrases.of({ "Find": "検索...", }),
             themeCompartment.of(initialTheme),
             editorStyleCompartment.of(initialStyle),
-            indentUnit.of("    "),
-            // lineWrappingCompartment を使用して動的に設定
+            indentUnitCompartment.of(indentUnit.of(indentString)),
+            tabSizeCompartment.of(EditorState.tabSize.of(appSettings.tabSize)),
             lineWrappingCompartment.of(appSettings.wordWrap ? EditorView.lineWrapping : []),
             Prec.highest(keymap.of(obsidianLikeListKeymap)),
             pasteHandler,
+            dropHandler,
             history(),
             search(),
             drawSelection(),
@@ -1197,8 +1650,9 @@ function createEditorState(content, filePath) {
             keymap.of([...defaultKeymap, ...historyKeymap]),
             syntaxHighlighting(defaultHighlightStyle),
             languageCompartment.of(getLanguageExtensions(filePath)),
-            highlightActiveLine(),
-            lineNumbers(),
+            activeLineCompartment.of(appSettings.highlightActiveLine ? highlightActiveLine() : []),
+            autoCloseBracketsCompartment.of(appSettings.autoCloseBrackets ? closeBrackets() : []),
+            lineNumbersCompartment.of(appSettings.showLineNumbers ? lineNumbers() : []),
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
                     const isExternal = update.transactions.some(tr => tr.annotation(ExternalChange));
@@ -1500,7 +1954,7 @@ document.getElementById('local-image-btn')?.addEventListener('click', async () =
             }
 
             const fileName = path.basename(absolutePath);
-            const insertText = `![${fileName}](${insertPath})`;
+            let insertText = `![${fileName}](${insertPath})\n`;
 
             const { state, dispatch } = globalEditorView;
             const { from, to } = state.selection.main;
@@ -1547,11 +2001,21 @@ if (btnExportPdf) {
         }
 
         try {
-            const processedMarkdown = await processMarkdownForExport(markdownContent);
-            const htmlContent = marked.parse(processedMarkdown, { breaks: true, gfm: true });
+            // オプション取得
+            const options = appSettings.pdfOptions || {
+                pageSize: 'A4', marginsType: 0, printBackground: true,
+                displayHeaderFooter: false, landscape: false, enableToc: false, includeTitle: false
+            };
+
+            // タイトルの取得
+            const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
+
+            // ★修正: 共通関数でHTML生成
+            const htmlContent = await convertMarkdownToHtml(markdownContent, options, currentTitle);
 
             if (typeof window.electronAPI?.exportPdf === 'function') {
-                const result = await window.electronAPI.exportPdf(htmlContent);
+                const result = await window.electronAPI.exportPdf(htmlContent, options);
+
                 if (result.success) {
                     showNotification(`PDFの保存が完了しました: ${result.path}`, 'success');
                 } else if (!result.canceled) {
@@ -1590,7 +2054,7 @@ function applyTextColor(color) {
     if (!state) return;
 
     const { from, to } = state.selection.main;
-    
+
     // 選択範囲がない（カーソルのみ）場合は何もしない
     if (from === to) return;
 
@@ -2304,11 +2768,20 @@ async function generatePdfPreview() {
             return;
         }
 
-        const processedMarkdown = await processMarkdownForExport(markdownContent);
-        const htmlContent = marked.parse(processedMarkdown, { breaks: true, gfm: true });
+        // オプション取得
+        const options = appSettings.pdfOptions || {
+            pageSize: 'A4', marginsType: 0, printBackground: true,
+            displayHeaderFooter: false, landscape: false, enableToc: false, includeTitle: false
+        };
+
+        // タイトルの取得 (入力欄の値を使用)
+        const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
+
+        // 共通関数でHTML生成（目次処理含む）
+        const htmlContent = await convertMarkdownToHtml(markdownContent, options, currentTitle);
 
         if (typeof window.electronAPI?.generatePdf === 'function') {
-            await renderHtmlToPdf(htmlContent);
+            await renderHtmlToPdf(htmlContent, options);
         } else {
             console.warn('PDF generation API not available, using fallback');
             const tempDiv = document.createElement('div');
@@ -2386,9 +2859,9 @@ async function processMarkdownForExport(markdown) {
     return processed;
 }
 
-async function renderHtmlToPdf(htmlContent) {
+async function renderHtmlToPdf(htmlContent, options = {}) {
     try {
-        const pdfData = await window.electronAPI.generatePdf(htmlContent);
+        const pdfData = await window.electronAPI.generatePdf(htmlContent, options);
         if (pdfData) {
             await displayPdfFromData(pdfData);
         }
@@ -5096,6 +5569,8 @@ function switchToFile(filePath) {
 
     if (fileData) {
         document.title = `${fileData.fileName} - Markdown IDE`;
+        // プレビュー用に、現在開いているファイルのディレクトリパスを保存
+        document.body.dataset.activeFileDir = path.dirname(filePath);
     }
 
     updateFileStats();

@@ -339,6 +339,7 @@
                                 <li class="settings-nav-item active" data-section="general">一般</li>
                                 <li class="settings-nav-item" data-section="editor">エディタ</li>
                                 <li class="settings-nav-item" data-section="appearance">外観</li>
+                                <li class="settings-nav-item" data-section="pdf">PDF設定</li>
                                 <li class="settings-nav-item" data-section="sync">クラウド同期</li>
                             </ul>
                         </div>
@@ -356,10 +357,68 @@
                                         </div>
                                     </label>
                                 </div>
+                                <div class="setting-item">
+                                    <label for="default-image-location">画像のデフォルト保存場所 (Clipboard Image Location)</label>
+                                    <select id="default-image-location">
+                                        <option value=".">現在のフォルダ (Current Folder)</option>
+                                        <option value="./assets">./assets フォルダ</option>
+                                        <option value="./images">./images フォルダ</option>
+                                    </select>
+                                    <div class="label-desc" style="margin-top: 4px;">クリップボードから画像を貼り付けた際の保存先フォルダを指定します。
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="settings-section" id="settings-section-editor">
                                 <h2>エディタ (Editor)</h2>
+                                <div class="setting-item">
+                                    <label for="tab-size">タブ幅 (Tab Size)</label>
+                                    <select id="tab-size">
+                                        <option value="2">2</option>
+                                        <option value="4" selected>4</option>
+                                        <option value="8">8</option>
+                                    </select>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="insert-spaces" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">スペースを挿入 (Insert Spaces)</span>
+                                            <span class="label-desc">タブキー押下時にタブ文字の代わりにスペースを挿入します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-line-numbers" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">行番号を表示 (Show Line Numbers)</span>
+                                            <span class="label-desc">エディタの左側に行番号を表示します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="auto-close-brackets" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">括弧を自動で閉じる (Auto Close Brackets)</span>
+                                            <span class="label-desc">(), [], {}, "", '' などを入力した際に自動で閉じます。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="highlight-active-line" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">現在行をハイライト (Highlight Active Line)</span>
+                                            <span class="label-desc">カーソルがある行の背景色を強調表示します。</span>
+                                        </div>
+                                    </label>
+                                </div>
                                 <div class="setting-item">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="word-wrap">
@@ -430,6 +489,103 @@
                                         <option value="light">ライト (Light)</option>
                                         <option value="dark">ダーク (Dark)</option>
                                     </select>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label for="window-opacity">ウィンドウの透明度 (Window Opacity)</label>
+                                    <div style="display: flex; align-items: center; gap: 15px;">
+                                        <input type="range" id="window-opacity" min="0" max="90" value="0" step="5"
+                                            style="flex: 1; max-width: 300px;">
+                                        <span id="window-opacity-value"
+                                            style="font-weight: bold; width: 40px;">0%</span>
+                                    </div>
+                                    <div class="label-desc" style="margin-top: 4px;">ウィンドウの透過率を設定します（0% = 不透明）。</div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-pdf">
+                                <h2>PDFエクスポート設定 (Export)</h2>
+
+                                <div class="setting-item">
+                                    <label for="pdf-page-ranges">ページ範囲 (Page Ranges)</label>
+                                    <input type="text" id="pdf-page-ranges" placeholder="例: 1-5, 8, 11-13 (空欄ですべて)">
+                                    <div class="label-desc" style="margin-top: 4px;">指定しない場合はすべてのページが出力されます。</div>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label for="pdf-page-size">用紙サイズ (Page Size)</label>
+                                    <select id="pdf-page-size">
+                                        <option value="A3">A3</option>
+                                        <option value="A4" selected>A4</option>
+                                        <option value="A5">A5</option>
+                                        <option value="Legal">Legal</option>
+                                        <option value="Letter">Letter</option>
+                                        <option value="Tabloid">Tabloid</option>
+                                    </select>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-landscape">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">横向き (Landscape)</span>
+                                            <span class="label-desc">用紙を横向きにして印刷します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label for="pdf-margins">余白設定 (Margins)</label>
+                                    <select id="pdf-margins">
+                                        <option value="0">標準 (Default)</option>
+                                        <option value="1">なし (None)</option>
+                                        <option value="2">最小 (Minimum)</option>
+                                    </select>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-print-background" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">背景を印刷する (Print Background)</span>
+                                            <span class="label-desc">背景色や画像を含める場合はONにします。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-header-footer">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">ヘッダー/フッターを表示</span>
+                                            <span class="label-desc">ページ番号やファイル名などを印字します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-toc">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">目次を自動生成 (Generate TOC)</span>
+                                            <span class="label-desc">見出し(H1~H6)に基づいて目次ページを先頭に追加します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-include-title">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">タイトルを含める (Include Title)</span>
+                                            <span class="label-desc">ファイル名をタイトルとして文書の先頭に追加します。</span>
+                                        </div>
+                                    </label>
                                 </div>
                             </div>
 

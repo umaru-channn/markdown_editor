@@ -18,6 +18,7 @@ const { Dropbox } = require('dropbox');
 const { google } = require('googleapis');
 const httpModule = require('http'); // 認証用ローカルサーバー
 const urlModule = require('url');
+const { highlightActiveLine } = require('@codemirror/view');
 require('dotenv').config(); // 環境変数読み込み
 
 // ========== 【重要】APIキー設定エリア ==========
@@ -136,6 +137,24 @@ function loadAppSettings() {
     theme: 'light',
     autoSave: true,
     wordWrap: true,
+    windowTransparency: 0,
+    tabSize: 4,
+    insertSpaces: true,
+    showLineNumbers: true,
+    autoCloseBrackets: true,
+    highlightActiveLine: true,
+    defaultImageLocation: '.',
+    // PDFエクスポートのデフォルト設定
+    pdfOptions: {
+      pageSize: 'A4',
+      marginsType: 0, // 0: default, 1: none, 2: minimum
+      printBackground: true,
+      displayHeaderFooter: false,
+      landscape: false,
+      enableToc: false,
+      includeTitle: false,
+      pageRanges: ''
+    },
     cloudSync: {
       service: 'none',
       dropbox: { accessToken: null, refreshToken: null },
@@ -1199,6 +1218,15 @@ function createWindow() {
 
   ipcMain.handle('window-close', () => {
     if (mainWindow) mainWindow.close();
+  });
+
+  // ウィンドウの透明度設定ハンドラー
+  ipcMain.handle('window-set-opacity', (event, opacity) => {
+    // opacityは 0.0 (透明) 〜 1.0 (不透明)
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.setOpacity(opacity);
+    }
   });
 
   // Settings Handlers
@@ -2306,7 +2334,7 @@ ipcMain.handle('select-file', async (event) => {
 });
 
 // PDF生成 (プレビュー用 - Base64返し) のIPC ハンドラー
-ipcMain.handle('generate-pdf', async (event, htmlContent) => {
+ipcMain.handle('generate-pdf', async (event, htmlContent, options = {}) => {
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
     if (!mainWindow) {
@@ -2323,16 +2351,20 @@ ipcMain.handle('generate-pdf', async (event, htmlContent) => {
     });
 
     // Load HTML content
-    const htmlTemplate = getPdfHtmlTemplate(htmlContent);
-
+    const htmlTemplate = getPdfHtmlTemplate(htmlContent, options);
     await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
 
-    // Generate PDF
+    // Generate PDF with options
     const pdfData = await pdfWindow.webContents.printToPDF({
-      marginsType: 1,
-      pageSize: 'A4',
-      printBackground: true,
-      printSelectionOnly: false
+      marginsType: options.marginsType !== undefined ? parseInt(options.marginsType) : 0, // 0: default, 1: none, 2: minimum
+      pageSize: options.pageSize || 'A4',
+      printBackground: options.printBackground !== undefined ? options.printBackground : true,
+      displayHeaderFooter: options.displayHeaderFooter !== undefined ? options.displayHeaderFooter : false,
+      headerTemplate: '<div style="font-size: 10px; width: 100%; text-align: center;"><span class="date"></span></div>',
+      footerTemplate: '<div style="font-size: 10px; width: 100%; text-align: center;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      printSelectionOnly: false,
+      landscape: options.landscape !== undefined ? options.landscape : false, // オプションから適用
+      pageRanges: options.pageRanges ? options.pageRanges : undefined
     });
 
     // Close the temporary window
@@ -2347,7 +2379,7 @@ ipcMain.handle('generate-pdf', async (event, htmlContent) => {
 });
 
 // PDFエクスポート（ファイル保存）のIPCハンドラー
-ipcMain.handle('export-pdf', async (event, htmlContent) => {
+ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
     if (!mainWindow) {
@@ -2377,15 +2409,20 @@ ipcMain.handle('export-pdf', async (event, htmlContent) => {
       }
     });
 
-    const htmlTemplate = getPdfHtmlTemplate(htmlContent);
+    const htmlTemplate = getPdfHtmlTemplate(htmlContent, options);
     await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
 
-    // PDF生成
+    // PDF生成 with options
     const pdfData = await pdfWindow.webContents.printToPDF({
-      marginsType: 1,
-      pageSize: 'A4',
-      printBackground: true,
-      printSelectionOnly: false
+      marginsType: options.marginsType !== undefined ? parseInt(options.marginsType) : 0,
+      pageSize: options.pageSize || 'A4',
+      printBackground: options.printBackground !== undefined ? options.printBackground : true,
+      displayHeaderFooter: options.displayHeaderFooter !== undefined ? options.displayHeaderFooter : false,
+      headerTemplate: '<div style="font-size: 10px; width: 100%; text-align: center;"><span class="date"></span></div>',
+      footerTemplate: '<div style="font-size: 10px; width: 100%; text-align: center;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      printSelectionOnly: false,
+      landscape: false,
+      pageRanges: options.pageRanges ? options.pageRanges : undefined
     });
 
     pdfWindow.close();
@@ -2402,7 +2439,26 @@ ipcMain.handle('export-pdf', async (event, htmlContent) => {
 });
 
 // HTMLテンプレートを生成するヘルパー関数
-function getPdfHtmlTemplate(htmlContent) {
+function getPdfHtmlTemplate(htmlContent, options = {}) {
+
+  // marginsType: 
+  // 0: Default (標準) - Electronのデフォルト余白 + CSSの40px
+  // 1: None (なし) - 余白0 + CSSの0
+  // 2: Minimum (最小) - Electronの最小余白 + CSSの微調整(例: 5mm)
+
+  let bodyPadding = '40px'; // デフォルト (Type 0)
+
+  if (options.marginsType === 1 || options.marginsType === '1') {
+    // 余白なし
+    bodyPadding = '0';
+  } else if (options.marginsType === 2 || options.marginsType === '2') {
+    // 余白最小
+    // Electron側の marginsType: 2 はプリンタの最小余白などを使いますが、
+    // ここでCSSパディングも小さくしないと見た目が変わりません。
+    // お好みで '0' や '5mm' などに設定してください。
+    bodyPadding = '5mm';
+  }
+
   return `
       <!DOCTYPE html>
       <html>
@@ -2411,7 +2467,7 @@ function getPdfHtmlTemplate(htmlContent) {
           <style>
             body {
               font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-              padding: 40px;
+              padding: ${bodyPadding};
               line-height: 1.6;
               color: #333;
             }
@@ -2419,6 +2475,15 @@ function getPdfHtmlTemplate(htmlContent) {
               margin-top: 24px;
               margin-bottom: 16px;
               font-weight: 600;
+            }
+            /* PDFタイトルのスタイル */
+            .pdf-title {
+              font-size: 28px;
+              font-weight: bold;
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 10px;
+              border-bottom: 2px solid #eaecef;
             }
             p {
               margin-bottom: 16px;
@@ -2577,6 +2642,58 @@ function getPdfHtmlTemplate(htmlContent) {
                 object-fit: cover;
                 display: block;
             }
+            /* ★追加: 目次 (TOC) 用のスタイル */
+            .toc {
+                margin-bottom: 20px;
+                page-break-after: always; /* 目次の後で改ページ */
+            }
+            .toc-title {
+                text-align: center;
+                margin-bottom: 10px;
+                font-size: 20px;
+                font-weight: 600;
+                border-bottom: 2px solid #333;
+                padding-bottom: 5px;
+            }
+            .toc-list {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+            }
+            .toc-item {
+                white-space: normal;
+            }
+            .toc-link {
+                text-decoration: none;
+                color: #333;
+                display: flex;          /* Flexboxを使って横並びにする */
+                align-items: flex-end;  /* 下揃えにして点線の高さを合わせる */
+                width: 100%;
+            }
+
+            /* 点線を描画する疑似要素 */
+            .toc-link::after {
+                content: "";            /* ここにページ番号を入れる場所ですが、自動取得不可のため空に */
+                flex-grow: 1;           /* 余白を埋めるように伸ばす */
+                border-bottom: 1px dotted #333; /* 1pxの点線 */
+                margin-left: 5px;       /* 文字との間隔 */
+                margin-bottom: 6px;     /* 高さの微調整（フォントサイズに合わせて調整してください） */
+                opacity: 0.5;           /* 点線を少し薄くして目立たせすぎない */
+            }
+
+            .toc-link:hover {
+                color: #007acc;
+            }
+            .toc-link:hover::after {
+                border-bottom-color: #007acc;
+            }
+            /* 階層ごとのインデント */
+            .toc-level-1 { padding-left: 0; font-weight: 600; font-size: 1.05em; margin-top: 6px; }
+            .toc-level-2 { padding-left: 30px; }
+            .toc-level-3 { padding-left: 60px; }
+            .toc-level-4 { padding-left: 90px; font-size: 0.9em; }
+            .toc-level-5 { padding-left: 110px; font-size: 0.9em; }
+            .toc-level-6 { padding-left: 120px; font-size: 0.9em; }
           </style>
         </head>
         <body>
@@ -2953,6 +3070,102 @@ function getJapaneseGitErrorMessage(originalMessage) {
   // それ以外はそのままと日本語補足
   return `エラーが発生しました:\n${originalMessage}`;
 }
+
+// 画像保存ハンドラ (クリップボード貼り付け用)
+ipcMain.handle('save-clipboard-image', async (event, buffer, targetDir) => {
+  try {
+    const settings = loadAppSettings();
+    const locationType = settings.defaultImageLocation || '.';
+
+    // 念のため targetDir が空の場合はカレントディレクトリとする
+    let baseDir = targetDir || '.';
+
+    // targetDir が相対パスの場合、開いているルートフォルダを基準に絶対パス化する
+    if (!path.isAbsolute(baseDir)) {
+      const webContentsId = event.sender.id;
+      const rootDir = workingDirectories.get(webContentsId) || os.homedir();
+      baseDir = path.resolve(rootDir, baseDir);
+    }
+
+    // 保存先ディレクトリの絶対パスを解決
+    const saveDir = path.resolve(baseDir, locationType);
+
+    // フォルダが存在しない場合のみ作成
+    if (!fs.existsSync(saveDir)) {
+      fs.mkdirSync(saveDir, { recursive: true });
+    }
+
+    // ファイル名を生成
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+    const random = crypto.randomBytes(2).toString('hex');
+    const filename = `image-${timestamp}-${random}.png`;
+
+    const fullPath = path.join(saveDir, filename);
+
+    // ファイル書き込み
+    fs.writeFileSync(fullPath, Buffer.from(buffer));
+
+    // Markdownに挿入するための相対パスを計算
+    // baseDir (MDファイルのある場所) から saveDir/filename への相対パス
+    let relativePath = path.relative(baseDir, fullPath);
+    relativePath = relativePath.replace(/\\/g, '/'); // Windowsパス対策
+
+    return { success: true, relativePath };
+  } catch (error) {
+    console.error('Failed to save clipboard image:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Web画像のダウンロード・保存ハンドラ (ドラッグ&ドロップ用)
+ipcMain.handle('download-image', async (event, url, targetDir) => {
+  try {
+    const settings = loadAppSettings();
+    const locationType = settings.defaultImageLocation || '.';
+
+    let baseDir = targetDir || '.';
+    if (!path.isAbsolute(baseDir)) {
+      const webContentsId = event.sender.id;
+      const rootDir = workingDirectories.get(webContentsId) || os.homedir();
+      baseDir = path.resolve(rootDir, baseDir);
+    }
+
+    const saveDir = path.resolve(baseDir, locationType);
+    if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
+
+    // ファイル名生成
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+    const random = crypto.randomBytes(2).toString('hex');
+
+    // URLから拡張子を推測（なければ.png）
+    let ext = '.png';
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const possibleExt = path.extname(pathname);
+      if (possibleExt && possibleExt.length <= 5) {
+        ext = possibleExt;
+      }
+    } catch (e) { }
+
+    const filename = `web-image-${timestamp}-${random}${ext}`;
+    const fullPath = path.join(saveDir, filename);
+
+    // gotを使ってダウンロード
+    const response = await got(url, { responseType: 'buffer' });
+    fs.writeFileSync(fullPath, response.body);
+
+    let relativePath = path.relative(baseDir, fullPath);
+    relativePath = relativePath.replace(/\\/g, '/');
+
+    return { success: true, relativePath };
+  } catch (error) {
+    console.error('Download failed:', error);
+    return { success: false, error: error.message };
+  }
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

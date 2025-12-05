@@ -68,6 +68,8 @@ window.electronAPI = {
 
   // File operations
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
+  saveClipboardImage: (buffer, targetDir) => ipcRenderer.invoke('save-clipboard-image', buffer, targetDir),
+  downloadImage: (url, targetDir) => ipcRenderer.invoke('download-image', url, targetDir),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),
   renameFile: (oldPath, newName) => ipcRenderer.invoke('rename-file', oldPath, newName),
   moveFile: (srcPath, destPath) => ipcRenderer.invoke('move-file', srcPath, destPath),
@@ -81,13 +83,15 @@ window.electronAPI = {
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
+  // ウィンドウの透明度設定
+  setWindowOpacity: (opacity) => ipcRenderer.invoke('window-set-opacity', opacity),
 
   // ファイル選択API
   selectFile: () => ipcRenderer.invoke('select-file'),
 
   // PDF
-  generatePdf: (htmlContent) => ipcRenderer.invoke('generate-pdf', htmlContent),
-  exportPdf: (htmlContent) => ipcRenderer.invoke('export-pdf', htmlContent),
+  generatePdf: (htmlContent, options) => ipcRenderer.invoke('generate-pdf', htmlContent, options),
+  exportPdf: (htmlContent, options) => ipcRenderer.invoke('export-pdf', htmlContent, options),
 
   // Utility
   fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url),

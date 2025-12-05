@@ -170,13 +170,19 @@ class ImageWidget extends WidgetType {
         const img = document.createElement("img");
         img.className = "cm-live-widget-image";
 
+        // 画像読み込み完了時にエディタのレイアウトを再計算させる
+        img.onload = () => {
+            if (view) view.requestMeasure();
+        };
+
         // パス解決ロジック (ローカルファイル対応)
         let imageSrc = this.src;
 
         // URLが http/https で始まらず、かつデータURIでもない場合
         if (!/^https?:\/\//i.test(imageSrc) && !/^data:/i.test(imageSrc)) {
             // renderer.js で設定した現在のディレクトリパスを取得
-            const currentDir = document.body.dataset.currentDir;
+            // activeFileDir (ファイルの場所) を優先、なければ currentDir (ルート)
+            const currentDir = document.body.dataset.activeFileDir || document.body.dataset.currentDir;
 
             if (currentDir) {
                 // 絶対パスでない場合は結合して絶対パス化
@@ -321,7 +327,8 @@ class PdfWidget extends WidgetType {
         // パス解決ロジック
         let fileSrc = this.src;
         if (!/^https?:\/\//i.test(fileSrc) && !/^data:/i.test(fileSrc)) {
-            const currentDir = document.body.dataset.currentDir;
+            // activeFileDir (ファイルの場所) を優先、なければ currentDir (ルート)
+            const currentDir = document.body.dataset.activeFileDir || document.body.dataset.currentDir;
             if (currentDir) {
                 // pathモジュールが使えるか確認
                 if (typeof path !== 'undefined') {

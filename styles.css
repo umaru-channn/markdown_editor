@@ -1216,7 +1216,9 @@ body[data-theme="dark"] .cm-live-link {
 /* 画像本体 */
 .cm-live-widget-image {
     display: block;
-    width: 100%;
+    width: auto;
+    max-width: 100%;
+    max-height: 400px;
     height: auto;
     object-fit: contain;
     border-radius: 3px;
