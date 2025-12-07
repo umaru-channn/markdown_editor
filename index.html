@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown IDE</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="node_modules/katex/dist/katex.min.css" />
+</head>
+
+<body>
+    <div class="ide-container" id="ide-container">
+        <!-- トップバー -->
+        <div class="top-bar" id="top-bar">
+            <div class="top-left-controls">
+                <div class="left-slot">
+                    <button id="btn-toggle-leftpane" title="サイドペインの表示/非表示"
+                        style="display: flex; align-items: center; justify-content: center;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="side-switch-group">
+                    <button class="side-switch active" data-target="files" id="btn-top-files" title="ファイル">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                    </button>
+                    <button class="side-switch" data-target="git" id="btn-top-git" title="Git管理">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="6" y1="3" x2="6" y2="15"></line>
+                            <circle cx="18" cy="6" r="3"></circle>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <path d="M18 9a9 9 0 0 1-9 9"></path>
+                        </svg>
+                    </button>
+                    <button class="side-switch" data-target="outline" id="btn-top-outline" title="アウトライン">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="8" y1="6" x2="21" y2="6"></line>
+                            <line x1="8" y1="12" x2="21" y2="12"></line>
+                            <line x1="8" y1="18" x2="21" y2="18"></line>
+                            <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                            <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                            <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                        </svg>
+                    </button>
+                    <button class="side-switch" data-target="recent" id="btn-top-recent" title="最近開いたファイル">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="tabs-container">
+                <div class="editor-tabs" id="editor-tabs">
+                </div>
+                <button id="btn-new-tab" class="tab-new-btn" title="新規ファイル作成">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="top-right-controls">
+                <button id="btn-toggle-right-activity" class="window-control-btn" title="右パネルの表示/非表示"
+                    style="display: flex; align-items: center; justify-content: center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" style="fill: none;"></rect>
+                        <line x1="15" y1="3" x2="15" y2="21"></line>
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4V3z"
+                            style="fill: currentColor; fill-opacity: 0.2; stroke: none;"></path>
+                    </svg>
+                </button>
+
+                <button id="btn-minimize" class="window-control-btn" title="最小化">
+                    <svg width="10" height="10" viewBox="0 0 10.2 1">
+                        <rect width="10.2" height="1" fill="currentColor" />
+                    </svg>
+                </button>
+
+                <button id="btn-maximize" class="window-control-btn" title="最大化">
+                    <svg class="icon-maximize" width="10" height="10" viewBox="0 0 10 10">
+                        <path d="M0,0v10h10V0H0z M9,9H1V1h8V9z" fill="currentColor" />
+                    </svg>
+                    <svg class="icon-restore hidden" width="10" height="10" viewBox="0 0 10 10">
+                        <path d="M2,0v2H0v8h8V8h2V0H2z M7,9H1V3h6V9z M9,7H8V2H3V1h6V7z" fill="currentColor" />
+                    </svg>
+                </button>
+
+                <button id="btn-close" class="window-control-btn close" title="閉じる">
+                    <svg width="10" height="10" viewBox="0 0 10 10">
+                        <polygon points="10,0.7 9.3,0 5,4.3 0.7,0 0,0.7 4.3,5 0,9.3 0.7,10 5,5.7 9.3,10 10,9.3 5.7,5"
+                            fill="currentColor" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <!-- 左アクティビティバー -->
+            <div class="activity-bar">
+                <div class="icon" id="btn-cloud-sync" title="クラウド同期">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                    </svg>
+                </div>
+
+                <div class="spacer"></div>
+
+                <div class="icon" id="btn-zen" title="Zenモード">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                </div>
+
+                <div class="icon" id="btn-accounts" title="アカウント">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                    </svg>
+                </div>
+
+                <div class="icon" id="btn-settings" title="設定">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 左ペイン -->
+            <div class="left-pane" id="left-pane">
+                <div class="left-pane-header" id="left-pane-header">
+                    <!-- ファイルエクスプローラー用ボタン -->
+                    <div class="header-buttons header-buttons-files" id="header-buttons-files"
+                        style="display: flex; align-items: center; overflow-x: auto; gap: 2px;">
+                        <button id="btn-open-folder" class="header-btn" title="フォルダを開く"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 2H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z">
+                                </path>
+                            </svg>
+                        </button>
+                        <button id="btn-new-file" class="header-btn" title="新規ファイルを作成"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path>
+                                <path d="M14 2v4a2 2 0 0 0 2 2h4"></path>
+                                <line x1="12" y1="11" x2="12" y2="17"></line>
+                                <line x1="9" y1="14" x2="15" y2="14"></line>
+                            </svg>
+                        </button>
+                        <button id="btn-new-folder" class="header-btn" title="新規フォルダを作成"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                                </path>
+                                <line x1="12" y1="11" x2="12" y2="17"></line>
+                                <line x1="9" y1="14" x2="15" y2="14"></line>
+                            </svg>
+                        </button>
+                        <button id="btn-sort-asc" class="header-btn" title="昇順でソート"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="4" y1="6" x2="13" y2="6"></line>
+                                <line x1="4" y1="12" x2="11" y2="12"></line>
+                                <line x1="4" y1="18" x2="11" y2="18"></line>
+                                <polyline points="15 15 18 18 21 15"></polyline>
+                                <line x1="18" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                        <button id="btn-sort-desc" class="header-btn" title="降順でソート"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="4" y1="6" x2="11" y2="6"></line>
+                                <line x1="4" y1="12" x2="11" y2="12"></line>
+                                <line x1="4" y1="18" x2="13" y2="18"></line>
+                                <polyline points="15 9 18 6 21 9"></polyline>
+                                <line x1="18" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Git用ボタン -->
+                    <div class="header-buttons header-buttons-git content-hidden" id="header-buttons-git"
+                        style="display: flex; align-items: center; overflow-x: auto; gap: 2px;">
+                        <button id="btn-git-ignore-apply" class="header-btn" title=".gitignore再適用"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24">
+                                </path>
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                            </svg>
+                        </button>
+
+                        <button id="btn-git-delete-history" class="header-btn" title="最新以外のコミットを全削除"
+                            style="display: flex; align-items: center; justify-content: center; color: #d9534f; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path
+                                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                </path>
+                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                            </svg>
+                        </button>
+
+                        <button id="btn-git-amend" class="header-btn" title="直前のコミットに上書き (Amend)"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
+
+                        <button id="btn-git-force-push" class="header-btn" title="強制プッシュ (Force Push)"
+                            style="display: flex; align-items: center; justify-content: center; color: #e2c08d; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z">
+                                </path>
+                                <path
+                                    d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z">
+                                </path>
+                                <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path>
+                                <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path>
+                            </svg>
+                        </button>
+
+                        <span
+                            style="width: 1px; height: 16px; background: var(--sidebar-border); margin: 0 4px; opacity: 0.5; flex-shrink: 0;"></span>
+
+                        <button id="btn-git-stage" class="header-btn" title="すべての変更をステージング"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                        <button id="btn-git-unstage" class="header-btn" title="すべての変更をアンステージング"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                        <button id="btn-git-refresh" class="header-btn" title="更新"
+                            style="display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M23 4v6h-6"></path>
+                                <path d="M1 20v-6h6"></path>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- アウトライン用ボタン -->
+                    <div class="header-buttons header-buttons-outline content-hidden" id="header-buttons-outline"
+                        style="display: flex; align-items: center;">
+                        <button id="btn-outline-collapse" class="header-btn" title="すべて折りたたむ"
+                            style="display: flex; align-items: center; justify-content: center;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="17 11 12 6 7 11"></polyline>
+                                <polyline points="17 18 12 13 7 18"></polyline>
+                            </svg>
+                        </button>
+                        <button id="btn-outline-expand" class="header-btn" title="すべて展開"
+                            style="display: flex; align-items: center; justify-content: center;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="7 13 12 18 17 13"></polyline>
+                                <polyline points="7 6 12 11 17 6"></polyline>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Recent用ボタン -->
+                    <div class="header-buttons header-buttons-recent content-hidden" id="header-buttons-recent">
+                        <button id="btn-recent-clear" class="header-btn" title="履歴をクリア"
+                            style="display: flex; align-items: center; justify-content: center;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path
+                                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                </path>
+                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ファイルエクスプローラー -->
+                <div class="left-pane-content" id="content-files" tabindex="0">
+                    <div class="file-tree" id="file-tree-container">
+                        <div class="tree-item expanded" data-path=".">
+                            <span class="tree-toggle">▼</span>
+                            <span class="tree-icon">📂</span>
+                            <span class="tree-label"></span>
+                        </div>
+                        <div class="tree-children" style="display: block;"></div>
+                    </div>
+                </div>
+
+                <div class="left-pane-content content-hidden" id="content-git">
+                    <strong>Git: 変更</strong>
+
+                    <div class="git-commit-area">
+                        <textarea id="git-message" placeholder="コミットメッセージ..." rows="1"></textarea>
+                        <div style="display: flex; gap: 5px;">
+                            <button id="git-commit-btn" class="git-action-btn">Commit</button>
+                            <button id="git-pull-btn" class="git-action-btn"
+                                style="flex: 1; background-color: #0969da;">Pull</button>
+                            <button id="git-push-btn" class="git-action-btn"
+                                style="background-color: #2da44e;">Push</button>
+                        </div>
+                    </div>
+
+                    <div class="git-section" id="section-unstaged">
+                        <div class="git-section-title" id="header-unstaged">
+                            <span class="toggle-icon">▼</span> 変更（Unstaged）
+                        </div>
+                        <div class="git-file-list" id="git-unstaged"></div>
+                    </div>
+
+                    <div class="git-section" id="section-staged">
+                        <div class="git-section-title" id="header-staged">
+                            <span class="toggle-icon">▼</span> ステージ済み（Staged）
+                        </div>
+                        <div class="git-file-list" id="git-staged"></div>
+                    </div>
+
+                    <div class="git-history-container"
+                        style="margin-top: 20px; border-top: 1px solid var(--sidebar-border); padding-top: 10px;">
+                        <div class="git-section-title"
+                            style="display: flex; justify-content: space-between; align-items: center; cursor: default;">
+                            <span>コミット履歴 (最新20件)</span>
+                            <span class="git-branch-badge" id="git-current-branch">main</span>
+                        </div>
+                        <div id="git-history-list" class="git-history-list">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- アウトライン -->
+                <div class="left-pane-content content-hidden" id="content-outline">
+                    <strong>アウトライン</strong>
+                    <ul id="outline-tree"></ul>
+                </div>
+
+                <!-- Recent Files パネル -->
+                <div class="left-pane-content content-hidden" id="content-recent">
+                    <strong>最近開いたファイル</strong>
+                    <ul id="recent-files-list" class="recent-files-list"></ul>
+                </div>
+            </div>
+
+            <div class="resizer" id="resizer-left"></div>
+
+            <!-- 中央ペイン（エディタ） -->
+            <div class="center-pane" id="center-pane">
+                <!-- ファイルタイトル入力バー -->
+                <div class="file-title-bar hidden" id="file-title-bar">
+                    <input type="text" id="file-title-input" class="file-title-input" placeholder="ファイル名"
+                        spellcheck="false">
+                </div>
+
+                <!-- 拡張ツールバー -->
+                <div class="toolbar">
+                    <div class="toolbar-left" id="toolbar-left">
+                        <button id="btn-save" title="保存 (Ctrl+S)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                        </button>
+                        <button id="btn-export-pdf" title="PDFとしてエクスポート">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </button>
+
+                        <span class="separator" style="opacity: 0.3; margin: 0 4px;">|</span>
+
+                        <button id="toolbar-undo" title="元に戻す (Ctrl+Z)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 7v6h6"></path>
+                                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                            </svg>
+                        </button>
+                        <button id="toolbar-redo" title="やり直し (Ctrl+Y)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 7v6h-6"></path>
+                                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"></path>
+                            </svg>
+                        </button>
+
+                        <span class="separator" style="opacity: 0.3; margin: 0 4px;">|</span>
+
+                        <button id="btn-h2" title="見出し2 (Ctrl+2)"
+                            style="font-weight: bold; font-size: 13px;">H2</button>
+                        <button id="btn-h3" title="見出し3 (Ctrl+3)"
+                            style="font-weight: bold; font-size: 13px;">H3</button>
+                        <div class="toolbar-dropdown-container">
+                            <button id="btn-hn" title="その他の見出し" style="font-weight: bold; font-size: 13px;">Hn
+                                ▼</button>
+                            <div class="toolbar-icon-menu">
+                                <button class="dropdown-item" data-action="h1" title="見出し1" style="font-weight: bold;">H1</button>
+                                <button class="dropdown-item" data-action="h4" title="見出し4" style="font-weight: bold;">H4</button>
+                                <button class="dropdown-item" data-action="h5" title="見出し5" style="font-weight: bold;">H5</button>
+                                <button class="dropdown-item" data-action="h6" title="見出し6" style="font-weight: bold;">H6</button>
+                            </div>
+                        </div>
+
+                        <span class="separator" style="opacity: 0.3; margin: 0 4px;">|</span>
+
+                        <button id="bold-btn" title="太字 (Ctrl+B)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path>
+                                <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"></path>
+                            </svg>
+                        </button>
+                        <button id="italic-btn" title="斜体 (Ctrl+I)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="19" y1="4" x2="10" y2="4"></line>
+                                <line x1="14" y1="20" x2="5" y2="20"></line>
+                                <line x1="15" y1="4" x2="9" y2="20"></line>
+                            </svg>
+                        </button>
+                        <button id="strike-btn" title="取り消し線 (Ctrl+Shift+S)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M16 4H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                <line x1="4" y1="12" x2="20" y2="12"></line>
+                            </svg>
+                        </button>
+
+                        <button id="color-btn" class="toolbar-button" title="文字色を変更"
+                            style="display: flex; align-items: center; justify-content: center;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M7 17L12 4L17 17"></path>
+                                <line x1="8" y1="13" x2="16" y2="13"></line>
+                                <path id="color-indicator" d="M4 21h16" stroke="red" stroke-width="3"></path>
+                            </svg>
+                        </button>
+                        <input type="color" id="color-picker"
+                            style="visibility: hidden; position: absolute; width: 0; height: 0;">
+
+                        <button id="highlight-btn" title="ハイライト (==)"
+                            style="display: flex; align-items: center; justify-content: center;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m9 11-6 6v3h9l3-3"></path>
+                                <path d="m22 7-3-3"></path>
+                                <path d="m13.7 13.3 5.7-5.7a2 2 0 0 0-2.8-2.8l-5.7 5.7"></path>
+                                <path d="M4 23h16" stroke="#FFD700" stroke-width="2"></path>
+                            </svg>
+                        </button>
+
+                        <span class="separator" style="opacity: 0.3; margin: 0 4px;">|</span>
+
+                        <button id="link-btn" title="リンク挿入">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07L13 7"></path>
+                                <path d="M4 11a5 5 0 0 0 .54 7.54l3 3a5 5 0 0 0 7.07-7.07L17 10"></path>
+                            </svg>
+                        </button>
+                        <button id="image-btn" title="画像挿入">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                        </button>
+                        <button id="local-image-btn" title="ローカル画像挿入">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </button>
+                        <button id="btn-table" title="テーブル挿入">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="3" y1="15" x2="21" y2="15"></line>
+                                <line x1="9" y1="3" x2="9" y2="21"></line>
+                                <line x1="15" y1="3" x2="15" y2="21"></line>
+                            </svg>
+                        </button>
+
+                        <span class="separator" style="opacity: 0.3; margin: 0 4px;">|</span>
+
+                        <button id="inline-code-btn" title="インラインコード (` `)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="16 18 22 12 16 6"></polyline>
+                                <polyline points="8 6 2 12 8 18"></polyline>
+                            </svg>
+                        </button>
+                        <button id="quote-btn" title="引用">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z">
+                                </path>
+                                <path
+                                    d="M15 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z">
+                                </path>
+                            </svg>
+                        </button>
+                        <button id="code-btn" title="コードブロック">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="4 17 10 11 4 5"></polyline>
+                                <line x1="12" y1="19" x2="20" y2="19"></line>
+                            </svg>
+                        </button>
+                        <button id="hr-btn" title="区切り線">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+
+                        <button id="btn-page-break" title="改ページ (Page Break)">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                                stroke-width="1.3" style="transform: scale(1.0);">
+                                <path d="M4 2 V5 H12 V2" />
+                                <path d="M4 14 V11 H12 V14" />
+                                <path d="M3 8 H13" stroke-dasharray="2 2" stroke-width="1.2" />
+                            </svg>
+                        </button>
+
+                        <div class="toolbar-dropdown-container">
+                            <button id="btn-list-menu" title="リスト">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                                    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                                    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                                    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                                </svg>
+                                <span style="font-size: 10px; margin-left: 2px;">▼</span>
+                            </button>
+                            <div class="toolbar-icon-menu">
+                                <button id="btn-bullet-list" title="箇条書きリスト">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="8" y1="6" x2="21" y2="6"></line>
+                                        <line x1="8" y1="12" x2="21" y2="12"></line>
+                                        <line x1="8" y1="18" x2="21" y2="18"></line>
+                                        <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                                        <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                                        <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                                    </svg>
+                                </button>
+                                <button id="btn-number-list" title="番号付きリスト">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="10" y1="6" x2="21" y2="6"></line>
+                                        <line x1="10" y1="12" x2="21" y2="12"></line>
+                                        <line x1="10" y1="18" x2="21" y2="18"></line>
+                                        <path d="M4 6h1v4"></path>
+                                        <path d="M4 10h2"></path>
+                                        <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path>
+                                    </svg>
+                                </button>
+                                <button id="btn-check-list" title="チェックリスト">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="5" width="6" height="6" rx="1" />
+                                        <path d="m3 17 2 2 4-4" />
+                                        <line x1="13" x2="21" y1="6" y2="6" />
+                                        <line x1="13" x2="21" y1="12" y2="12" />
+                                        <line x1="13" x2="21" y1="18" y2="18" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <button id="btn-toolbar-more" class="hidden" title="さらに表示" style="font-weight: bold;">»</button>
+                    </div>
+
+                    <div id="toolbar-overflow-menu" class="toolbar-overflow-menu hidden"></div>
+                </div>
+
+                <div class="editor-area" id="content-readme">
+                    <div id="editor" style="height: 100%;"></div>
+
+                    <div id="custom-search-widget" class="search-widget hidden">
+                        <div class="search-widget-row">
+                            <div class="search-input-container">
+                                <span class="search-icon-toggle" id="search-toggle-replace" title="置換モード切替">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="9 18 15 12 9 6"></polyline>
+                                    </svg>
+                                </span>
+                                <input type="text" id="search-input" placeholder="検索" spellcheck="false">
+                                <div class="search-options">
+                                    <button class="icon-btn toggle-btn" id="opt-case"
+                                        title="大文字・小文字を区別 (Alt+C)">Aa</button>
+                                    <button class="icon-btn toggle-btn" id="opt-word" title="単語単位 (Alt+W)">abl</button>
+                                    <button class="icon-btn toggle-btn" id="opt-regex" title="正規表現 (Alt+R)">.*</button>
+                                </div>
+                            </div>
+                            <div class="search-actions">
+                                <span id="search-count" class="search-count">No results</span>
+                                <button class="icon-btn" id="search-prev" title="前へ (Shift+Enter)">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="12" y1="19" x2="12" y2="5"></line>
+                                        <polyline points="5 12 12 5 19 12"></polyline>
+                                    </svg>
+                                </button>
+                                <button class="icon-btn" id="search-next" title="次へ (Enter)">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <polyline points="19 12 12 19 5 12"></polyline>
+                                    </svg>
+                                </button>
+                                <button class="icon-btn close-btn" id="search-close" title="閉じる (Esc)">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="search-widget-row replace-row hidden" id="replace-row">
+                            <div class="search-input-container">
+                                <input type="text" id="replace-input" placeholder="置換" spellcheck="false">
+                            </div>
+                            <div class="search-actions">
+                                <button class="icon-btn" id="replace-btn" title="置換 (Enter)">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="23 4 23 10 17 10"></polyline>
+                                        <polyline points="1 20 1 14 7 14"></polyline>
+                                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15">
+                                        </path>
+                                    </svg>
+                                </button>
+                                <button class="icon-btn" id="replace-all-btn" title="すべて置換 (Ctrl+Alt+Enter)">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="23 4 23 10 17 10"></polyline>
+                                        <path d="M20.49 15a9 9 0 0 1-2.12 3.16 9 9 0 0 1-3.21 1.59"></path>
+                                        <path d="M12 21a9 9 0 0 1-9-9 9 9 0 0 1 2.37-6.09"></path>
+                                        <polyline points="1 14 7 14"></polyline>
+                                    </svg>
+                                    <span style="font-size:10px; font-weight:bold; margin-left:-2px;">All</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- 設定画面 -->
+                <div class="settings-view-content content-hidden" id="content-settings">
+                    <div class="settings-container">
+                        <div class="settings-sidebar">
+                            <div class="settings-sidebar-header">設定</div>
+                            <ul class="settings-nav-list">
+                                <li class="settings-nav-item active" data-section="general">一般</li>
+                                <li class="settings-nav-item" data-section="editor">エディタ</li>
+                                <li class="settings-nav-item" data-section="appearance">外観</li>
+                                <li class="settings-nav-item" data-section="pdf">PDF設定</li>
+                                <li class="settings-nav-item" data-section="sync">クラウド同期</li>
+                            </ul>
+                        </div>
+
+                        <div class="settings-main-content">
+                            <div class="settings-section active" id="settings-section-general">
+                                <h2>一般 (General)</h2>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="auto-save">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">自動保存を有効にする</span>
+                                            <span class="label-desc">ファイルの変更を検知して自動的に保存します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label for="exclude-patterns">除外するファイル/フォルダ (Exclude Patterns)</label>
+                                    <input type="text" id="exclude-patterns"
+                                        placeholder="例: node_modules, .git, dist, build">
+                                    <div class="label-desc" style="margin-top: 4px;">ファイルツリーから隠す名前をカンマ区切りで指定します。</div>
+                                </div>
+                                <div class="setting-item">
+                                    <label for="default-image-location">画像のデフォルト保存場所 (Clipboard Image Location)</label>
+                                    <select id="default-image-location">
+                                        <option value=".">現在のフォルダ (Current Folder)</option>
+                                        <option value="./assets">./assets フォルダ</option>
+                                        <option value="./images">./images フォルダ</option>
+                                    </select>
+                                    <div class="label-desc" style="margin-top: 4px;">クリップボードから画像を貼り付けた際の保存先フォルダを指定します。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-editor">
+                                <h2>エディタ (Editor)</h2>
+                                <div class="setting-item">
+                                    <label for="tab-size">タブ幅 (Tab Size)</label>
+                                    <select id="tab-size">
+                                        <option value="2">2</option>
+                                        <option value="4" selected>4</option>
+                                        <option value="8">8</option>
+                                    </select>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="insert-spaces" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">スペースを挿入 (Insert Spaces)</span>
+                                            <span class="label-desc">タブキー押下時にタブ文字の代わりにスペースを挿入します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-line-numbers" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">行番号を表示 (Show Line Numbers)</span>
+                                            <span class="label-desc">エディタの左側に行番号を表示します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="auto-close-brackets" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">括弧を自動で閉じる (Auto Close Brackets)</span>
+                                            <span class="label-desc">(), [], {}, "", '' などを入力した際に自動で閉じます。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="highlight-active-line" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">現在行をハイライト (Highlight Active Line)</span>
+                                            <span class="label-desc">カーソルがある行の背景色を強調表示します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="word-wrap">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">右端で折り返す (Word Wrap)</span>
+                                            <span class="label-desc">ウィンドウの幅に合わせてテキストを自動的に改行します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
+                                    <label for="font-size">フォントサイズ</label>
+                                    <select id="font-size">
+                                        <option value="12px">12px</option>
+                                        <option value="14px">14px</option>
+                                        <option value="16px">16px</option>
+                                        <option value="18px">18px</option>
+                                        <option value="20px">20px</option>
+                                        <option value="22px">22px</option>
+                                        <option value="24px">24px</option>
+                                    </select>
+                                </div>
+                                <div class="setting-item">
+                                    <label for="font-family">フォント (Font Family)</label>
+                                    <select id="font-family">
+                                        <option value='"Segoe UI", "Meiryo", sans-serif' selected>標準 (Segoe UI / メイリオ)
+                                        </option>
+
+                                        <option value='"Meiryo", "Hiragino Kaku Gothic ProN", sans-serif'>メイリオ (Meiryo)
+                                        </option>
+                                        <option value='"Yu Gothic", "YuGothic", sans-serif'>游ゴシック (Yu Gothic)</option>
+                                        <option value='"Yu Gothic UI", sans-serif'>Yu Gothic UI</option>
+                                        <option value='"BIZ UDGothic", "BIZ UDPGothic", sans-serif'>BIZ UDゴシック (Windows
+                                            10以降)
+                                        </option>
+                                        <option value='"MS Gothic", "MS PGothic", sans-serif'>MS ゴシック (レトロ/互換性)</option>
+
+                                        <option value='"Yu Mincho", "YuMincho", serif'>游明朝 (Yu Mincho)</option>
+                                        <option value='"MS Mincho", "MS PMincho", serif'>MS 明朝 (MS Mincho)</option>
+                                        <option value='"BIZ UDMincho", "BIZ UDPMincho", serif'>BIZ UD明朝 (Windows 10以降)
+                                        </option>
+
+                                        <option value='"Consolas", "Courier New", monospace'>Consolas (Windows標準等幅)
+                                        </option>
+                                        <option value='"Courier New", Courier, monospace'>Courier New</option>
+                                        <option value='"Lucida Console", monospace'>Lucida Console</option>
+
+                                        <option value='Arial, sans-serif'>Arial</option>
+                                        <option value='Verdana, sans-serif'>Verdana</option>
+                                        <option value='Tahoma, sans-serif'>Tahoma</option>
+                                        <option value='"Trebuchet MS", sans-serif'>Trebuchet MS</option>
+                                        <option value='Impact, sans-serif'>Impact (太字)</option>
+
+                                        <option value='"Times New Roman", Times, serif'>Times New Roman</option>
+                                        <option value='Georgia, serif'>Georgia</option>
+                                        <option value='"Palatino Linotype", "Book Antiqua", serif'>Palatino Linotype
+                                        </option>
+                                        <option value='"Comic Sans MS", cursive'>Comic Sans MS (手書き風)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-appearance">
+                                <h2>外観 (Appearance)</h2>
+                                <div class="setting-item">
+                                    <label for="theme">テーマ</label>
+                                    <select id="theme">
+                                        <option value="light">ライト (Light)</option>
+                                        <option value="dark">ダーク (Dark)</option>
+                                    </select>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label for="window-opacity">ウィンドウの透明度 (Window Opacity)</label>
+                                    <div style="display: flex; align-items: center; gap: 15px;">
+                                        <input type="range" id="window-opacity" min="0" max="90" value="0" step="5"
+                                            style="flex: 1; max-width: 300px;">
+                                        <span id="window-opacity-value"
+                                            style="font-weight: bold; width: 40px;">0%</span>
+                                    </div>
+                                    <div class="label-desc" style="margin-top: 4px;">ウィンドウの透過率を設定します（0% = 不透明）。</div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-pdf">
+                                <h2>PDFエクスポート設定 (Export)</h2>
+
+                                <div class="setting-item">
+                                    <label for="pdf-page-ranges">ページ範囲 (Page Ranges)</label>
+                                    <input type="text" id="pdf-page-ranges" placeholder="例: 1-5, 8, 11-13 (空欄ですべて)">
+                                    <div class="label-desc" style="margin-top: 4px;">指定しない場合はすべてのページが出力されます。</div>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label for="pdf-page-size">用紙サイズ (Page Size)</label>
+                                    <select id="pdf-page-size">
+                                        <option value="A3">A3</option>
+                                        <option value="A4" selected>A4</option>
+                                        <option value="A5">A5</option>
+                                        <option value="Legal">Legal</option>
+                                        <option value="Letter">Letter</option>
+                                        <option value="Tabloid">Tabloid</option>
+                                    </select>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-landscape">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">横向き (Landscape)</span>
+                                            <span class="label-desc">用紙を横向きにして印刷します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label for="pdf-margins">余白設定 (Margins)</label>
+                                    <select id="pdf-margins">
+                                        <option value="0">標準 (Default)</option>
+                                        <option value="1">なし (None)</option>
+                                        <option value="2">最小 (Minimum)</option>
+                                    </select>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-print-background" checked>
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">背景を印刷する (Print Background)</span>
+                                            <span class="label-desc">背景色や画像を含める場合はONにします。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-header-footer">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">ヘッダー/フッターを表示</span>
+                                            <span class="label-desc">ページ番号やファイル名などを印字します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-toc">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">目次を自動生成 (Generate TOC)</span>
+                                            <span class="label-desc">見出し(H1~H6)に基づいて目次ページを先頭に追加します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="pdf-include-title">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">タイトルを含める (Include Title)</span>
+                                            <span class="label-desc">ファイル名をタイトルとして文書の先頭に追加します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-sync">
+                                <h2>クラウド同期 (Cloud Sync)</h2>
+                                <div class="setting-item">
+                                    <label for="sync-service">同期サービス</label>
+                                    <select id="sync-service">
+                                        <option value="none">使用しない</option>
+                                        <option value="dropbox">Dropbox</option>
+                                        <option value="gdrive">Google Drive</option>
+                                    </select>
+                                </div>
+
+                                <div id="sync-settings-dropbox" class="sync-provider-settings hidden">
+                                    <h3>Dropbox 設定</h3>
+                                    <p class="setting-note">ボタンを押してブラウザで認証を行ってください。</p>
+                                    <button id="btn-auth-dropbox" class="modal-btn primary">Dropboxと連携 (認証)</button>
+                                    <span id="dropbox-status" class="auth-status">未連携</span>
+                                </div>
+
+                                <div id="sync-settings-gdrive" class="sync-provider-settings hidden">
+                                    <h3>Google Drive 設定</h3>
+                                    <p class="setting-note">ボタンを押してブラウザで認証を行ってください。</p>
+                                    <button id="btn-auth-gdrive" class="modal-btn primary">Google Driveと連携 (認証)</button>
+                                    <span id="gdrive-status" class="auth-status">未連携</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右ペイン（ターミナル/プレビュー） -->
+            <div class="right-pane hidden" id="right-pane">
+                <div class="terminal-header" id="terminal-header">
+                    <div class="terminal-tabs-container" id="terminal-tabs-container">
+                        <div class="terminal-tabs-list" id="terminal-tabs-list"></div>
+                        <div class="new-terminal-container">
+                            <button id="new-terminal-btn" title="New Terminal">+</button>
+                            <button id="dropdown-toggle" title="Select Shell">▾</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="shell-dropdown" class="hidden"></div>
+                <div id="terminal-container" class="terminal-content"></div>
+
+                <div class="pdf-preview-header hidden" id="pdf-preview-header">
+                    PDFプレビュー
+                    <div class="pdf-controls">
+                        <span id="pdf-page-info"></span>
+                    </div>
+                </div>
+                <div id="pdf-preview-container" class="pdf-preview-content hidden">
+                    <canvas id="pdf-canvas"></canvas>
+                </div>
+            </div>
+
+            <div class="resizer" id="resizer-right"></div>
+
+            <!-- 右アクティビティバー -->
+            <div class="right-activity-bar">
+                <div class="icon" id="btn-terminal-right" title="ターミナル">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                </div>
+                <div class="icon" id="btn-pdf-preview" title="プレビュー">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                </div>
+                <!-- <div class="icon" id="btn-info" title="情報">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                </div> -->
+            </div>
+        </div>
+
+        <!-- 下ペイン -->
+        <div class="bottom-pane hidden" id="bottom-pane">
+            <div class="terminal-header" id="bottom-terminal-header">
+                ターミナル
+            </div>
+            <div id="terminal-bottom-container" class="terminal-content"></div>
+        </div>
+
+        <div class="resizer" id="resizer-bottom"></div>
+
+        <div class="status-bar">
+            <div class="status-left">
+                <span id="status-bar-branch" class="status-bar-item hidden" title="ブランチを作成・切り替え"></span>
+                <span id="sync-status-text" style="margin-left: 10px;"></span>
+            </div>
+            <div class="status-right">
+                <span id="status-font-size" style="margin-right: 15px; font-size: 11px;">Size: 16px</span>
+                <span id="file-stats">文字数: 0 | 行数: 0</span>
+                <span class="icon" id="btn-toggle-position" title="ターミナルの位置を切り替え"> ◧ </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知用コンテナ -->
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+    <script src="node_modules/katex/dist/katex.min.js"></script>
+    <script src="node_modules/katex/dist/contrib/auto-render.min.js"></script>
+    <script src="node_modules/mermaid/dist/mermaid.min.js"></script>
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
+    <script type="module">
+        import * as pdfjsLib from './node_modules/pdfjs-dist/build/pdf.min.mjs';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
+        window.pdfjsLib = pdfjsLib;
+    </script>
+    <script src="./renderer.js"></script>
+</body>
+
+</html>
