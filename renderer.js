@@ -60,6 +60,7 @@ const {
     replaceAll,
     closeSearchPanel
 } = require("@codemirror/search");
+const { get } = require('http');
 
 // プログラムによる変更を識別するためのアノテーション
 const ExternalChange = Annotation.define();
@@ -1785,32 +1786,56 @@ function setupSearchWidget(view) {
     };
 }
 
+/**
+ * コマンドIDに対応するキーバインド設定を常に配列で取得するヘルパー
+ * 既存の設定が文字列でも配列でもエラーにならないように吸収します
+ */
+function getKeybindingsForCommand(commandId) {
+    const cmd = COMMANDS_REGISTRY.find(c => c.id === commandId);
+    let current = undefined;
+
+    if (appSettings.keybindings) {
+        current = appSettings.keybindings[commandId];
+    }
+
+    // 設定値が undefined の場合はデフォルトを使用
+    if (current === undefined) {
+        return cmd && cmd.defaultKey ? [cmd.defaultKey] : [];
+    }
+
+    // 設定値が null の場合は無効化されているので空配列
+    if (current === null) {
+        return [];
+    }
+
+    // 文字列なら配列化、既に配列ならそのまま返す (ここが重要)
+    return Array.isArray(current) ? current : [current];
+}
+
 // キーマップを動的に入れ替えるためのコンパートメント
 const keybindingsCompartment = new Compartment();
-// 現在の設定に基づいてキーマップ配列を生成するヘルパー関数
+// 現在の設定に基づいてキーマップ配列を生成するヘルパー関数 (配列対応版)
 function getCombinedKeymap() {
     const dynamicKeymap = [];
     
     // ユーザー設定のコマンド (COMMANDS_REGISTRY)
     COMMANDS_REGISTRY.filter(c => c.context === 'editor').forEach(cmd => {
-        // 現在のキー設定を取得
-        let key = null;
-        if (appSettings.keybindings && appSettings.keybindings[cmd.id] !== undefined) {
-            key = appSettings.keybindings[cmd.id];
-        } else {
-            key = cmd.defaultKey;
-        }
+        // キー設定を配列で取得 (ヘルパーを使用)
+        const keys = getKeybindingsForCommand(cmd.id);
 
-        // key が null (無効化) でない場合のみ登録
-        if (key) {
-            dynamicKeymap.push({
-                key: key,
-                run: (view) => {
-                    cmd.run(view);
-                    return true; // イベント伝播を停止
-                }
-            });
-        }
+        // 配列内のすべてのキーを登録
+        keys.forEach(key => {
+            // キーが有効な文字列である場合のみ登録
+            if (key && typeof key === 'string') {
+                dynamicKeymap.push({
+                    key: key,
+                    run: (view) => {
+                        cmd.run(view);
+                        return true; // イベント伝播を停止
+                    }
+                });
+            }
+        });
     });
 
     // 検索ウィジェット用のEscapeキー処理
@@ -1896,117 +1921,134 @@ let isRecordingKey = false;
 let hotkeySearchFilter = "";
 let hotkeyKeyFilter = null; // null or "Mod-s" string
 
-// リストの描画
+// リストの描画（複数ショートカット対応版）
 function renderHotkeysList() {
     const listContainer = document.getElementById('hotkeys-list');
     if (!listContainer) return;
     listContainer.innerHTML = '';
 
     COMMANDS_REGISTRY.forEach(cmd => {
-        // 現在の設定キーを取得 (設定がない場合は undefined)
-        // null が明示的に設定されている場合は「無効」とする
-        let currentKey = appSettings.keybindings && appSettings.keybindings[cmd.id];
+        // 設定されているキーの配列を取得
+        const keys = getKeybindingsForCommand(cmd.id);
         
-        // 設定値がない場合、デフォルトを使用するかどうか
-        // 今回の仕様変更で「設定値が null なら無効」「undefined ならデフォルト」と区別が必要
-        // appSettings.keybindings[cmd.id] === null -> 無効化済み
-        // appSettings.keybindings[cmd.id] === undefined -> デフォルト使用
-        
-        const isDefault = currentKey === undefined;
-        const effectiveKey = isDefault ? cmd.defaultKey : currentKey;
-        
-        // 表示用文字列
-        const displayKey = effectiveKey ? formatKeyDisplay(effectiveKey) : '---'; // 無効時は ---
-
         // テキストフィルター
         if (hotkeySearchFilter) {
             const lowerFilter = hotkeySearchFilter.toLowerCase();
-            if (!cmd.name.toLowerCase().includes(lowerFilter) && !cmd.id.includes(lowerFilter)) {
+            const keysStr = keys.map(k => formatKeyDisplay(k)).join(' ').toLowerCase();
+            if (!cmd.name.toLowerCase().includes(lowerFilter) && 
+                !cmd.id.includes(lowerFilter) &&
+                !keysStr.includes(lowerFilter)) {
                 return;
             }
         }
-        // キーフィルター
+        
+        // キーフィルター (特定のキーバインドが含まれているか)
         if (hotkeyKeyFilter) {
-            if (effectiveKey !== hotkeyKeyFilter) return;
+            if (!keys.includes(hotkeyKeyFilter)) return;
         }
 
         // 行要素の作成
         const row = document.createElement('div');
         row.className = 'hotkey-item';
         
-        // デフォルトと異なる（変更済み or 無効化済み）場合に「デフォルトに戻す」ボタンを表示
-        const showRestoreBtn = !isDefault;
-        
-        // キーが設定されている（有効）場合に「削除（×）」ボタンを表示
-        const showClearBtn = effectiveKey !== null;
+        // 設定があるかどうか
+        const hasCustomSettings = appSettings.keybindings && appSettings.keybindings[cmd.id] !== undefined;
+
+        // キーバッジのHTML生成
+        const badgesContainer = document.createElement('div');
+        badgesContainer.className = 'hotkey-badges';
+        badgesContainer.style.display = 'flex';
+        badgesContainer.style.flexWrap = 'wrap';
+        badgesContainer.style.gap = '4px';
+        badgesContainer.style.alignItems = 'center';
+
+        keys.forEach(key => {
+            const badge = document.createElement('div');
+            badge.className = 'kbd-shortcut';
+            badge.title = 'クリックして変更';
+            badge.innerHTML = `
+                <span>${formatKeyDisplay(key)}</span>
+                <span class="remove-key-btn" title="削除" style="margin-left:6px; opacity:0.5; font-weight:bold; cursor:pointer;">×</span>
+            `;
+            
+            // 変更イベント
+            badge.addEventListener('click', (e) => {
+                // 削除ボタンがクリックされた場合
+                if (e.target.classList.contains('remove-key-btn')) {
+                    e.stopPropagation();
+                    updateKeybinding(cmd.id, null, key); // nullを渡して削除
+                    renderHotkeysList();
+                    return;
+                }
+                // バッジ本体クリックで変更 (oldKeyとして現在のキーを渡す)
+                e.stopPropagation();
+                startRecordingKey(cmd.id, badge, key);
+            });
+
+            badgesContainer.appendChild(badge);
+        });
+
+        // キーが一つもない場合の表示
+        if (keys.length === 0) {
+            const emptyBadge = document.createElement('div');
+            emptyBadge.className = 'kbd-shortcut blank';
+            emptyBadge.textContent = 'Unbound';
+            badgesContainer.appendChild(emptyBadge);
+        }
 
         row.innerHTML = `
             <div class="hotkey-label">
                 <div class="command-name">${cmd.name}</div>
                 <div class="command-id">${cmd.id}</div>
             </div>
-            <div class="hotkey-controls">
-                <div class="kbd-shortcut ${!effectiveKey ? 'disabled' : ''}" data-id="${cmd.id}" title="クリックしてキーを変更">
-                    ${displayKey}
+            <div class="hotkey-controls" style="flex: 2; justify-content: flex-end;">
                 </div>
-
-                <button class="hotkey-action-btn add-btn" title="ショートカットを追加/変更" data-id="${cmd.id}">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                </button>
-
-                ${showRestoreBtn ? `
-                <button class="hotkey-action-btn restore-btn" title="デフォルトに戻す" data-id="${cmd.id}">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                        <path d="M3 3v5h5"></path>
-                    </svg>
-                </button>
-                ` : ''}
-
-                ${showClearBtn ? `
-                <button class="hotkey-action-btn clear-btn" title="ショートカットを無効化" data-id="${cmd.id}">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-                ` : ''}
-            </div>
         `;
 
-        // イベントリスナー設定
+        // コントロール部分に要素を追加
+        const controlsDiv = row.querySelector('.hotkey-controls');
+        controlsDiv.appendChild(badgesContainer);
 
-        // 1. キーバッジクリック -> 変更
-        const badge = row.querySelector('.kbd-shortcut');
-        badge.addEventListener('click', (e) => {
+        // 追加(+)ボタン
+        const addBtn = document.createElement('button');
+        addBtn.className = 'hotkey-action-btn add-btn';
+        addBtn.title = 'ショートカットを追加';
+        addBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+        `;
+        addBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            startRecordingKey(cmd.id, badge);
+            // 入力用の一時的なバッジを作成してコンテナに追加
+            const tempBadge = document.createElement('div');
+            tempBadge.className = 'kbd-shortcut temp-badge';
+            tempBadge.textContent = '...';
+            badgesContainer.appendChild(tempBadge);
+            
+            // 新規追加モードで記録開始 (oldKey = null)
+            startRecordingKey(cmd.id, tempBadge, null);
         });
+        controlsDiv.appendChild(addBtn);
 
-        // 2. 追加ボタン (+) -> 変更 (バッジクリックと同じ挙動)
-        const addBtn = row.querySelector('.add-btn');
-        if (addBtn) {
-            addBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                startRecordingKey(cmd.id, badge);
-            });
-        }
-
-        // 3. デフォルトに戻すボタン (くるくる)
-        const restoreBtn = row.querySelector('.restore-btn');
-        if (restoreBtn) {
+        // リセットボタン（設定がある場合のみ表示）
+        if (hasCustomSettings) {
+            const restoreBtn = document.createElement('button');
+            restoreBtn.className = 'hotkey-action-btn restore-btn';
+            restoreBtn.title = 'デフォルトに戻す';
+            restoreBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                </svg>
+            `;
             restoreBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                // 設定から削除 = デフォルトに戻る
                 if (appSettings.keybindings) {
                     delete appSettings.keybindings[cmd.id];
                 }
                 saveSettings();
-                
-                // エディタのキーマップ更新 (デフォルト値で再構成される)
                 if (globalEditorView) {
                     globalEditorView.dispatch({
                         effects: keybindingsCompartment.reconfigure(
@@ -2017,17 +2059,7 @@ function renderHotkeysList() {
                 renderHotkeysList();
                 showNotification('デフォルト設定に戻しました', 'success');
             });
-        }
-
-        // 4. 無効化ボタン (×) -> null を設定して無効化
-        const clearBtn = row.querySelector('.clear-btn');
-        if (clearBtn) {
-            clearBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                updateKeybinding(cmd.id, null); // nullを保存して無効化
-                renderHotkeysList();
-                showNotification('ショートカットを無効化しました', 'info');
-            });
+            controlsDiv.appendChild(restoreBtn);
         }
 
         listContainer.appendChild(row);
@@ -2035,12 +2067,15 @@ function renderHotkeysList() {
 }
 
 // キー入力の記録モード
-function startRecordingKey(commandId, element) {
+function startRecordingKey(commandId, element, oldKey = null) {
     if (isRecordingKey) return;
     isRecordingKey = true;
 
-    const originalText = element.textContent;
-    element.textContent = 'Type key...';
+    // 元のHTMLを保存（バッジの中身など）
+    const originalHTML = element.innerHTML;
+    
+    // UI上の見た目を入力待ち状態にする
+    element.innerHTML = '<span style="font-size:10px;">Type key...</span>';
     element.classList.add('recording');
 
     const handleKeyDown = (e) => {
@@ -2049,6 +2084,12 @@ function startRecordingKey(commandId, element) {
 
         // 修飾キーのみの場合は無視
         if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+        // Escキーでキャンセル
+        if (e.key === 'Escape') {
+            cleanup(true);
+            return;
+        }
 
         // キーの生成 (例: Mod-Shift-f)
         const parts = [];
@@ -2059,20 +2100,25 @@ function startRecordingKey(commandId, element) {
         // Key名 (大文字小文字対応)
         let keyChar = e.key;
         if (keyChar === ' ') keyChar = 'Space';
-        if (keyChar.length === 1) keyChar = keyChar.toLowerCase();
+        // 矢印キー等の正規化
+        if (keyChar === 'ArrowUp') keyChar = 'ArrowUp';
+        else if (keyChar === 'ArrowDown') keyChar = 'ArrowDown';
+        else if (keyChar === 'ArrowLeft') keyChar = 'ArrowLeft';
+        else if (keyChar === 'ArrowRight') keyChar = 'ArrowRight';
+        else if (keyChar.length === 1) keyChar = keyChar.toLowerCase();
 
         parts.push(keyChar);
         const newKeyString = parts.join('-');
 
-        // 保存
-        updateKeybinding(commandId, newKeyString);
+        // 保存（oldKeyがあれば置換、なければ追加）
+        updateKeybinding(commandId, newKeyString, oldKey);
 
-        cleanup();
+        cleanup(false);
     };
 
     const handleMouseDown = (e) => {
         // 外部クリックでキャンセル
-        if (e.target !== element) {
+        if (e.target !== element && !element.contains(e.target)) {
             cleanup(true);
         }
     };
@@ -2082,33 +2128,57 @@ function startRecordingKey(commandId, element) {
         element.classList.remove('recording');
         window.removeEventListener('keydown', handleKeyDown, true);
         window.removeEventListener('mousedown', handleMouseDown);
-        if (cancelled) element.textContent = originalText;
-        else renderHotkeysList();
+        
+        if (cancelled) {
+            element.innerHTML = originalHTML; // 元に戻す
+            // 新規追加用の仮要素（...）だった場合は削除する
+            if (element.classList.contains('temp-badge')) {
+                element.remove();
+            }
+        } else {
+            // 成功した場合はリスト全体を再描画して反映
+            renderHotkeysList();
+        }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('mousedown', handleMouseDown);
 }
 
-// 設定の更新
-function updateKeybinding(id, key) {
+// 設定の更新（追加・変更・削除対応）
+function updateKeybinding(id, newKey, oldKeyToReplace = null) {
     if (!appSettings.keybindings) appSettings.keybindings = {};
     
-    const cmd = COMMANDS_REGISTRY.find(c => c.id === id);
+    // 現在の設定を配列として取得
+    let currentKeys = getKeybindingsForCommand(id);
     
-    // キーが指定された場合
-    if (key) {
-        // デフォルトと同じなら設定から削除（デフォルト使用に戻す）
-        if (cmd && cmd.defaultKey === key) {
-            delete appSettings.keybindings[id];
+    if (oldKeyToReplace) {
+        // --- 既存キーの変更または削除 ---
+        if (newKey) {
+            // 置換 (Edit): 古いキーを探して新しいキーに変える
+            currentKeys = currentKeys.map(k => k === oldKeyToReplace ? newKey : k);
         } else {
-            // 変更値を保存
-            appSettings.keybindings[id] = key;
+            // 削除 (Remove): newKeyがnullの場合は削除
+            currentKeys = currentKeys.filter(k => k !== oldKeyToReplace);
         }
     } else {
-        // keyが null の場合 = 無効化
-        // 明示的に null を保存する
+        // --- 新規追加 ---
+        if (newKey) {
+            // 重複チェック: 同じキーがなければ追加
+            if (!currentKeys.includes(newKey)) {
+                currentKeys.push(newKey);
+            }
+        } else {
+            // 全削除 (リセットなどで使用)
+            currentKeys = [];
+        }
+    }
+
+    // 空配列になった場合は null (無効) として保存、それ以外は配列として保存
+    if (currentKeys.length === 0) {
         appSettings.keybindings[id] = null;
+    } else {
+        appSettings.keybindings[id] = currentKeys;
     }
     
     saveSettings();
@@ -6988,33 +7058,43 @@ document.addEventListener('keydown', (e) => {
     // 入力フォームや記録モード中は無視
     if (isRecordingKey) return;
     const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-    if ((activeTag === 'input' || activeTag === 'textarea') && !e.ctrlKey && !e.metaKey) return;
+    // テキスト入力中は、修飾キーなしのショートカットを無視（文字入力と競合するため）
+    if ((activeTag === 'input' || activeTag === 'textarea') && !e.ctrlKey && !e.metaKey && !e.altKey) return;
 
     // 現在のキーイベントを正規化 (Mod-s 等)
     const parts = [];
     if (e.metaKey || e.ctrlKey) parts.push('Mod');
     if (e.altKey) parts.push('Alt');
     if (e.shiftKey) parts.push('Shift');
-    let keyChar = e.key.toLowerCase();
-
-    // 特殊キーの補正
+    
+    let keyChar = e.key;
+    
+    // 特殊キーの名称統一 (CodeMirrorの形式に合わせる)
     if (keyChar === ' ') keyChar = 'Space';
-    // 注意: JPキーボード等での対応
-    if (keyChar === '@') keyChar = '@'; // Mod-@
-    if (keyChar === ';') keyChar = ';'; // Mod-; (Zoom In)
-    if (keyChar === '=') keyChar = '=';
+    else if (keyChar === 'ArrowUp') keyChar = 'ArrowUp';
+    else if (keyChar === 'ArrowDown') keyChar = 'ArrowDown';
+    else if (keyChar === 'ArrowLeft') keyChar = 'ArrowLeft';
+    else if (keyChar === 'ArrowRight') keyChar = 'ArrowRight';
+    else if (keyChar === 'Escape') keyChar = 'Escape';
+    else if (keyChar === 'Tab') keyChar = 'tab'; // Tabキーを小文字の 'tab' に統一
+    else if (keyChar.length === 1) keyChar = keyChar.toLowerCase(); // アルファベットは小文字に
 
     // 修飾キー単体の場合は無視
-    if (['control', 'shift', 'alt', 'meta'].includes(keyChar)) return;
+    if (['control', 'shift', 'alt', 'meta'].includes(keyChar.toLowerCase())) return;
 
     parts.push(keyChar);
     const currentKeyStr = parts.join('-');
 
     // グローバルコマンドのマッチングと実行
     const matchedCommand = COMMANDS_REGISTRY.find(cmd => {
+        // グローバルコンテキストのコマンドのみ対象
         if (cmd.context !== 'global') return false;
-        const assignedKey = getKeybinding(cmd.id);
-        return assignedKey === currentKeyStr;
+        
+        // 配列対応版のヘルパー関数を使って設定を取得
+        const keys = getKeybindingsForCommand(cmd.id);
+        
+        // 入力されたキーが、設定されたキー配列の中に含まれているかチェック
+        return keys.includes(currentKeyStr);
     });
 
     if (matchedCommand) {
