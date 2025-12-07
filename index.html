@@ -445,10 +445,14 @@
                             <button id="btn-hn" title="その他の見出し" style="font-weight: bold; font-size: 13px;">Hn
                                 ▼</button>
                             <div class="toolbar-icon-menu">
-                                <button class="dropdown-item" data-action="h1" title="見出し1" style="font-weight: bold;">H1</button>
-                                <button class="dropdown-item" data-action="h4" title="見出し4" style="font-weight: bold;">H4</button>
-                                <button class="dropdown-item" data-action="h5" title="見出し5" style="font-weight: bold;">H5</button>
-                                <button class="dropdown-item" data-action="h6" title="見出し6" style="font-weight: bold;">H6</button>
+                                <button class="dropdown-item" data-action="h1" title="見出し1"
+                                    style="font-weight: bold;">H1</button>
+                                <button class="dropdown-item" data-action="h4" title="見出し4"
+                                    style="font-weight: bold;">H4</button>
+                                <button class="dropdown-item" data-action="h5" title="見出し5"
+                                    style="font-weight: bold;">H5</button>
+                                <button class="dropdown-item" data-action="h6" title="見出し6"
+                                    style="font-weight: bold;">H6</button>
                             </div>
                         </div>
 
@@ -719,6 +723,7 @@
                                 <li class="settings-nav-item" data-section="editor">エディタ</li>
                                 <li class="settings-nav-item" data-section="appearance">外観</li>
                                 <li class="settings-nav-item" data-section="pdf">PDF設定</li>
+                                <li class="settings-nav-item" data-section="hotkeys">ホットキー (Hotkeys)</li>
                                 <li class="settings-nav-item" data-section="sync">クラウド同期</li>
                             </ul>
                         </div>
@@ -971,6 +976,41 @@
                                             <span class="label-desc">ファイル名をタイトルとして文書の先頭に追加します。</span>
                                         </div>
                                     </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-hotkeys">
+                                <h2>ホットキー (Hotkeys)</h2>
+
+                                <div class="hotkey-search-container">
+                                    <div class="search-input-wrapper">
+                                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                        </svg>
+                                        <input type="text" id="hotkey-search-input" placeholder="コマンドを検索..."
+                                            spellcheck="false">
+                                        <button id="btn-hotkey-filter-by-key" class="icon-btn" title="キー入力で検索">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                                stroke="currentColor" stroke-width="2">
+                                                <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+                                                <line x1="6" y1="8" x2="6" y2="8"></line>
+                                                <line x1="10" y1="8" x2="10" y2="8"></line>
+                                                <line x1="14" y1="8" x2="14" y2="8"></line>
+                                                <line x1="18" y1="8" x2="18" y2="8"></line>
+                                                <line x1="6" y1="12" x2="6" y2="12"></line>
+                                                <line x1="10" y1="12" x2="10" y2="12"></line>
+                                                <line x1="14" y1="12" x2="14" y2="12"></line>
+                                                <line x1="18" y1="12" x2="18" y2="12"></line>
+                                                <line x1="6" y1="16" x2="18" y2="16"></line>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div id="hotkey-filter-status" class="hidden">キーを入力して検索中... (Escで解除)</div>
+                                </div>
+
+                                <div id="hotkeys-list" class="hotkeys-list">
                                 </div>
                             </div>
 

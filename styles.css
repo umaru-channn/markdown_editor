@@ -3461,3 +3461,189 @@ body[data-theme="dark"] .settings-nav-item.active {
 #terminal-tabs-list:hover::-webkit-scrollbar-thumb {
     background: rgba(128, 128, 128, 0.6); /* 半透明のグレー */
 }
+
+/* ========== Hotkey Settings Styles ========== */
+.hotkey-search-container {
+    margin-bottom: 20px;
+}
+
+.search-input-wrapper {
+    display: flex;
+    align-items: center;
+    background-color: var(--sidebar-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+.search-input-wrapper input {
+    border: none;
+    background: transparent;
+    box-shadow: none !important; /* グローバルスタイルの打ち消し */
+    flex: 1;
+    padding-left: 8px;
+}
+
+.search-input-wrapper input:focus {
+    outline: none;
+}
+
+#hotkey-filter-status {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #007acc;
+    background-color: rgba(0, 122, 204, 0.1);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+/* Hotkey List Item */
+.hotkey-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--sidebar-border);
+}
+
+.hotkey-item:hover {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+body[data-theme="dark"] .hotkey-item:hover {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.hotkey-label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-color);
+}
+
+.hotkey-label .command-id {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+}
+
+.hotkey-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Key Badge (kbd style) */
+.kbd-shortcut {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--main-bg);
+    border: 1px solid var(--sidebar-border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 8px;
+    min-width: 24px;
+    height: 24px;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    color: var(--text-color);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.1s;
+}
+
+.kbd-shortcut:hover {
+    border-color: #999;
+}
+
+.kbd-shortcut.recording {
+    background-color: #007acc;
+    color: white;
+    border-color: #005a9e;
+    animation: pulse-border 1s infinite;
+}
+
+.kbd-shortcut.blank {
+    color: #888;
+    font-style: italic;
+    border-style: dashed;
+    background: transparent;
+}
+
+/* Reset / Clear Button */
+.hotkey-reset-btn {
+    opacity: 0.5;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.hotkey-reset-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+body[data-theme="dark"] .hotkey-reset-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes pulse-border {
+    0% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0.7); }
+    70% { box-shadow: 0 0 0 4px rgba(0, 122, 204, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0); }
+}
+
+/* キー設定ボタン群 */
+.hotkey-action-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-color);
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+.hotkey-action-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+body[data-theme="dark"] .hotkey-action-btn:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 追加ボタン */
+.add-btn:hover {
+    color: #007acc;
+    background-color: rgba(0, 122, 204, 0.1);
+}
+
+/* デフォルトに戻すボタン */
+.restore-btn {
+    color: #007acc;
+}
+
+/* 削除(無効化)ボタン */
+.clear-btn:hover {
+    color: #e81123;
+    background-color: rgba(232, 17, 35, 0.1);
+}
+
+/* 無効化状態のバッジスタイル */
+.kbd-shortcut.disabled {
+    color: #aaa;
+    border-style: dashed;
+    background-color: transparent;
+    opacity: 0.7;
+}

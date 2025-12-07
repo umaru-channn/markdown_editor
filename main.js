@@ -140,6 +140,8 @@ function loadAppSettings() {
     defaultImageLocation: '.',
     // デフォルトの除外設定
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
+    // キーバインド設定
+    keybindings: {},
     // PDFエクスポートのデフォルト設定
     pdfOptions: {
       pageSize: 'A4',

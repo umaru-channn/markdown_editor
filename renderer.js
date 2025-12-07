@@ -10,6 +10,7 @@
  */
 
 const path = require('path');
+const { webFrame } = require('electron'); 
 const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
@@ -50,6 +51,7 @@ const { diff: diffLanguage } = require("@codemirror/legacy-modes/mode/diff");
 // @codemirror/search から必要なクラスをインポート
 const {
     search,
+    searchKeymap,
     setSearchQuery,
     SearchQuery,
     findNext,
@@ -180,6 +182,106 @@ let appSettings = {
         pageRanges: ''
     }
 };
+
+// ========== Command Registry ==========
+const COMMANDS_REGISTRY = [
+    // --- Global Commands ---
+    { id: 'file:save', name: 'ファイルを保存', defaultKey: 'Mod-s', context: 'global', run: () => saveCurrentFile() },
+    { id: 'file:save-as', name: '名前を付けて保存', defaultKey: 'Mod-Shift-s', context: 'global', run: () => saveCurrentFile(true) },
+    { id: 'file:new-tab', name: '新規タブ', defaultKey: 'Mod-t', context: 'global', run: () => createNewTab() },
+    { id: 'file:close-tab', name: 'タブを閉じる', defaultKey: 'Mod-w', context: 'global', run: () => { 
+        const tab = document.querySelector('.editor-tabs .tab.active'); if(tab) closeTab(tab, tab.id==='tab-settings'); 
+    }},
+    { id: 'file:reopen-tab', name: '閉じたタブを開く', defaultKey: 'Mod-Shift-t', context: 'global', run: () => reopenLastClosedTab() },
+    
+    // サイドバー切替 (太字 Ctrl+B との競合を避けて Shift を追加)
+    { id: 'view:toggle-sidebar', name: 'サイドバーの表示/非表示', defaultKey: 'Mod-Shift-b', context: 'global', run: () => document.getElementById('btn-toggle-leftpane')?.click() }, 
+    // ターミナル切替 (Ctrl+@)
+    { id: 'view:toggle-terminal', name: 'ターミナルの表示/非表示', defaultKey: 'Mod-@', context: 'global', run: () => { isTerminalVisible=!isTerminalVisible; updateTerminalVisibility(); } },
+    { id: 'view:toggle-right-pane', name: '右パネルの表示/非表示', defaultKey: 'Mod-l', context: 'global', run: () => { isRightActivityBarVisible=!isRightActivityBarVisible; updateTerminalVisibility(); } },
+    
+    // 1. アプリ全体(ウィンドウ)の拡大縮小 (新規追加)
+    // 拡大: Ctrl + Shift + + (US配列等では = キー)
+    { id: 'view:window-zoom-in', name: 'ウィンドウ拡大', defaultKey: 'Mod-Shift-+', context: 'global', run: () => adjustWindowZoom(0.5) },
+    // 縮小: Ctrl + Shift + -
+    { id: 'view:window-zoom-out', name: 'ウィンドウ縮小', defaultKey: 'Mod-Shift-=', context: 'global', run: () => adjustWindowZoom(-0.5) },
+    // ウィンドウリセット: Ctrl + 0 (標準的なリセットキー)
+    { id: 'view:window-zoom-reset', name: 'ウィンドウリセット', defaultKey: 'Mod-Alt-0', context: 'global', run: () => webFrame.setZoomLevel(0) },
+
+    // 2. 文字サイズ(エディタ)の拡大縮小
+    // 既存のキー割り当て(Ctrl+; / Ctrl+-)を維持
+    { id: 'view:font-zoom-in', name: '文字サイズ拡大', defaultKey: 'Mod-;', context: 'global', run: () => adjustFontSize(2) },
+    { id: 'view:font-zoom-out', name: '文字サイズ縮小', defaultKey: 'Mod--', context: 'global', run: () => adjustFontSize(-2) },
+    // フォントリセット: Ctrl + Alt + 0 (ウィンドウリセットと区別するため変更)
+    { id: 'view:font-zoom-reset', name: '文字サイズリセット', defaultKey: 'Mod-0', context: 'global', run: () => adjustFontSize(0) },
+
+    // --- Editor Commands (CodeMirror) ---
+    // 装飾
+    { id: 'editor:bold', name: '太字', defaultKey: 'Mod-b', context: 'editor', run: (view) => toggleMark(view, "**") },
+    { id: 'editor:italic', name: '斜体', defaultKey: 'Mod-i', context: 'editor', run: (view) => toggleMark(view, "*") },
+    // 取り消し線 (SaveAsとの競合を避けて Mod-Shift-x に変更)
+    { id: 'editor:strikethrough', name: '取り消し線', defaultKey: 'Mod-Shift-x', context: 'editor', run: (view) => toggleMark(view, "~~") },
+    { id: 'editor:highlight', name: 'ハイライト', defaultKey: 'Mod-Shift-h', context: 'editor', run: (view) => toggleMark(view, "==") },
+    { id: 'editor:inline-code', name: 'インラインコード', defaultKey: 'Mod-e', context: 'editor', run: (view) => toggleMark(view, "`") },
+
+    // 見出し
+    { id: 'editor:h1', name: '見出し 1', defaultKey: 'Mod-1', context: 'editor', run: (view) => toggleLinePrefix(view, "#") },
+    { id: 'editor:h2', name: '見出し 2', defaultKey: 'Mod-2', context: 'editor', run: (view) => toggleLinePrefix(view, "##") },
+    { id: 'editor:h3', name: '見出し 3', defaultKey: 'Mod-3', context: 'editor', run: (view) => toggleLinePrefix(view, "###") },
+    { id: 'editor:h4', name: '見出し 4', defaultKey: 'Mod-4', context: 'editor', run: (view) => toggleLinePrefix(view, "####") },
+    { id: 'editor:h5', name: '見出し 5', defaultKey: 'Mod-5', context: 'editor', run: (view) => toggleLinePrefix(view, "#####") },
+    { id: 'editor:h6', name: '見出し 6', defaultKey: 'Mod-6', context: 'editor', run: (view) => toggleLinePrefix(view, "######") },
+
+    // 挿入・ブロック
+    { id: 'editor:link', name: 'リンク挿入', defaultKey: 'Mod-k', context: 'editor', run: (view) => insertLink(view) },
+    { id: 'editor:code-block', name: 'コードブロック', defaultKey: 'Mod-Shift-c', context: 'editor', run: (view) => insertCodeBlock(view) },
+    { id: 'editor:quote', name: '引用', defaultKey: 'Mod-Shift-.', context: 'editor', run: (view) => toggleLinePrefix(view, ">") },
+    
+    // リスト
+    { id: 'editor:list-bullet', name: '箇条書きリスト', defaultKey: 'Mod-Shift-8', context: 'editor', run: (view) => toggleList(view, 'ul') },
+    { id: 'editor:list-number', name: '番号付きリスト', defaultKey: 'Mod-Shift-9', context: 'editor', run: (view) => toggleList(view, 'ol') },
+    { id: 'editor:list-task', name: 'タスクリスト', defaultKey: 'Mod-Shift-l', context: 'editor', run: (view) => toggleList(view, 'task') },
+
+    // 検索・置換
+    { id: 'editor:search', name: '検索', defaultKey: 'Mod-f', context: 'editor', run: () => searchWidgetControl?.open() },
+    { id: 'editor:replace', name: '置換', defaultKey: 'Mod-h', context: 'editor', run: () => searchWidgetControl?.toggleReplace() },
+
+    // --- 挿入機能 (既存関数のショートカット化) ---
+    { id: 'editor:insert-image', name: '画像挿入', defaultKey: 'Mod-Shift-m', context: 'editor', run: (view) => insertImage(view) },
+    { id: 'editor:insert-table', name: 'テーブル挿入', defaultKey: 'Mod-Alt-t', context: 'editor', run: (view) => insertTable(view) }, // Mod-t (新規タブ) と被らないようにShift
+    { id: 'editor:insert-hr', name: '区切り線', defaultKey: 'Mod-Alt-h', context: 'editor', run: (view) => insertHorizontalRule(view) },
+    { id: 'editor:insert-page-break', name: '改ページ', defaultKey: 'Mod-Enter', context: 'editor', run: (view) => insertPageBreak(view) },
+
+    // タブ切り替え (Ctrl+Tab / Ctrl+Shift+Tab)
+    { id: 'view:next-tab', name: '次のタブ', defaultKey: 'Mod-tab', context: 'global', run: () => switchTab(1) },
+    { id: 'view:prev-tab', name: '前のタブ', defaultKey: 'Mod-Shift-tab', context: 'global', run: () => switchTab(-1) }
+];
+
+/**
+ * 現在の設定（appSettings.keybindings）とデフォルトをマージして
+ * キー割り当てを取得するヘルパー
+ */
+function getKeybinding(commandId) {
+    // 設定に値があればそれを返す（null含む）
+    if (appSettings.keybindings && appSettings.keybindings[commandId] !== undefined) {
+        return appSettings.keybindings[commandId];
+    }
+    // 設定がなければデフォルトを返す
+    const cmd = COMMANDS_REGISTRY.find(c => c.id === commandId);
+    return cmd ? cmd.defaultKey : null;
+}
+
+/**
+ * キー文字列 (Mod-Shift-s) を表示用 (Ctrl+Shift+S) に変換
+ */
+function formatKeyDisplay(keyStr) {
+    if (!keyStr) return 'Blank';
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    return keyStr
+        .replace('Mod', isMac ? 'Cmd' : 'Ctrl')
+        .replace(/-/g, ' + ')
+        .toUpperCase();
+}
 
 // CodeMirror Compartments for dynamic reconfiguration
 const themeCompartment = new Compartment();
@@ -1683,7 +1785,55 @@ function setupSearchWidget(view) {
     };
 }
 
-// ========== Editor State Helper (Fix for Issue 2) ==========
+// キーマップを動的に入れ替えるためのコンパートメント
+const keybindingsCompartment = new Compartment();
+// 現在の設定に基づいてキーマップ配列を生成するヘルパー関数
+function getCombinedKeymap() {
+    const dynamicKeymap = [];
+    
+    // ユーザー設定のコマンド (COMMANDS_REGISTRY)
+    COMMANDS_REGISTRY.filter(c => c.context === 'editor').forEach(cmd => {
+        // 現在のキー設定を取得
+        let key = null;
+        if (appSettings.keybindings && appSettings.keybindings[cmd.id] !== undefined) {
+            key = appSettings.keybindings[cmd.id];
+        } else {
+            key = cmd.defaultKey;
+        }
+
+        // key が null (無効化) でない場合のみ登録
+        if (key) {
+            dynamicKeymap.push({
+                key: key,
+                run: (view) => {
+                    cmd.run(view);
+                    return true; // イベント伝播を停止
+                }
+            });
+        }
+    });
+
+    // 検索ウィジェット用のEscapeキー処理
+    dynamicKeymap.push({
+        key: "Escape",
+        run: (view) => {
+            const widget = document.getElementById('custom-search-widget');
+            if (widget && !widget.classList.contains('hidden')) {
+                widget.classList.add('hidden');
+                view.focus();
+                return true;
+            }
+            return false;
+        }
+    });
+
+    // リスト操作(Enter/Tab等)と結合
+    return [
+        ...dynamicKeymap,
+        ...obsidianLikeListKeymap
+    ];
+}
+
 function createEditorState(content, filePath) {
     const initialTheme = appSettings.theme === 'dark' ? oneDark : [];
     const initialStyle = EditorView.theme({
@@ -1709,43 +1859,27 @@ function createEditorState(content, filePath) {
             indentUnitCompartment.of(indentUnit.of(indentString)),
             tabSizeCompartment.of(EditorState.tabSize.of(appSettings.tabSize)),
             lineWrappingCompartment.of(appSettings.wordWrap ? EditorView.lineWrapping : []),
-            Prec.highest(keymap.of(obsidianLikeListKeymap)),
+            
+            // コンパートメントを使って動的キーマップを適用
+            // これにより、後から reconfigure でキー設定だけを即座に入れ替え可能になります
+            keybindingsCompartment.of(Prec.highest(keymap.of(getCombinedKeymap()))),
+
             pasteHandler,
             dropHandler,
             history(),
             search(),
             drawSelection(),
             dropCursor(),
-            Prec.highest(keymap.of([
-                { key: "Mod-f", run: () => { searchWidgetControl?.open(); return true; } },
-                { key: "Mod-h", run: () => { searchWidgetControl?.toggleReplace(); return true; } },
-                {
-                    key: "Escape", run: (view) => {
-                        const widget = document.getElementById('custom-search-widget');
-                        if (widget && !widget.classList.contains('hidden')) {
-                            widget.classList.add('hidden');
-                            view.focus();
-                            return true;
-                        }
-                        return false;
-                    }
-                },
-                { key: "Mod-b", run: (view) => { toggleMark(view, "**"); return true; } },
-                { key: "Mod-i", run: (view) => { toggleMark(view, "*"); return true; } },
-                { key: "Mod-Shift-s", run: (view) => { toggleMark(view, "~~"); return true; } },
-                { key: "Mod-1", run: (view) => { toggleLinePrefix(view, "#"); return true; } },
-                { key: "Mod-2", run: (view) => { toggleLinePrefix(view, "##"); return true; } },
-                { key: "Mod-3", run: (view) => { toggleLinePrefix(view, "###"); return true; } },
-                { key: "Mod-4", run: (view) => { toggleLinePrefix(view, "####"); return true; } },
-                { key: "Mod-5", run: (view) => { toggleLinePrefix(view, "#####"); return true; } },
-                { key: "Mod-6", run: (view) => { toggleLinePrefix(view, "######"); return true; } },
-            ])),
-            keymap.of([...defaultKeymap, ...historyKeymap]),
+            
+            // デフォルトキーマップ (優先度低)
+            keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+            
             syntaxHighlighting(defaultHighlightStyle),
             languageCompartment.of(getLanguageExtensions(filePath)),
             activeLineCompartment.of(appSettings.highlightActiveLine ? highlightActiveLine() : []),
             autoCloseBracketsCompartment.of(appSettings.autoCloseBrackets ? closeBrackets() : []),
             lineNumbersCompartment.of(appSettings.showLineNumbers ? lineNumbers() : []),
+            
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
                     const isExternal = update.transactions.some(tr => tr.annotation(ExternalChange));
@@ -1754,6 +1888,294 @@ function createEditorState(content, filePath) {
             })
         ]
     });
+}
+
+// ========== Hotkey UI Logic ==========
+
+let isRecordingKey = false;
+let hotkeySearchFilter = "";
+let hotkeyKeyFilter = null; // null or "Mod-s" string
+
+// リストの描画
+function renderHotkeysList() {
+    const listContainer = document.getElementById('hotkeys-list');
+    if (!listContainer) return;
+    listContainer.innerHTML = '';
+
+    COMMANDS_REGISTRY.forEach(cmd => {
+        // 現在の設定キーを取得 (設定がない場合は undefined)
+        // null が明示的に設定されている場合は「無効」とする
+        let currentKey = appSettings.keybindings && appSettings.keybindings[cmd.id];
+        
+        // 設定値がない場合、デフォルトを使用するかどうか
+        // 今回の仕様変更で「設定値が null なら無効」「undefined ならデフォルト」と区別が必要
+        // appSettings.keybindings[cmd.id] === null -> 無効化済み
+        // appSettings.keybindings[cmd.id] === undefined -> デフォルト使用
+        
+        const isDefault = currentKey === undefined;
+        const effectiveKey = isDefault ? cmd.defaultKey : currentKey;
+        
+        // 表示用文字列
+        const displayKey = effectiveKey ? formatKeyDisplay(effectiveKey) : '---'; // 無効時は ---
+
+        // テキストフィルター
+        if (hotkeySearchFilter) {
+            const lowerFilter = hotkeySearchFilter.toLowerCase();
+            if (!cmd.name.toLowerCase().includes(lowerFilter) && !cmd.id.includes(lowerFilter)) {
+                return;
+            }
+        }
+        // キーフィルター
+        if (hotkeyKeyFilter) {
+            if (effectiveKey !== hotkeyKeyFilter) return;
+        }
+
+        // 行要素の作成
+        const row = document.createElement('div');
+        row.className = 'hotkey-item';
+        
+        // デフォルトと異なる（変更済み or 無効化済み）場合に「デフォルトに戻す」ボタンを表示
+        const showRestoreBtn = !isDefault;
+        
+        // キーが設定されている（有効）場合に「削除（×）」ボタンを表示
+        const showClearBtn = effectiveKey !== null;
+
+        row.innerHTML = `
+            <div class="hotkey-label">
+                <div class="command-name">${cmd.name}</div>
+                <div class="command-id">${cmd.id}</div>
+            </div>
+            <div class="hotkey-controls">
+                <div class="kbd-shortcut ${!effectiveKey ? 'disabled' : ''}" data-id="${cmd.id}" title="クリックしてキーを変更">
+                    ${displayKey}
+                </div>
+
+                <button class="hotkey-action-btn add-btn" title="ショートカットを追加/変更" data-id="${cmd.id}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+
+                ${showRestoreBtn ? `
+                <button class="hotkey-action-btn restore-btn" title="デフォルトに戻す" data-id="${cmd.id}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                        <path d="M3 3v5h5"></path>
+                    </svg>
+                </button>
+                ` : ''}
+
+                ${showClearBtn ? `
+                <button class="hotkey-action-btn clear-btn" title="ショートカットを無効化" data-id="${cmd.id}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+                ` : ''}
+            </div>
+        `;
+
+        // イベントリスナー設定
+
+        // 1. キーバッジクリック -> 変更
+        const badge = row.querySelector('.kbd-shortcut');
+        badge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startRecordingKey(cmd.id, badge);
+        });
+
+        // 2. 追加ボタン (+) -> 変更 (バッジクリックと同じ挙動)
+        const addBtn = row.querySelector('.add-btn');
+        if (addBtn) {
+            addBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                startRecordingKey(cmd.id, badge);
+            });
+        }
+
+        // 3. デフォルトに戻すボタン (くるくる)
+        const restoreBtn = row.querySelector('.restore-btn');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // 設定から削除 = デフォルトに戻る
+                if (appSettings.keybindings) {
+                    delete appSettings.keybindings[cmd.id];
+                }
+                saveSettings();
+                
+                // エディタのキーマップ更新 (デフォルト値で再構成される)
+                if (globalEditorView) {
+                    globalEditorView.dispatch({
+                        effects: keybindingsCompartment.reconfigure(
+                            Prec.highest(keymap.of(getCombinedKeymap()))
+                        )
+                    });
+                }
+                renderHotkeysList();
+                showNotification('デフォルト設定に戻しました', 'success');
+            });
+        }
+
+        // 4. 無効化ボタン (×) -> null を設定して無効化
+        const clearBtn = row.querySelector('.clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                updateKeybinding(cmd.id, null); // nullを保存して無効化
+                renderHotkeysList();
+                showNotification('ショートカットを無効化しました', 'info');
+            });
+        }
+
+        listContainer.appendChild(row);
+    });
+}
+
+// キー入力の記録モード
+function startRecordingKey(commandId, element) {
+    if (isRecordingKey) return;
+    isRecordingKey = true;
+
+    const originalText = element.textContent;
+    element.textContent = 'Type key...';
+    element.classList.add('recording');
+
+    const handleKeyDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // 修飾キーのみの場合は無視
+        if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+        // キーの生成 (例: Mod-Shift-f)
+        const parts = [];
+        if (e.metaKey || e.ctrlKey) parts.push('Mod');
+        if (e.altKey) parts.push('Alt');
+        if (e.shiftKey) parts.push('Shift');
+
+        // Key名 (大文字小文字対応)
+        let keyChar = e.key;
+        if (keyChar === ' ') keyChar = 'Space';
+        if (keyChar.length === 1) keyChar = keyChar.toLowerCase();
+
+        parts.push(keyChar);
+        const newKeyString = parts.join('-');
+
+        // 保存
+        updateKeybinding(commandId, newKeyString);
+
+        cleanup();
+    };
+
+    const handleMouseDown = (e) => {
+        // 外部クリックでキャンセル
+        if (e.target !== element) {
+            cleanup(true);
+        }
+    };
+
+    const cleanup = (cancelled = false) => {
+        isRecordingKey = false;
+        element.classList.remove('recording');
+        window.removeEventListener('keydown', handleKeyDown, true);
+        window.removeEventListener('mousedown', handleMouseDown);
+        if (cancelled) element.textContent = originalText;
+        else renderHotkeysList();
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('mousedown', handleMouseDown);
+}
+
+// 設定の更新
+function updateKeybinding(id, key) {
+    if (!appSettings.keybindings) appSettings.keybindings = {};
+    
+    const cmd = COMMANDS_REGISTRY.find(c => c.id === id);
+    
+    // キーが指定された場合
+    if (key) {
+        // デフォルトと同じなら設定から削除（デフォルト使用に戻す）
+        if (cmd && cmd.defaultKey === key) {
+            delete appSettings.keybindings[id];
+        } else {
+            // 変更値を保存
+            appSettings.keybindings[id] = key;
+        }
+    } else {
+        // keyが null の場合 = 無効化
+        // 明示的に null を保存する
+        appSettings.keybindings[id] = null;
+    }
+    
+    saveSettings();
+    
+    // 現在開いているエディタのキーマップを即座に更新
+    if (globalEditorView) {
+        globalEditorView.dispatch({
+            effects: keybindingsCompartment.reconfigure(
+                Prec.highest(keymap.of(getCombinedKeymap()))
+            )
+        });
+    }
+}
+
+// 検索・フィルター機能のセットアップ
+function setupHotkeySearch() {
+    const input = document.getElementById('hotkey-search-input');
+    const btnKeyFilter = document.getElementById('btn-hotkey-filter-by-key');
+    const status = document.getElementById('hotkey-filter-status');
+
+    if (input) {
+        input.addEventListener('input', (e) => {
+            hotkeySearchFilter = e.target.value;
+            hotkeyKeyFilter = null;
+            status.classList.add('hidden');
+            renderHotkeysList();
+        });
+    }
+
+    if (btnKeyFilter) {
+        btnKeyFilter.addEventListener('click', () => {
+            status.classList.remove('hidden');
+            status.textContent = 'キーを入力してください...';
+
+            const handler = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+                const parts = [];
+                if (e.metaKey || e.ctrlKey) parts.push('Mod');
+                if (e.altKey) parts.push('Alt');
+                if (e.shiftKey) parts.push('Shift');
+                let keyChar = e.key;
+                if (keyChar.length === 1) keyChar = keyChar.toLowerCase();
+                parts.push(keyChar);
+
+                hotkeyKeyFilter = parts.join('-');
+                hotkeySearchFilter = "";
+                input.value = "";
+
+                status.textContent = `Filter: ${formatKeyDisplay(hotkeyKeyFilter)} (Click to clear)`;
+                renderHotkeysList();
+
+                window.removeEventListener('keydown', handler, true);
+            };
+            window.addEventListener('keydown', handler, true);
+        });
+    }
+
+    if (status) {
+        status.addEventListener('click', () => {
+            hotkeyKeyFilter = null;
+            status.classList.add('hidden');
+            renderHotkeysList();
+        });
+    }
 }
 
 function initEditor() {
@@ -5254,6 +5676,16 @@ window.addEventListener('load', async () => {
     setupSyncSettings();
     setupSettingsNavigation(); // 設定画面のナビゲーション初期化
 
+    setupHotkeySearch();
+
+    // 設定画面のメニューがクリックされたらリストを描画
+    const hotkeyNav = document.querySelector('.settings-nav-item[data-section="hotkeys"]');
+    if (hotkeyNav) {
+        hotkeyNav.addEventListener('click', () => {
+            renderHotkeysList();
+        });
+    }
+
     // 状態監視リスナー
     if (window.electronAPI && window.electronAPI.onSyncStatusChange) {
         window.electronAPI.onSyncStatusChange((status) => {
@@ -5789,7 +6221,7 @@ function reopenLastClosedTab() {
         // 未保存マーク付きで復元
         tab.innerHTML = `${targetName} ● <span class="close-tab" data-filepath="${targetPath}">×</span>`;
         if (editorTabsContainer) editorTabsContainer.appendChild(tab);
-        
+
         // 状態を復元
         fileModificationState.set(targetPath, true);
         switchToFile(targetPath);
@@ -5813,6 +6245,38 @@ function switchToLastFileOrReadme() {
         }
     } else {
         showWelcomeReadme();
+    }
+}
+
+/**
+ * タブを切り替える関数 (循環対応)
+ * @param {number} direction - 1: 次のタブ, -1: 前のタブ
+ */
+function switchTab(direction) {
+    const tabs = Array.from(document.querySelectorAll('.editor-tabs .tab'));
+    if (tabs.length <= 1) return;
+
+    const activeTab = document.querySelector('.editor-tabs .tab.active');
+    // アクティブなタブがない場合は先頭を選択
+    if (!activeTab) {
+        const target = tabs[0];
+        if (target.id === 'tab-settings') openSettingsTab();
+        else if (target.dataset.filepath) switchToFile(target.dataset.filepath);
+        return;
+    }
+
+    const currentIndex = tabs.indexOf(activeTab);
+    // 循環するようにインデックスを計算 (末尾→先頭、先頭→末尾)
+    let nextIndex = (currentIndex + direction) % tabs.length;
+    if (nextIndex < 0) nextIndex = tabs.length - 1;
+
+    const targetTab = tabs[nextIndex];
+    
+    // タブの種類に応じて切り替え
+    if (targetTab.id === 'tab-settings') {
+        openSettingsTab();
+    } else if (targetTab.dataset.filepath) {
+        switchToFile(targetTab.dataset.filepath);
     }
 }
 
@@ -6485,8 +6949,24 @@ if (document.getElementById('btn-new-folder')) {
     document.getElementById('btn-new-folder').addEventListener('click', () => showCreationInput(true));
 }
 
+// ========== ウィンドウズーム調整用ヘルパー ==========
+function adjustWindowZoom(delta) {
+    const currentZoom = webFrame.getZoomLevel();
+    webFrame.setZoomLevel(currentZoom + delta);
+}
+
 // ========== フォントサイズ調整用ヘルパー ==========
 function adjustFontSize(delta) {
+
+    // deltaが0の場合はリセット処理
+    if (delta === 0) {
+        appSettings.fontSize = '16px';
+        saveSettings();
+        applySettingsToUI();
+        updateEditorSettings();
+        return;
+    }
+
     const currentSize = parseInt(appSettings.fontSize);
     if (isNaN(currentSize)) return;
 
@@ -6505,105 +6985,42 @@ function adjustFontSize(delta) {
 
 // ========== ショートカットキーと削除機能 ==========
 document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    // 入力フォームや記録モード中は無視
+    if (isRecordingKey) return;
+    const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+    if ((activeTag === 'input' || activeTag === 'textarea') && !e.ctrlKey && !e.metaKey) return;
+
+    // 現在のキーイベントを正規化 (Mod-s 等)
+    const parts = [];
+    if (e.metaKey || e.ctrlKey) parts.push('Mod');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    let keyChar = e.key.toLowerCase();
+
+    // 特殊キーの補正
+    if (keyChar === ' ') keyChar = 'Space';
+    // 注意: JPキーボード等での対応
+    if (keyChar === '@') keyChar = '@'; // Mod-@
+    if (keyChar === ';') keyChar = ';'; // Mod-; (Zoom In)
+    if (keyChar === '=') keyChar = '=';
+
+    // 修飾キー単体の場合は無視
+    if (['control', 'shift', 'alt', 'meta'].includes(keyChar)) return;
+
+    parts.push(keyChar);
+    const currentKeyStr = parts.join('-');
+
+    // グローバルコマンドのマッチングと実行
+    const matchedCommand = COMMANDS_REGISTRY.find(cmd => {
+        if (cmd.context !== 'global') return false;
+        const assignedKey = getKeybinding(cmd.id);
+        return assignedKey === currentKeyStr;
+    });
+
+    if (matchedCommand) {
         e.preventDefault();
-        saveCurrentFile();
-    }
-
-    // フォントサイズ拡大縮小 (Zoom In/Out)
-    // Ctrl + + / Ctrl + = / Ctrl + ; (JIS)
-    if (e.ctrlKey || e.metaKey) {
-        if (e.key === '+' || e.key === ';' || e.key === '=') {
-            e.preventDefault();
-            adjustFontSize(2); // +2px
-        } else if (e.key === '-') {
-            e.preventDefault();
-            adjustFontSize(-2); // -2px
-        } else if (e.key === '0') {
-            e.preventDefault();
-            appSettings.fontSize = '16px'; // リセット
-            saveSettings();
-            applySettingsToUI();
-            updateEditorSettings();
-        }
-    }
-
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        const activeTab = document.querySelector('.editor-tabs .tab.active');
-        if (activeTab) {
-            if (activeTab.id === 'tab-settings') {
-                closeTab(activeTab, true);
-            }
-            else if (activeTab.dataset.filepath) {
-                closeTab(activeTab, false);
-            }
-        }
-    }
-
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
-        e.preventDefault();
-
-        const tabs = Array.from(document.querySelectorAll('.editor-tabs .tab'));
-        if (tabs.length <= 1) return;
-
-        const activeIndex = tabs.findIndex(tab => tab.classList.contains('active'));
-        if (activeIndex === -1) return;
-
-        let nextIndex;
-        if (e.shiftKey) {
-            nextIndex = (activeIndex - 1 + tabs.length) % tabs.length;
-        } else {
-            nextIndex = (activeIndex + 1) % tabs.length;
-        }
-
-        tabs[nextIndex].click();
-    }
-
-    if (e.key === 'Delete' || (e.metaKey && e.key === 'Backspace')) {
-        const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-        if (activeTag === 'input' || activeTag === 'textarea' || document.activeElement.classList.contains('cm-content')) return;
-
-        const selectedItem = document.getElementById('file-tree-container')?.querySelector('.tree-item.selected');
-        if (selectedItem) {
-            if (selectedItem.classList.contains('creation-mode')) return;
-
-            const path = selectedItem.dataset.path;
-            const name = selectedItem.dataset.name;
-            if (path && name) {
-                // 確認ポップアップを消して直接実行
-                confirmAndDelete(path);
-            }
-        }
-    }
-
-    // Ctrl+T (新規タブ作成)
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't' && !e.shiftKey) {
-        e.preventDefault();
-        createNewTab();
-        return;
-    }
-
-    // Ctrl+Shift+T (閉じたタブを開く)
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't' && e.shiftKey) {
-        e.preventDefault();
-        reopenLastClosedTab();
-        return;
-    }
-
-    // Ctrl+J または Ctrl+@ (ターミナルの表示/非表示)
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'j' || e.key === '@')) {
-        e.preventDefault();
-        
-        // ターミナルの表示状態をトグル
-        if (isTerminalVisible) {
-            isTerminalVisible = false;
-        } else {
-            isTerminalVisible = true;
-            isPdfPreviewVisible = false; // PDFプレビューとは排他表示にする
-        }
-        updateTerminalVisibility(); // 画面更新
-        return;
+        console.log('Execute Global Command:', matchedCommand.id);
+        matchedCommand.run();
     }
 });
 
