@@ -593,15 +593,16 @@ class CodeBlockLanguageWidget extends WidgetType {
         selectBtn.onmousedown = (e) => { e.preventDefault(); this.showDropdown(view, selectBtn); };
         container.appendChild(selectBtn);
 
-        // 2. バージョン選択 (Pythonのみ表示)
+        // 2. バージョン/環境選択 (Python および Shell系で表示)
         const normLang = (this.lang || "").toLowerCase();
-        if (normLang === 'python' || normLang === 'py') {
+        if (['python', 'py', 'bash', 'sh', 'shell', 'zsh'].includes(normLang)) {
             const verBtn = document.createElement("button");
             verBtn.className = "cm-language-select-btn";
             verBtn.style.marginLeft = "4px";
             verBtn.style.color = "#666";
+            // 選択中のラベルを表示 (初期値は Default)
             verBtn.innerHTML = `<span>${this.selectedLabel}</span> <span class="arrow">▼</span>`;
-            verBtn.title = "実行バージョンを選択";
+            verBtn.title = "実行環境を選択";
 
             verBtn.onmousedown = (e) => {
                 e.preventDefault();
@@ -652,7 +653,7 @@ class CodeBlockLanguageWidget extends WidgetType {
         let versions = [];
         try {
             versions = await window.electronAPI.getLangVersions(this.lang);
-        } catch (e) {}
+        } catch (e) { }
 
         const items = [{ label: "Default (System)", path: null }, ...versions];
 
@@ -714,8 +715,14 @@ class CodeBlockLanguageWidget extends WidgetType {
                 btn.textContent = "⏳";
                 btn.disabled = true;
 
+                // 現在開いているファイルのディレクトリパスを取得
+                // (renderer.js の switchToFile 関数でセットされているデータ属性を使用)
+                const currentFileDir = document.body.dataset.activeFileDir || null;
+
                 try {
-                    const result = await window.electronAPI.executeCode(codeText, this.lang, this.selectedPath);
+                    // 第4引数に currentFileDir を渡す
+                    const result = await window.electronAPI.executeCode(codeText, this.lang, this.selectedPath, currentFileDir);
+
                     const resultText = result.success ? result.stdout : result.stderr;
                     const isError = !result.success || (result.stderr && result.stderr.trim().length > 0);
                     const finalText = resultText || (result.success ? "(No output)" : "(Unknown error)");

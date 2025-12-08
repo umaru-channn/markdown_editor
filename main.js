@@ -123,7 +123,7 @@ function saveTerminalState() {
  */
 function loadAppSettings() {
   const settingsPath = path.join(app.getPath('userData'), 'app-settings.json');
-  
+
   // デフォルト設定を先に定義する
   const defaultSettings = {
     fontSize: '16px',
@@ -172,7 +172,7 @@ function loadAppSettings() {
   } catch (error) {
     console.error('Failed to load app settings:', error);
   }
-  
+
   // ファイルがない場合はデフォルトを返す
   return defaultSettings;
 }
@@ -2175,7 +2175,7 @@ ipcMain.handle('read-directory', async (event, dirPath) => {
     const excludePatterns = settings.excludePatterns || '';
 
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    
+
     const items = entries
       .filter(entry => {
         // 除外リストにある名前はスキップ
@@ -3221,7 +3221,7 @@ ipcMain.handle('download-image', async (event, url, targetDir) => {
 // ヘルパー: コマンドが存在するかチェックする
 const checkCommandExists = (command) => {
   return new Promise((resolve) => {
-    const checkCmd = process.platform === 'win32' ? `where ${command}` : `which ${command}`;
+    const checkCmd = process.platform === 'win32' ? `where "${command}"` : `which "${command}"`;
     exec(checkCmd, (error) => {
       resolve(!error);
     });
@@ -3354,25 +3354,105 @@ ipcMain.handle('get-lang-versions', async (event, lang) => {
       });
     });
   }
+
+  // Shell / Bash (WSL, Git Bash detection)
+  if (['bash', 'sh', 'shell', 'zsh'].includes(language)) {
+    const shells = [];
+
+    // Windows環境のみ検出ロジックを実装
+    if (process.platform === 'win32') {
+      // 1. WSL
+      try {
+        await execPromise('wsl --status');
+        shells.push({ label: 'WSL (Ubuntu/Default)', path: 'wsl' });
+      } catch (e) { /* WSL not found */ }
+
+      // 2. Git Bash (一般的なインストールパスを確認)
+      const gitBashPaths = [
+        'C:\\Program Files\\Git\\bin\\bash.exe',
+        'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+        // ユーザーごとのインストール先 (AppData)
+        path.join(os.homedir(), 'AppData\\Local\\Programs\\Git\\bin\\bash.exe'),
+      ];
+
+      for (const p of gitBashPaths) {
+        if (fs.existsSync(p)) {
+          shells.push({ label: 'Git Bash', path: p });
+          break; // ひとつ見つかれば十分
+        }
+      }
+    } else {
+      // macOS/Linux defaults
+      shells.push({ label: '/bin/bash', path: '/bin/bash' });
+      shells.push({ label: '/bin/zsh', path: '/bin/zsh' });
+    }
+
+    return shells;
+  }
+
   return [];
 });
 
 // コード実行ハンドラ
-ipcMain.handle('execute-code', async (event, code, language, execPath = null) => {
+// 第四引数に workingDir (カレントディレクトリ) を追加
+ipcMain.handle('execute-code', async (event, code, language, execPath = null, workingDir = null) => {
   return new Promise(async (resolve) => {
     const tempDir = os.tmpdir();
 
     // 設定読み込み
     const settings = loadAppSettings();
     const defaultPython = settings.pythonPath || 'python';
-    const targetPython = execPath || defaultPython;
+
+    const langLower = language.toLowerCase();
+
+    // 実行パスの決定
+    let targetExec = execPath || (['python', 'py'].includes(langLower) ? defaultPython : null);
+
+    // WindowsかつShell系で、パスが未指定(Default)の場合、Git Bashを自動検出してセットする
+    if (!targetExec && ['bash', 'sh', 'shell', 'zsh'].includes(langLower) && process.platform === 'win32') {
+      const gitBashCandidates = [
+        'C:\\Program Files\\Git\\bin\\bash.exe',
+        'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+        path.join(os.homedir(), 'AppData\\Local\\Programs\\Git\\bin\\bash.exe')
+      ];
+
+      for (const p of gitBashCandidates) {
+        if (fs.existsSync(p)) {
+          targetExec = p; // 見つかったパスをデフォルトとして採用
+          break;
+        }
+      }
+    }
+
+    // ヘルパー: WindowsパスをWSLパス(/mnt/c/...)に変換する
+    const toWslPath = (winPath) => {
+      return winPath.replace(/^([a-zA-Z]):/, (match, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, '/');
+    };
 
     const langConfig = {
       'javascript': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
       'js': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
-      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetPython}" "${f}"` },
-      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetPython}" "${f}"` },
-      'bash': { ext: '.sh', base: 'bash', cmd: (f) => `bash "${f}"` },
+      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec}" "${f}"` },
+      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec}" "${f}"` },
+
+      // --- Shell / Bash 系 ---
+      'bash': {
+        ext: '.sh',
+        base: targetExec === 'wsl' ? 'wsl' : (targetExec || 'bash'),
+        cmd: (f) => {
+          // WSL実行時は、スクリプト実行パスをWSLパスに変換する
+          if (targetExec === 'wsl') return `wsl bash "${toWslPath(f)}"`;
+          // Git Bash/その他
+          if (targetExec) return `"${targetExec}" "${f}"`;
+          return `bash "${f}"`;
+        }
+      },
+
+      // PowerShell
+      'powershell': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
+      'ps1': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
+      'pwsh': { ext: '.ps1', base: 'pwsh', cmd: (f) => `pwsh -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
+
       'c': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"` },
       'cpp': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
       'c++': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
@@ -3383,19 +3463,42 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null) =>
       'rust': { ext: '.rs', base: 'rustc', cmd: (f) => `rustc "${f}" -o "${f.replace(/\.rs$/, '.exe')}" && "${f.replace(/\.rs$/, '.exe')}"` },
     };
 
-    const config = langConfig[language.toLowerCase()];
+    // Shell系エイリアス対応
+    if (['sh', 'shell', 'zsh'].includes(langLower)) {
+      langConfig[langLower] = { ...langConfig['bash'] };
+      if (langLower === 'zsh') {
+        langConfig[langLower].cmd = (f) => {
+          if (targetExec === 'wsl') return `wsl zsh "${toWslPath(f)}"`;
+          if (targetExec) return `"${targetExec}" "${f}"`;
+          return `zsh "${f}"`;
+        };
+      }
+    }
+
+    const config = langConfig[langLower];
 
     if (!config) {
       resolve({ success: false, stderr: `言語 '${language}' は実行に対応していません。` });
       return;
     }
 
+    // 存在チェック (baseコマンド)
     if (config.base) {
-      const exists = await checkCommandExists(config.base);
+      let exists = false;
+      if (path.isAbsolute(config.base)) {
+        exists = fs.existsSync(config.base);
+      } else {
+        exists = await checkCommandExists(config.base);
+      }
+
       if (!exists) {
         const help = getInstallHelp(config.base);
         const instructions = help ? help.instructions : "インストールが必要です。";
-        const msg = `⚠️ エラー: コマンド '${config.base}' が見つかりません。\n--------------------------------------------------\n${instructions}\n--------------------------------------------------`;
+        const extraHint = (config.base.includes('\\')) ?
+          `\n指定されたパスに実行ファイルがありません。\nパス: ${config.base}` :
+          "\n(PATHが通っていないか、インストールされていません)";
+
+        const msg = `⚠️ エラー: コマンド '${path.basename(config.base)}' が見つかりません。${extraHint}\n--------------------------------------------------\n${instructions}\n--------------------------------------------------`;
         resolve({ success: false, stderr: msg });
         return;
       }
@@ -3410,15 +3513,35 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null) =>
         return;
       }
       const command = config.cmd(tempFilePath);
-      exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
+
+      // 実行オプションに cwd を設定する
+      let cwdPath = tempDir;
+      // workingDir があり、かつディレクトリとして存在する場合のみカレントディレクトリとして使用
+      if (workingDir && fs.existsSync(workingDir)) {
+        cwdPath = workingDir;
+      }
+
+      const execOptions = {
+        timeout: 15000,
+        cwd: cwdPath // ここでカレントディレクトリを指定
+      };
+
+      // 実行
+      exec(command, execOptions, (error, stdout, stderr) => {
         try {
           if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
           const exePath = tempFilePath.replace(config.ext, '.exe');
           if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
         } catch (e) { }
 
-        if (error) resolve({ success: false, stdout, stderr: stderr || error.message });
-        else resolve({ success: true, stdout, stderr });
+        if (error) {
+          if (error.signal === 'SIGTERM') {
+            stderr = `[Timeout] 実行時間が長すぎたため終了されました。\n${stderr}`;
+          }
+          resolve({ success: false, stdout, stderr: stderr || error.message });
+        } else {
+          resolve({ success: true, stdout, stderr });
+        }
       });
     });
   });

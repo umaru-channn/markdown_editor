@@ -24,7 +24,7 @@ window.electronAPI = {
 
   // --- Editor & System APIs ---
   executeCommand: (command, currentDir) => ipcRenderer.invoke('execute-command', command, currentDir),
-  executeCode: (code, language, execPath) => ipcRenderer.invoke('execute-code', code, language, execPath),
+  executeCode: (code, language, execPath, workingDir) => ipcRenderer.invoke('execute-code', code, language, execPath, workingDir),
   getLangVersions: (language) => ipcRenderer.invoke('get-lang-versions', language),
   getCurrentDirectory: () => ipcRenderer.invoke('get-current-directory'),
   getCompletionCandidates: (prefix, currentDir) => ipcRenderer.invoke('get-completion-candidates', prefix, currentDir),

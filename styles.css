@@ -1260,14 +1260,15 @@ body[data-theme="dark"] .cm-live-quote {
 
 /* ハイライト (==) */
 .cm-live-highlight {
-    background-color:yellow;
+    background-color: yellow;
     color: var(--text-color);
     padding: 0 0.2em;
     border-radius: 2px;
 }
 
 body[data-theme="dark"] .cm-live-highlight {
-    background-color: rgba(255, 255, 0, 0.2); /* ダークテーマの薄い黄色 */
+    background-color: rgba(255, 255, 0, 0.2);
+    /* ダークテーマの薄い黄色 */
     color: var(--text-color);
 }
 
@@ -2003,7 +2004,8 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 #resizer-bottom {
     height: 4px;
-    bottom: calc(200px + var(--status-bar-height));;
+    bottom: calc(200px + var(--status-bar-height));
+    ;
     left: calc(var(--activitybar-width) + var(--current-left-pane-width));
     right: var(--right-activity-offset, 50px);
     cursor: row-resize;
@@ -3781,7 +3783,7 @@ body[data-theme="dark"] .calendar-content {
     color: #24292e;
     max-height: 300px;
     overflow-y: auto;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 /* ダークモード対応 */
@@ -3797,8 +3799,10 @@ body[data-theme="dark"] .cm-execution-result {
     border-color: #fdaeb7;
     color: #cf222e;
 }
+
 body[data-theme="dark"] .cm-execution-result.error {
-    background-color: #2b1d1d; /* 少し暗めの赤背景 */
+    background-color: #2b1d1d;
+    /* 少し暗めの赤背景 */
     border-color: #8b2d2d;
     color: #ff7b72;
 }
@@ -3818,10 +3822,12 @@ body[data-theme="dark"] .cm-execution-result.error {
     padding: 2px 6px;
     border-radius: 3px;
 }
+
 .cm-execution-close-btn:hover {
     opacity: 1;
-    background-color: rgba(0,0,0,0.1);
+    background-color: rgba(0, 0, 0, 0.1);
 }
+
 body[data-theme="dark"] .cm-execution-close-btn:hover {
-    background-color: rgba(255,255,255,0.1);
+    background-color: rgba(255, 255, 255, 0.1);
 }
