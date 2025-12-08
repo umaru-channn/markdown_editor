@@ -88,6 +88,11 @@ window.electronAPI = {
   // ウィンドウの透明度設定
   setWindowOpacity: (opacity) => ipcRenderer.invoke('window-set-opacity', opacity),
 
+  // CSS Snippets
+  getCssSnippets: () => ipcRenderer.invoke('get-css-snippets'),
+  readCssSnippet: (filename) => ipcRenderer.invoke('read-css-snippet', filename),
+  openSnippetsFolder: () => ipcRenderer.invoke('open-snippets-folder'),
+
   // ファイル選択API
   selectFile: () => ipcRenderer.invoke('select-file'),
 

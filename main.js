@@ -1255,6 +1255,51 @@ function createWindow() {
     }
   });
 
+  // ========== CSS Snippets Logic ==========
+  // スニペットフォルダのパスを取得（なければ作成）
+  function getSnippetsDir() {
+    const userDataPath = app.getPath('userData');
+    const snippetsPath = path.join(userDataPath, 'snippets');
+    if (!fs.existsSync(snippetsPath)) {
+      fs.mkdirSync(snippetsPath, { recursive: true });
+    }
+    return snippetsPath;
+  }
+
+  // スニペット一覧を取得
+  ipcMain.handle('get-css-snippets', async () => {
+    try {
+      const dir = getSnippetsDir();
+      const files = fs.readdirSync(dir);
+      // .cssファイルのみをフィルタリング
+      return files.filter(file => file.endsWith('.css'));
+    } catch (error) {
+      console.error('Failed to get snippets:', error);
+      return [];
+    }
+  });
+
+  // スニペットの内容を読み込む
+  ipcMain.handle('read-css-snippet', async (event, filename) => {
+    try {
+      const dir = getSnippetsDir();
+      const filePath = path.join(dir, filename);
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf8');
+      }
+      return '';
+    } catch (error) {
+      console.error(`Failed to read snippet ${filename}:`, error);
+      return '';
+    }
+  });
+
+  // スニペットフォルダをエクスプローラーで開く
+  ipcMain.handle('open-snippets-folder', async () => {
+    const dir = getSnippetsDir();
+    await shell.openPath(dir);
+  });
+
   // Settings Handlers
   ipcMain.handle('load-app-settings', () => {
     return loadAppSettings();

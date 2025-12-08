@@ -121,6 +121,17 @@
                     </svg>
                 </div>
 
+                <div class="icon" id="btn-export-pdf" title="PDFとしてエクスポート">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                </div>
+
                 <div class="spacer"></div>
 
                 <div class="icon" id="btn-zen" title="Zenモード">
@@ -917,6 +928,42 @@
                                             style="font-weight: bold; width: 40px;">0%</span>
                                     </div>
                                     <div class="label-desc" style="margin-top: 4px;">ウィンドウの透過率を設定します（0% = 不透明）。</div>
+                                </div>
+
+                                <div class="setting-item"
+                                    style="margin-top: 30px; border-top: 1px solid var(--sidebar-border); padding-top: 20px;">
+                                    <div
+                                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <h3 style="margin: 0; font-size: 14px;">CSSスニペット (CSS Snippets)</h3>
+                                        <div style="display: flex; gap: 5px;">
+                                            <button id="btn-reload-snippets" class="icon-btn" title="再読み込み"
+                                                style="padding: 4px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                                    stroke="currentColor" stroke-width="2">
+                                                    <path d="M23 4v6h-6"></path>
+                                                    <path d="M1 20v-6h6"></path>
+                                                    <path
+                                                        d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                            <button id="btn-open-snippets-folder" class="icon-btn" title="フォルダを開く"
+                                                style="padding: 4px;">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                                    stroke="currentColor" stroke-width="2">
+                                                    <path
+                                                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="label-desc" style="margin-bottom: 15px;">
+                                        カスタムCSSを適用してエディタの見た目を変更します。
+                                    </div>
+
+                                    <div id="css-snippets-list" class="css-snippets-list">
+                                    </div>
                                 </div>
                             </div>
 

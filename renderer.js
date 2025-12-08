@@ -175,6 +175,7 @@ let appSettings = {
     defaultImageLocation: '.',
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
     showStatusBar: true,
+    enabledSnippets: [],
     // PDF設定のデフォルト値
     pdfOptions: {
         pageSize: 'A4',
@@ -6001,6 +6002,9 @@ window.addEventListener('load', async () => {
     setupSyncSettings();
     setupSettingsNavigation(); // 設定画面のナビゲーション初期化
 
+    setupSnippetEvents();
+    renderCssSnippetsList();
+
     setupHotkeySearch();
 
     // 設定画面のメニューがクリックされたらリストを描画
@@ -7730,6 +7734,151 @@ function showEmptySpaceContextMenu(x, y) {
 
     document.body.appendChild(menu);
     activeContextMenu = menu;
+}
+
+// ========== CSS Snippets Logic ==========
+/**
+ * スニペットリストを描画し、現在の設定に基づいてトグル状態を反映する
+ */
+async function renderCssSnippetsList() {
+    const listContainer = document.getElementById('css-snippets-list');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = ''; // クリア
+
+    try {
+        const files = await window.electronAPI.getCssSnippets();
+
+        if (files.length === 0) {
+            listContainer.innerHTML = '<div style="font-size:12px; color:#888; text-align:center; padding:10px;">スニペットがありません。<br>フォルダを開いて.cssファイルを追加してください。</div>';
+            return;
+        }
+
+        files.forEach(filename => {
+            const isEnabled = appSettings.enabledSnippets && appSettings.enabledSnippets.includes(filename);
+
+            const item = document.createElement('div');
+            item.className = 'snippet-item';
+            
+            item.innerHTML = `
+                <div class="snippet-info">
+                    <span class="snippet-name">${filename}</span>
+                </div>
+                <label class="snippet-toggle">
+                    <input type="checkbox" ${isEnabled ? 'checked' : ''}>
+                    <span class="snippet-slider"></span>
+                </label>
+            `;
+
+            const checkbox = item.querySelector('input');
+            checkbox.addEventListener('change', async (e) => {
+                await toggleSnippet(filename, e.target.checked);
+            });
+
+            listContainer.appendChild(item);
+            
+            // 起動時やリロード時に、有効なものはCSSを適用する
+            if (isEnabled) {
+                applyCssSnippet(filename);
+            }
+        });
+
+    } catch (e) {
+        console.error('Error rendering snippets:', e);
+    }
+}
+
+/**
+ * スニペットの有効/無効を切り替えて設定を保存する
+ */
+async function toggleSnippet(filename, enabled) {
+    if (!appSettings.enabledSnippets) appSettings.enabledSnippets = [];
+
+    if (enabled) {
+        if (!appSettings.enabledSnippets.includes(filename)) {
+            appSettings.enabledSnippets.push(filename);
+        }
+        await applyCssSnippet(filename);
+    } else {
+        appSettings.enabledSnippets = appSettings.enabledSnippets.filter(f => f !== filename);
+        removeCssSnippet(filename);
+    }
+
+    saveSettings();
+}
+
+/**
+ * CSSファイルの内容を読み込んで <style> タグとして注入する
+ */
+async function applyCssSnippet(filename) {
+    const styleId = `snippet-style-${filename}`;
+    
+    // 既に適用済みなら中身を更新する（再読み込み対応）
+    let styleTag = document.getElementById(styleId);
+    
+    try {
+        const cssContent = await window.electronAPI.readCssSnippet(filename);
+        
+        if (!styleTag) {
+            styleTag = document.createElement('style');
+            styleTag.id = styleId;
+            document.head.appendChild(styleTag);
+        }
+        
+        styleTag.textContent = cssContent;
+        console.log(`Applied snippet: ${filename}`);
+        
+    } catch (e) {
+        console.error(`Failed to apply snippet ${filename}:`, e);
+    }
+}
+
+/**
+ * 注入された <style> タグを削除する
+ */
+function removeCssSnippet(filename) {
+    const styleId = `snippet-style-${filename}`;
+    const styleTag = document.getElementById(styleId);
+    if (styleTag) {
+        styleTag.remove();
+        console.log(`Removed snippet: ${filename}`);
+    }
+}
+
+/**
+ * 全スニペットの再読み込み（リロードボタン用）
+ */
+async function reloadAllSnippets() {
+    // 一旦全ての適用済みスタイルを削除（または更新）してもよいが、
+    // ここではリストを再描画し、有効なものを再注入する
+    await renderCssSnippetsList();
+    showNotification('スニペットリストを更新しました', 'success');
+}
+
+/**
+ * スニペット機能のイベントリスナー設定
+ */
+function setupSnippetEvents() {
+    const btnReload = document.getElementById('btn-reload-snippets');
+    const btnOpenFolder = document.getElementById('btn-open-snippets-folder');
+
+    if (btnReload) {
+        btnReload.addEventListener('click', reloadAllSnippets);
+    }
+
+    if (btnOpenFolder) {
+        btnOpenFolder.addEventListener('click', () => {
+            window.electronAPI.openSnippetsFolder();
+        });
+    }
+    
+    // 設定画面のナビゲーションで「外観」が選ばれたときにリストを更新するようにする
+    const appearanceNav = document.querySelector('.settings-nav-item[data-section="appearance"]');
+    if (appearanceNav) {
+        appearanceNav.addEventListener('click', () => {
+            renderCssSnippetsList();
+        });
+    }
 }
 
 document.addEventListener('click', () => {

@@ -1230,6 +1230,15 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     font-size: 1.0em;
 }
 
+.cm-live-h1,
+.cm-live-h2,
+.cm-live-h3,
+.cm-live-h4,
+.cm-live-h5,
+.cm-live-h6 {
+    display: flex !important;
+}
+
 .cm-live-quote {
     background: var(--cb-body-bg);
     border-left: 4px solid var(--cb-border-color);
@@ -3830,4 +3839,96 @@ body[data-theme="dark"] .cm-execution-result.error {
 
 body[data-theme="dark"] .cm-execution-close-btn:hover {
     background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* CSS Snippets UI */
+.css-snippets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.snippet-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background-color: var(--sidebar-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+}
+
+.snippet-info {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.snippet-name {
+    font-weight: 500;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.snippet-path {
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+}
+
+/* トグルスイッチ (既存のcheckbox-label等を流用または新規定義) */
+.snippet-toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+    margin-left: 10px;
+}
+
+.snippet-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.snippet-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 20px;
+}
+
+.snippet-slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+.snippet-toggle input:checked + .snippet-slider {
+    background-color: #007acc;
+}
+
+.snippet-toggle input:checked + .snippet-slider:before {
+    transform: translateX(16px);
+}
+
+body[data-theme="dark"] .snippet-item {
+    background-color: #2d2d2d;
+    border-color: #444;
+}
+body[data-theme="dark"] .snippet-slider {
+    background-color: #555;
 }
