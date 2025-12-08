@@ -2,7 +2,7 @@
 const path = require('path');
 const { ViewPlugin, Decoration, WidgetType, keymap } = require("@codemirror/view");
 const { syntaxTree } = require("@codemirror/language");
-const { RangeSetBuilder } = require("@codemirror/state");
+const { RangeSetBuilder, StateField, StateEffect } = require("@codemirror/state");
 
 /* ========== Helper Functions & Widgets ========== */
 
@@ -39,6 +39,27 @@ const LANGUAGE_LIST = [
     { label: "Dart", value: "dart" },
     { label: "Scala", value: "scala" }
 ];
+
+// 実行ボタンを表示する言語のリスト
+const EXECUTABLE_LANGUAGES = new Set([
+    "javascript", "js", "node",
+    "typescript", "ts",
+    "python", "py",
+    "bash", "sh", "zsh",
+    "c",
+    "cpp", "c++",
+    "java",
+    "csharp", "cs",
+    "php",
+    "ruby", "rb",
+    "perl", "pl",
+    "lua",
+    "powershell", "ps1",
+    "r",
+    "go", "golang",
+    "rust", "rs",
+    "dart"
+]);
 
 // Altテキストからサイズを解析するヘルパー関数
 function parseAltText(rawAlt) {
@@ -134,7 +155,7 @@ class HRWidget extends WidgetType {
     ignoreEvent() { return false; }
 }
 
-/* --- 追加: <br>タグ用ウィジェット --- */
+/* --- <br>タグ用ウィジェット --- */
 class BrWidget extends WidgetType {
     toDOM() {
         const br = document.createElement("br");
@@ -479,53 +500,207 @@ class CheckboxWidget extends WidgetType {
     ignoreEvent() { return true; }
 }
 
-/* --- Code Block Language Label Widget (Dropdown) --- */
+/* ========== Execution Result Logic ========== */
+
+// 実行結果を追加・削除するためのStateEffect
+const setExecutionResult = StateEffect.define();
+const clearExecutionResult = StateEffect.define();
+
+// 実行結果表示用ウィジェット
+class ExecutionResultWidget extends WidgetType {
+    constructor(output, isError, id) {
+        super();
+        this.output = output;
+        this.isError = isError;
+        this.id = id;
+    }
+
+    eq(other) {
+        return other.output === this.output && other.isError === this.isError && other.id === this.id;
+    }
+
+    toDOM(view) {
+        const div = document.createElement("div");
+        div.className = `cm-execution-result ${this.isError ? "error" : ""}`;
+
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "cm-execution-close-btn";
+        closeBtn.textContent = "×";
+        closeBtn.title = "結果を閉じる";
+        closeBtn.onmousedown = (e) => {
+            e.preventDefault();
+            view.dispatch({ effects: clearExecutionResult.of(this.id) });
+        };
+
+        const content = document.createElement("div");
+        content.textContent = this.output;
+
+        div.appendChild(closeBtn);
+        div.appendChild(content);
+        return div;
+    }
+
+    ignoreEvent() { return true; }
+}
+
+// 実行結果を管理するStateField
+const executionResultField = StateField.define({
+    create() { return Decoration.none; },
+    update(decorations, tr) {
+        decorations = decorations.map(tr.changes);
+        for (const effect of tr.effects) {
+            if (effect.is(setExecutionResult)) {
+                const { pos, output, isError } = effect.value;
+                const widget = Decoration.widget({
+                    widget: new ExecutionResultWidget(output, isError, pos),
+                    block: true,
+                    side: 1
+                });
+                decorations = decorations.update({
+                    filter: (from) => from !== pos,
+                    add: [widget.range(pos)]
+                });
+            } else if (effect.is(clearExecutionResult)) {
+                decorations = decorations.update({ filter: (from) => from !== effect.value });
+            }
+        }
+        return decorations;
+    },
+    provide: f => EditorView.decorations.from(f)
+});
+
+/* --- Code Block Language Label Widget (Run & Copy) --- */
 class CodeBlockLanguageWidget extends WidgetType {
-    constructor(lang) { super(); this.lang = lang; }
-    eq(other) { return other.lang === this.lang; }
+    constructor(lang) {
+        super();
+        this.lang = lang;
+        this.selectedPath = null;
+        this.selectedLabel = "Default";
+    }
+
+    eq(other) {
+        return other.lang === this.lang;
+    }
 
     toDOM(view) {
         const container = document.createElement("div");
         container.className = "cm-language-widget-container";
 
-        // 言語選択ボタン（ドロップダウンのトリガー）
+        // 1. 言語選択
         const selectBtn = document.createElement("button");
         selectBtn.className = "cm-language-select-btn";
         selectBtn.innerHTML = `<span>${formatLanguageName(this.lang)}</span> <span class="arrow">▼</span>`;
-        selectBtn.title = "言語を選択";
+        selectBtn.onmousedown = (e) => { e.preventDefault(); this.showDropdown(view, selectBtn); };
+        container.appendChild(selectBtn);
 
-        selectBtn.addEventListener("mousedown", (e) => {
-            e.preventDefault(); // エディタのフォーカス喪失を防ぐ
-            this.showDropdown(view, selectBtn);
-        });
+        // 2. バージョン選択 (Pythonのみ表示)
+        const normLang = (this.lang || "").toLowerCase();
+        if (normLang === 'python' || normLang === 'py') {
+            const verBtn = document.createElement("button");
+            verBtn.className = "cm-language-select-btn";
+            verBtn.style.marginLeft = "4px";
+            verBtn.style.color = "#666";
+            verBtn.innerHTML = `<span>${this.selectedLabel}</span> <span class="arrow">▼</span>`;
+            verBtn.title = "実行バージョンを選択";
 
-        // コピーボタン
+            verBtn.onmousedown = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.showVersionDropdown(view, verBtn);
+            };
+            container.appendChild(verBtn);
+        }
+
+        // 3. 実行ボタン
+        if (EXECUTABLE_LANGUAGES.has(normLang)) {
+            const runBtn = document.createElement("button");
+            runBtn.className = "cm-code-copy-btn";
+            runBtn.textContent = "▶ Run";
+            runBtn.style.marginLeft = "4px";
+            runBtn.style.color = "#28a745";
+            runBtn.style.fontWeight = "bold";
+            runBtn.onmousedown = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.runCode(view, container, runBtn);
+            };
+            container.appendChild(runBtn);
+        }
+
+        // 4. コピーボタン
         const copyBtn = document.createElement("button");
         copyBtn.className = "cm-code-copy-btn";
-        copyBtn.textContent = "コピー";
-        copyBtn.title = "コードをクリップボードにコピー";
-
-        // Widget内での直接イベントハンドリングに変更
-        copyBtn.addEventListener("mousedown", (e) => {
+        copyBtn.textContent = "Copy";
+        copyBtn.style.marginLeft = "4px";
+        copyBtn.onmousedown = (e) => {
             e.preventDefault();
             e.stopPropagation();
             this.copyCode(view, container, copyBtn);
-        });
-
-        container.appendChild(selectBtn);
+        };
         container.appendChild(copyBtn);
+
         return container;
     }
 
-    // コピー処理の実装
-    copyCode(view, container, btn) {
+    async showVersionDropdown(view, targetBtn) {
+        const existing = document.querySelector(".cm-language-dropdown-portal");
+        if (existing) existing.remove();
+
+        const originalLabel = targetBtn.textContent;
+        targetBtn.querySelector('span').textContent = "Loading...";
+
+        let versions = [];
+        try {
+            versions = await window.electronAPI.getLangVersions(this.lang);
+        } catch (e) {}
+
+        const items = [{ label: "Default (System)", path: null }, ...versions];
+
+        const dropdown = document.createElement("div");
+        dropdown.className = "cm-language-dropdown-portal";
+        const list = document.createElement("div");
+        list.className = "cm-language-list";
+
+        items.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "cm-language-item";
+            div.textContent = item.label;
+
+            div.onmousedown = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.selectedPath = item.path;
+                this.selectedLabel = item.label;
+                targetBtn.innerHTML = `<span>${item.label}</span> <span class="arrow">▼</span>`;
+                dropdown.remove();
+                document.removeEventListener("mousedown", closer);
+            };
+            list.appendChild(div);
+        });
+
+        dropdown.appendChild(list);
+        document.body.appendChild(dropdown);
+
+        const rect = targetBtn.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 4}px`;
+        dropdown.style.left = `${rect.left}px`;
+
+        const closer = (e) => {
+            if (!dropdown.contains(e.target) && e.target !== targetBtn) {
+                dropdown.remove();
+                targetBtn.innerHTML = `<span>${this.selectedLabel || "Default"}</span> <span class="arrow">▼</span>`;
+                document.removeEventListener("mousedown", closer);
+            }
+        };
+        setTimeout(() => document.addEventListener("mousedown", closer), 0);
+    }
+
+    async runCode(view, container, btn) {
         const pos = view.posAtDOM(container);
         if (pos === null) return;
 
         let node = syntaxTree(view.state).resolveInner(pos, 1);
-        while (node && node.name !== "FencedCode") {
-            node = node.parent;
-        }
+        while (node && node.name !== "FencedCode") node = node.parent;
 
         if (node && node.name === "FencedCode") {
             const startLine = view.state.doc.lineAt(node.from);
@@ -535,152 +710,137 @@ class CodeBlockLanguageWidget extends WidgetType {
 
             if (codeStart < codeEnd) {
                 const codeText = view.state.sliceDoc(codeStart, codeEnd);
+                const originalText = btn.textContent;
+                btn.textContent = "⏳";
+                btn.disabled = true;
+
+                try {
+                    const result = await window.electronAPI.executeCode(codeText, this.lang, this.selectedPath);
+                    const resultText = result.success ? result.stdout : result.stderr;
+                    const isError = !result.success || (result.stderr && result.stderr.trim().length > 0);
+                    const finalText = resultText || (result.success ? "(No output)" : "(Unknown error)");
+
+                    view.dispatch({
+                        effects: setExecutionResult.of({
+                            pos: endLine.to,
+                            output: finalText,
+                            isError: isError
+                        })
+                    });
+                } catch (err) {
+                    view.dispatch({
+                        effects: setExecutionResult.of({
+                            pos: endLine.to,
+                            output: `Execution Error: ${err.message}`,
+                            isError: true
+                        })
+                    });
+                } finally {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            }
+        }
+    }
+
+    copyCode(view, container, btn) {
+        const pos = view.posAtDOM(container);
+        if (pos === null) return;
+        let node = syntaxTree(view.state).resolveInner(pos, 1);
+        while (node && node.name !== "FencedCode") node = node.parent;
+        if (node) {
+            const startLine = view.state.doc.lineAt(node.from);
+            const endLine = view.state.doc.lineAt(node.to);
+            const codeStart = startLine.to + 1;
+            const codeEnd = endLine.from;
+            if (codeStart < codeEnd) {
+                const text = view.state.sliceDoc(codeStart, codeEnd);
                 if (navigator.clipboard) {
-                    navigator.clipboard.writeText(codeText).then(() => {
-                        const originalText = btn.textContent;
+                    navigator.clipboard.writeText(text).then(() => {
+                        const original = btn.textContent;
                         btn.textContent = "Copied!";
                         btn.classList.add("copied");
-                        setTimeout(() => {
-                            btn.textContent = originalText;
-                            btn.classList.remove("copied");
-                        }, 2000);
-                    }).catch(err => console.error(err));
+                        setTimeout(() => { btn.textContent = original; btn.classList.remove("copied"); }, 2000);
+                    });
                 }
             }
         }
     }
 
     showDropdown(view, targetBtn) {
-        // 既存のドロップダウンがあれば閉じる
-        const existingDropdown = document.querySelector(".cm-language-dropdown-portal");
-        if (existingDropdown) existingDropdown.remove();
+        // ... (既存のshowDropdownロジックをそのまま維持) ...
+        const existing = document.querySelector(".cm-language-dropdown-portal");
+        if (existing) existing.remove();
 
         const dropdown = document.createElement("div");
         dropdown.className = "cm-language-dropdown-portal";
-
-        const searchInput = document.createElement("input");
-        searchInput.type = "text";
-        searchInput.className = "cm-language-search";
-        searchInput.placeholder = "言語を検索...";
-        searchInput.spellcheck = false;
-
-        const listContainer = document.createElement("div");
-        listContainer.className = "cm-language-list";
+        const input = document.createElement("input");
+        input.className = "cm-language-search";
+        input.placeholder = "言語を検索...";
+        const list = document.createElement("div");
+        list.className = "cm-language-list";
 
         const performChange = (newLang) => {
             const pos = view.posAtDOM(targetBtn);
             if (pos === null) return;
-
-            // 構文木から FencedCode ノードを探す
             let node = syntaxTree(view.state).resolveInner(pos, 1);
-            while (node && node.name !== "FencedCode") {
-                node = node.parent;
-            }
-
-            if (node && node.name === "FencedCode") {
-                // コードブロックの先頭行を取得
+            while (node && node.name !== "FencedCode") node = node.parent;
+            if (node) {
                 const line = view.state.doc.lineAt(node.from);
-                const lineText = line.text;
-
-                // 正規表現で ```lang の部分を特定して置換
-                const match = lineText.match(/^(\s*`{3,})([\w-]*)/);
+                const match = line.text.match(/^(\s*`{3,})([\w-]*)/);
                 if (match) {
-                    const prefix = match[1]; // "```"
-                    const currentLang = match[2]; // "javascript"
-
-                    // 言語指定部分の開始位置と終了位置
-                    const start = line.from + prefix.length;
-                    const end = start + currentLang.length;
-
-                    view.dispatch({
-                        changes: { from: start, to: end, insert: newLang }
-                    });
+                    view.dispatch({ changes: { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length, insert: newLang } });
                 }
             }
         };
 
-        const renderList = (filterText = "") => {
-            listContainer.innerHTML = "";
-            const lowerFilter = filterText.toLowerCase();
-
+        const renderList = (filter = "") => {
+            list.innerHTML = "";
+            const lower = filter.toLowerCase();
             LANGUAGE_LIST.forEach(item => {
-                if (filterText && !item.label.toLowerCase().includes(lowerFilter) && !item.value.toLowerCase().includes(lowerFilter)) {
-                    return;
-                }
-
-                const listItem = document.createElement("div");
-                listItem.className = "cm-language-item";
-                const isSelected = (this.lang || "").toLowerCase() === item.value;
-                if (isSelected) listItem.classList.add("selected");
-
-                listItem.innerHTML = `
-                    <span class="label">${item.label}</span>
-                    ${isSelected ? '<span class="check">✓</span>' : ''}
-                `;
-
-                listItem.addEventListener("mousedown", (e) => { // clickだとblurが先に走る可能性があるためmousedown
+                if (filter && !item.label.toLowerCase().includes(lower) && !item.value.toLowerCase().includes(lower)) return;
+                const div = document.createElement("div");
+                div.className = "cm-language-item";
+                if ((this.lang || "") === item.value) div.classList.add("selected");
+                div.innerHTML = `<span class="label">${item.label}</span>${div.classList.contains("selected") ? '<span class="check">✓</span>' : ''}`;
+                div.onmousedown = (e) => {
                     e.preventDefault();
                     performChange(item.value);
                     dropdown.remove();
-                    document.removeEventListener("mousedown", outsideClickListener);
-                });
-
-                listContainer.appendChild(listItem);
+                    document.removeEventListener("mousedown", closer);
+                };
+                list.appendChild(div);
             });
-
-            if (listContainer.children.length === 0) {
-                const emptyItem = document.createElement("div");
-                emptyItem.className = "cm-language-item empty";
-                emptyItem.textContent = "見つかりません";
-                listContainer.appendChild(emptyItem);
-            }
+            if (list.children.length === 0) list.innerHTML = `<div class="cm-language-item empty">見つかりません</div>`;
         };
 
         renderList();
-
-        searchInput.addEventListener("input", (e) => {
-            renderList(e.target.value);
-        });
-
-        // 検索ボックスでのEnterキー対応
-        searchInput.addEventListener("keydown", (e) => {
+        input.oninput = (e) => renderList(e.target.value);
+        input.onkeydown = (e) => {
             if (e.key === "Enter") {
-                // 最初の候補を選択
-                const firstItem = listContainer.querySelector(".cm-language-item:not(.empty)");
-                if (firstItem) {
+                const first = list.querySelector(".cm-language-item:not(.empty)");
+                if (first) {
                     const evt = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
-                    firstItem.dispatchEvent(evt);
+                    first.dispatchEvent(evt);
                 }
-            }
-        });
-
-        dropdown.appendChild(searchInput);
-        dropdown.appendChild(listContainer);
-        document.body.appendChild(dropdown);
-
-        const rect = targetBtn.getBoundingClientRect();
-        dropdown.style.top = `${rect.bottom + 4}px`;
-
-        // 右端揃えにするか左揃えにするか（画面からはみ出さないように）
-        const dropdownWidth = 220; // CSSと合わせる
-        if (rect.left + dropdownWidth > window.innerWidth - 20) {
-            dropdown.style.left = `${rect.right - dropdownWidth}px`;
-        } else {
-            dropdown.style.left = `${rect.left}px`;
-        }
-
-        searchInput.focus();
-
-        const outsideClickListener = (e) => {
-            if (!dropdown.contains(e.target) && e.target !== targetBtn && !targetBtn.contains(e.target)) {
-                dropdown.remove();
-                document.removeEventListener("mousedown", outsideClickListener);
             }
         };
 
-        setTimeout(() => {
-            document.addEventListener("mousedown", outsideClickListener);
-        }, 0);
+        dropdown.append(input, list);
+        document.body.appendChild(dropdown);
+        const rect = targetBtn.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 4}px`;
+        const dw = 220;
+        dropdown.style.left = (rect.left + dw > window.innerWidth - 20) ? `${rect.right - dw}px` : `${rect.left}px`;
+        input.focus();
+
+        const closer = (e) => {
+            if (!dropdown.contains(e.target) && e.target !== targetBtn && !targetBtn.contains(e.target)) {
+                dropdown.remove();
+                document.removeEventListener("mousedown", closer);
+            }
+        };
+        setTimeout(() => document.addEventListener("mousedown", closer), 0);
     }
 
     ignoreEvent() { return true; }
@@ -1314,4 +1474,4 @@ const plugin = ViewPlugin.define(
     }
 );
 
-exports.livePreviewPlugin = [plugin, codeBlockAutoClose];
+exports.livePreviewPlugin = [plugin, codeBlockAutoClose, executionResultField];

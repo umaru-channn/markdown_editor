@@ -3218,6 +3218,212 @@ ipcMain.handle('download-image', async (event, url, targetDir) => {
   }
 });
 
+// ヘルパー: コマンドが存在するかチェックする
+const checkCommandExists = (command) => {
+  return new Promise((resolve) => {
+    const checkCmd = process.platform === 'win32' ? `where ${command}` : `which ${command}`;
+    exec(checkCmd, (error) => {
+      resolve(!error);
+    });
+  });
+};
+
+// ヘルパー: インストール手順の生成
+const getInstallHelp = (baseCommand) => {
+  const platform = process.platform;
+
+  // 手順データ
+  const INSTALL_DATA = {
+    'node': {
+      name: "Node.js",
+      win32: { type: 'simple', cmd: "winget install -e --id OpenJS.NodeJS" },
+      darwin: { type: 'simple', cmd: "brew install node" },
+      linux: { type: 'simple', cmd: "sudo apt install nodejs npm" }
+    },
+    'python': {
+      name: "Python",
+      win32: { type: 'simple', cmd: "winget install -e --id Python.Python.3.12" },
+      darwin: { type: 'simple', cmd: "brew install python" },
+      linux: { type: 'simple', cmd: "sudo apt install python3" }
+    },
+    'java': {
+      name: "Java (JDK)",
+      win32: { type: 'simple', cmd: "winget install -e --id Oracle.JDK.21" },
+      darwin: { type: 'simple', cmd: "brew install openjdk" },
+      linux: { type: 'simple', cmd: "sudo apt install default-jdk" }
+    },
+    'gcc': {
+      name: "GCC (C Compiler)",
+      win32: {
+        type: 'complex',
+        msg: "WindowsでC言語を実行するには、以下の3ステップが必要です。\n\n" +
+          "1. MSYS2のインストール:\n" +
+          "   > winget install -e --id MSYS2.MSYS2\n\n" +
+          "2. コンパイラのインストール (重要):\n" +
+          "   スタートメニューから「MSYS2 UCRT64」を起動し、以下を実行してください:\n" +
+          "   pacman -S mingw-w64-ucrt-x86_64-gcc\n\n" +
+          "3. パスの設定:\n" +
+          "   Windowsの環境変数Pathに以下を追加して、PCを再起動してください:\n" +
+          "   C:\\msys64\\ucrt64\\bin"
+      },
+      darwin: { type: 'simple', cmd: "xcode-select --install" },
+      linux: { type: 'simple', cmd: "sudo apt install build-essential" }
+    },
+    'g++': {
+      name: "G++ (C++ Compiler)",
+      win32: {
+        type: 'complex',
+        msg: "WindowsでC++を実行するには、以下の3ステップが必要です。\n\n" +
+          "1. MSYS2のインストール:\n" +
+          "   > winget install -e --id MSYS2.MSYS2\n\n" +
+          "2. コンパイラのインストール (重要):\n" +
+          "   スタートメニューから「MSYS2 UCRT64」を起動し、以下を実行してください:\n" +
+          "   pacman -S mingw-w64-ucrt-x86_64-gcc\n\n" +
+          "3. パスの設定:\n" +
+          "   1.Windowsキーを押して「環境変数」と検索し、「システム環境変数の編集」を開きます。\n" +
+          "   2.変数の編集:" +
+          "   右下の [環境変数(N)...] ボタンをクリック。\n" +
+          "   下の段（システム環境変数）のリストから 「Path」 を探して選択し、[編集(I)...] をクリック。\n" +
+          "   右上の [新規(N)] をクリックし、[C:\\msys64\\ucrt64\\bin] を貼り付けます。\n" +
+          "   [OK] を押して全ての画面を閉じます。 PCを再起動してください"
+      },
+      darwin: { type: 'simple', cmd: "xcode-select --install" },
+      linux: { type: 'simple', cmd: "sudo apt install build-essential" }
+    },
+    'csc': {
+      name: "C# Compiler",
+      win32: { type: 'simple', cmd: "winget install -e --id Microsoft.DotNet.SDK.8" },
+      darwin: { type: 'simple', cmd: "brew install dotnet-sdk" },
+      linux: { type: 'simple', cmd: "sudo apt install dotnet-sdk-8.0" }
+    },
+    'go': {
+      name: "Go",
+      win32: { type: 'simple', cmd: "winget install -e --id GoLang.Go" },
+      darwin: { type: 'simple', cmd: "brew install go" },
+      linux: { type: 'simple', cmd: "sudo apt install golang-go" }
+    },
+    'rustc': {
+      name: "Rust",
+      win32: { type: 'simple', cmd: "winget install -e --id Rustlang.Rustup" },
+      darwin: { type: 'simple', cmd: "brew install rust" },
+      linux: { type: 'simple', cmd: "sudo apt install rustc" }
+    }
+  };
+
+  const info = INSTALL_DATA[baseCommand];
+  if (!info) return null;
+
+  const osInfo = info[platform];
+  if (!osInfo) return { name: info.name, instructions: "公式サイトからインストールしてください。" };
+
+  if (osInfo.type === 'complex') {
+    return { name: info.name, instructions: osInfo.msg };
+  } else {
+    return {
+      name: info.name,
+      instructions: `👇 ターミナルで以下を実行してください:\n> ${osInfo.cmd}\n\n(インストール後は再起動が必要です)`
+    };
+  }
+};
+
+// 言語のインストール済みバージョン一覧を取得
+ipcMain.handle('get-lang-versions', async (event, lang) => {
+  const language = lang.toLowerCase();
+
+  if (language === 'python' || language === 'py') {
+    return new Promise((resolve) => {
+      exec('py --list-paths', (error, stdout, stderr) => {
+        if (error) {
+          resolve([]);
+          return;
+        }
+
+        const versions = [];
+        const lines = stdout.split('\r\n').filter(line => line.trim() !== '');
+
+        lines.forEach(line => {
+          const match = line.match(/^\s*-?V?:?(\d+\.\d+).*?\s+(?:\*\s+)?(.*)$/);
+          if (match) {
+            versions.push({
+              label: `Python ${match[1]}`,
+              path: match[2].trim()
+            });
+          }
+        });
+        resolve(versions);
+      });
+    });
+  }
+  return [];
+});
+
+// コード実行ハンドラ
+ipcMain.handle('execute-code', async (event, code, language, execPath = null) => {
+  return new Promise(async (resolve) => {
+    const tempDir = os.tmpdir();
+
+    // 設定読み込み
+    const settings = loadAppSettings();
+    const defaultPython = settings.pythonPath || 'python';
+    const targetPython = execPath || defaultPython;
+
+    const langConfig = {
+      'javascript': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
+      'js': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
+      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetPython}" "${f}"` },
+      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetPython}" "${f}"` },
+      'bash': { ext: '.sh', base: 'bash', cmd: (f) => `bash "${f}"` },
+      'c': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"` },
+      'cpp': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
+      'c++': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
+      'java': { ext: '.java', base: 'java', cmd: (f) => `java "${f}"` },
+      'csharp': { ext: '.cs', base: 'csc', cmd: (f) => `csc /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
+      'cs': { ext: '.cs', base: 'csc', cmd: (f) => `csc /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
+      'go': { ext: '.go', base: 'go', cmd: (f) => `go run "${f}"` },
+      'rust': { ext: '.rs', base: 'rustc', cmd: (f) => `rustc "${f}" -o "${f.replace(/\.rs$/, '.exe')}" && "${f.replace(/\.rs$/, '.exe')}"` },
+    };
+
+    const config = langConfig[language.toLowerCase()];
+
+    if (!config) {
+      resolve({ success: false, stderr: `言語 '${language}' は実行に対応していません。` });
+      return;
+    }
+
+    if (config.base) {
+      const exists = await checkCommandExists(config.base);
+      if (!exists) {
+        const help = getInstallHelp(config.base);
+        const instructions = help ? help.instructions : "インストールが必要です。";
+        const msg = `⚠️ エラー: コマンド '${config.base}' が見つかりません。\n--------------------------------------------------\n${instructions}\n--------------------------------------------------`;
+        resolve({ success: false, stderr: msg });
+        return;
+      }
+    }
+
+    const fileName = `code_${Date.now()}`;
+    const tempFilePath = path.join(tempDir, `${fileName}${config.ext}`);
+
+    fs.writeFile(tempFilePath, code, (err) => {
+      if (err) {
+        resolve({ success: false, stderr: `File write error: ${err.message}` });
+        return;
+      }
+      const command = config.cmd(tempFilePath);
+      exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
+        try {
+          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+          const exePath = tempFilePath.replace(config.ext, '.exe');
+          if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
+        } catch (e) { }
+
+        if (error) resolve({ success: false, stdout, stderr: stderr || error.message });
+        else resolve({ success: true, stdout, stderr });
+      });
+    });
+  });
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.

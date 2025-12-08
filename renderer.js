@@ -4729,7 +4729,7 @@ function showCommitContextMenu(x, y, commit) {
         }
     });
 
-    // --- 追加: リセット項目 ---
+    // --- リセット項目 ---
     const resetOption = document.createElement('div');
     resetOption.className = 'context-menu-item';
     resetOption.textContent = '現在のブランチをここにリセット (Hard)';
@@ -4765,7 +4765,7 @@ function showCommitContextMenu(x, y, commit) {
         });
     });
 
-    // --- 追加: リバート項目 ---
+    // --- リバート項目 ---
     const revertOption = document.createElement('div');
     revertOption.className = 'context-menu-item';
     revertOption.textContent = 'このコミットを打ち消し (Revert)';
