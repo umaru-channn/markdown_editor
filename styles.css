@@ -30,10 +30,11 @@ body {
     --leftpane-width: 240px;
     --right-pane-width: 350px;
     --current-left-pane-width: 240px;
+    --status-bar-height: 24px;
 
     /* Toolbar Colors */
-    --toolbar-bg: #f9f9f9;
-    --toolbar-border: #ddd;
+    --toolbar-bg: var(--topbar-bg);
+    --toolbar-border: var(--topbar-border);
     --toolbar-btn-bg: #fff;
     --toolbar-btn-hover: #e0e0e0;
     --toolbar-text: #333;
@@ -125,23 +126,31 @@ input[type="number"]::-webkit-outer-spin-button {
 
 /* ========== Scrollbar Customization (VS Code Style) ========== */
 ::-webkit-scrollbar {
-    width: 10px;  /* 縦スクロールバーの幅 */
-    height: 10px; /* 横スクロールバーの高さ */
+    width: 10px;
+    /* 縦スクロールバーの幅 */
+    height: 10px;
+    /* 横スクロールバーの高さ */
 }
 
 ::-webkit-scrollbar-track {
-    background: transparent; /* 背景を透明にして圧迫感をなくす */
+    background: transparent;
+    /* 背景を透明にして圧迫感をなくす */
 }
 
 ::-webkit-scrollbar-thumb {
-    background-color: rgba(121, 121, 121, 0.4); /* 半透明のグレー */
-    border-radius: 6px; /* 丸みを持たせる */
-    border: 2px solid transparent; /* 透明な枠線で実際の表示幅を細く見せる */
-    background-clip: content-box; /* paddingボックス内で描画 */
+    background-color: rgba(121, 121, 121, 0.4);
+    /* 半透明のグレー */
+    border-radius: 6px;
+    /* 丸みを持たせる */
+    border: 2px solid transparent;
+    /* 透明な枠線で実際の表示幅を細く見せる */
+    background-clip: content-box;
+    /* paddingボックス内で描画 */
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(100, 100, 100, 0.7); /* ホバー時は少し濃く */
+    background-color: rgba(100, 100, 100, 0.7);
+    /* ホバー時は少し濃く */
 }
 
 ::-webkit-scrollbar-corner {
@@ -254,11 +263,16 @@ body[data-theme="dark"] .side-switch-group button:hover {
     height: auto;
     color: var(--text-color);
     /* 長いファイル名の表示崩れ対策 */
-    white-space: nowrap;      /* 折り返し禁止 */
-    flex-shrink: 0;           /* 縮小禁止（スクロールさせるため） */
-    max-width: 200px;         /* タブの最大幅（任意） */
-    overflow: hidden;         /* はみ出しを隠す */
-    text-overflow: ellipsis;  /* 省略記号(...)を表示 */
+    white-space: nowrap;
+    /* 折り返し禁止 */
+    flex-shrink: 0;
+    /* 縮小禁止（スクロールさせるため） */
+    max-width: 200px;
+    /* タブの最大幅（任意） */
+    overflow: hidden;
+    /* はみ出しを隠す */
+    text-overflow: ellipsis;
+    /* 省略記号(...)を表示 */
 }
 
 .editor-tabs .tab.active {
@@ -300,36 +314,44 @@ body[data-theme="dark"] .editor-tabs .tab .close-tab:hover {
 .tabs-container {
     flex: 1;
     display: flex;
-    align-items: flex-end; /* 下揃え */
+    align-items: flex-end;
+    /* 下揃え */
     height: 100%;
-    overflow: hidden; /* コンテナ自体はスクロールさせない */
+    overflow: hidden;
+    /* コンテナ自体はスクロールさせない */
     padding-left: 5px;
-    min-width: 0; /* Flexbox内での縮小を許可 */
+    min-width: 0;
+    /* Flexbox内での縮小を許可 */
 }
 
 /* --- Editor Tabs --- */
 /* 既存の .editor-tabs のスタイルを上書き/修正 */
 #editor-tabs {
-    flex: 0 1 auto; /* コンテンツに合わせて伸縮するが、親を超えたら縮む */
+    flex: 0 1 auto;
+    /* コンテンツに合わせて伸縮するが、親を超えたら縮む */
     display: flex;
-    overflow-x: auto; /* タブが多い場合ここだけスクロール */
+    overflow-x: auto;
+    /* タブが多い場合ここだけスクロール */
     height: 100%;
     align-items: flex-end;
     background-color: transparent;
     padding-bottom: 0 !important;
     margin-bottom: 0 !important;
-    padding-left: 0; /* 左パディングはコンテナ側に移動 */
+    padding-left: 0;
+    /* 左パディングはコンテナ側に移動 */
 }
 
 /* --- プラスボタンのスタイル --- */
 .tab-new-btn {
-    flex: 0 0 32px; /* 幅固定 */
+    flex: 0 0 32px;
+    /* 幅固定 */
     height: 28px;
     background: transparent;
     border: none;
     cursor: pointer;
     margin-left: 2px;
-    margin-right: 5px; /* 右側のコントロールとの余白 */
+    margin-right: 5px;
+    /* 右側のコントロールとの余白 */
     margin-bottom: 2px;
     border-radius: 3px;
     display: flex;
@@ -338,7 +360,8 @@ body[data-theme="dark"] .editor-tabs .tab .close-tab:hover {
     color: var(--text-color);
     opacity: 0.7;
     transition: background-color 0.2s;
-    -webkit-app-region: no-drag; /* ドラッグ除外 */
+    -webkit-app-region: no-drag;
+    /* ドラッグ除外 */
 }
 
 .tab-new-btn:hover {
@@ -392,7 +415,7 @@ body[data-theme="dark"] .window-control-btn:not(.close):hover {
     position: fixed;
     top: 35px;
     left: 0;
-    bottom: 24px;
+    bottom: var(--status-bar-height);
     width: var(--activitybar-width);
     background-color: #333;
     color: #ccc;
@@ -408,7 +431,7 @@ body[data-theme="dark"] .window-control-btn:not(.close):hover {
     position: fixed;
     top: 35px;
     right: 0;
-    bottom: 24px;
+    bottom: var(--status-bar-height);
     width: var(--activitybar-width);
     background-color: #333;
     color: #ccc;
@@ -522,7 +545,8 @@ body[data-theme="dark"] .header-btn:hover {
 
 /* ヘッダーボタン領域のスクロールバーを非表示にする（ズレ防止） */
 .header-buttons::-webkit-scrollbar {
-    display: none; /* バー自体を消す（スクロール操作は可能） */
+    display: none;
+    /* バー自体を消す（スクロール操作は可能） */
 }
 
 /* ファイルエクスプローラーのフォーカススタイル */
@@ -1236,18 +1260,15 @@ body[data-theme="dark"] .cm-live-quote {
 
 /* ハイライト (==) */
 .cm-live-highlight {
-    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.7) 0);
-    /* 蛍光マーカー風 */
-    /* または単色背景 */
-    /* background-color: rgba(255, 255, 0, 0.4); */
-    padding: 0 2px;
+    background-color:yellow;
+    color: var(--text-color);
+    padding: 0 0.2em;
     border-radius: 2px;
 }
 
 body[data-theme="dark"] .cm-live-highlight {
-    background: linear-gradient(transparent 60%, rgba(255, 235, 59, 0.5) 0);
-    /* ダークモードでの可読性を考慮 */
-    color: inherit;
+    background-color: rgba(255, 255, 0, 0.2); /* ダークテーマの薄い黄色 */
+    color: var(--text-color);
 }
 
 .cm-live-code {
@@ -1355,14 +1376,13 @@ body[data-theme="dark"] .cm-live-link {
     /* PDFはブロック要素として表示 */
     position: relative;
     max-width: 100%;
-    margin: 10px 0;
+    margin: 0 0;
     user-select: none;
     background-color: #525659;
     /* PDFビューアっぽい背景色 */
     border: 1px solid var(--sidebar-border);
     border-radius: 4px;
-    height: 500px;
-    /* デフォルトの高さ */
+    height: 23.8em;
 }
 
 .cm-live-widget-pdf {
@@ -1747,7 +1767,7 @@ body[data-theme="dark"] .cm-language-item:hover {
     position: fixed;
     top: 35px;
     right: var(--activitybar-width);
-    bottom: 24px;
+    bottom: var(--status-bar-height);
     display: flex;
     flex-direction: column;
     z-index: 4;
@@ -1763,7 +1783,7 @@ body[data-theme="dark"] .cm-language-item:hover {
     background: #1e1e1e;
     color: #ccc;
     position: fixed;
-    bottom: 24px;
+    bottom: var(--status-bar-height);
     left: calc(var(--activitybar-width) + var(--current-left-pane-width));
     right: var(--right-activity-offset, 50px);
     display: flex;
@@ -1975,7 +1995,7 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 #resizer-right {
     top: 35px;
-    bottom: 24px;
+    bottom: var(--status-bar-height);
     right: calc(350px + var(--activitybar-width));
     width: 4px;
     cursor: col-resize;
@@ -1983,7 +2003,7 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 #resizer-bottom {
     height: 4px;
-    bottom: 224px;
+    bottom: calc(200px + var(--status-bar-height));;
     left: calc(var(--activitybar-width) + var(--current-left-pane-width));
     right: var(--right-activity-offset, 50px);
     cursor: row-resize;
@@ -1991,13 +2011,15 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 /* 左リサイザーのスタイル */
 #resizer-left {
-    top: 35px; /* トップバーの高さ */
-    bottom: 24px; /* ステータスバーの高さ */
+    top: 35px;
+    /* トップバーの高さ */
+    bottom: var(--status-bar-height);
+    /* ステータスバーの高さ */
     left: calc(var(--activitybar-width) + var(--leftpane-width));
     width: 4px;
     cursor: col-resize;
     /* つまみやすいようにマージンで調整 */
-    margin-left: -2px; 
+    margin-left: -2px;
 }
 
 /* 左ペインが隠れているときはリサイザーも隠す */
@@ -2007,7 +2029,7 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 /* ========== Status Bar ========== */
 .status-bar {
-    height: 24px;
+    height: var(--status-bar-height);
     background: #007acc;
     color: white;
     display: flex;
@@ -2018,6 +2040,13 @@ body[data-theme="dark"] .cm-language-item:hover {
     z-index: 10;
     width: 100%;
     flex-shrink: 0;
+}
+
+/* ステータスバー非表示時のための定義 */
+.status-bar.hidden {
+    height: 0 !important;
+    overflow: hidden;
+    /* display: none; は transition と併用できないため height: 0 にする */
 }
 
 /* ========== UI Components ========== */
@@ -2140,25 +2169,30 @@ body[data-theme="dark"] .cm-language-item:hover {
 .ide-container.zen-mode-active .resizer {
     display: none !important;
 }
+
 /* トップバー内のサイドバー操作ボタンを隠す */
 .ide-container.zen-mode-active .top-left-controls .left-slot,
 .ide-container.zen-mode-active .top-left-controls .side-switch-group {
     display: none !important;
 }
+
 /* トップバー左側の幅をリセット（サイドバー幅に依存させない） */
 .ide-container.zen-mode-active .top-left-controls {
     width: auto !important;
     min-width: 0 !important;
 }
+
 /* メインコンテンツのマージン（サイドバー分）を除去 */
 .ide-container.zen-mode-active .main-content {
     margin-left: 0 !important;
     margin-right: 0 !important;
 }
+
 /* センターペインを最大幅に */
 .ide-container.zen-mode-active .center-pane {
     width: 100%;
 }
+
 /* エディタ本文を中央寄せにして読みやすくする */
 .ide-container.zen-mode-active .cm-content {
     max-width: 900px;
@@ -3420,14 +3454,17 @@ body[data-theme="dark"] .settings-nav-item.active {
 /* トップバーのSVGアイコンにホバー効果を追加 */
 .top-left-controls button:hover svg,
 .top-right-controls button:hover svg {
-    color: var(--color-active-icon, #007acc); /* アクティブカラー（VS Codeの青など）に変化 */
+    color: var(--color-active-icon, #007acc);
+    /* アクティブカラー（VS Codeの青など）に変化 */
     opacity: 0.9;
 }
+
 /* アクティビティバー（左右）のSVGアイコンにホバー効果を追加 */
 .activity-bar .icon:hover svg,
 .right-activity-bar .icon:hover svg {
     opacity: 1.0;
-    color: var(--color-active-icon, #007acc); /* アクティブカラーに変化 */
+    color: var(--color-active-icon, #007acc);
+    /* アクティブカラーに変化 */
 }
 
 /* タブバーのスクロール設定（オーバーレイ・極細・ホバー時のみ） */
@@ -3436,7 +3473,7 @@ body[data-theme="dark"] .settings-nav-item.active {
 #terminal-tabs-list {
     /* スクロールバーをコンテンツの上に重ねる（レイアウトの高さに影響を与えない） */
     overflow-x: overlay !important;
-    
+
     /* 前回のパディングハックがあればリセット */
     padding-bottom: 0 !important;
     margin-bottom: 0 !important;
@@ -3445,7 +3482,8 @@ body[data-theme="dark"] .settings-nav-item.active {
 /* このエリア専用のスクロールバーサイズ（極細） */
 #editor-tabs::-webkit-scrollbar,
 #terminal-tabs-list::-webkit-scrollbar {
-    height: 3px; /* 3pxの極細ライン */
+    height: 3px;
+    /* 3pxの極細ライン */
     background: transparent;
 }
 
@@ -3459,7 +3497,8 @@ body[data-theme="dark"] .settings-nav-item.active {
 /* コンテナにマウスを乗せたときだけ、つまみを表示 */
 #editor-tabs:hover::-webkit-scrollbar-thumb,
 #terminal-tabs-list:hover::-webkit-scrollbar-thumb {
-    background: rgba(128, 128, 128, 0.6); /* 半透明のグレー */
+    background: rgba(128, 128, 128, 0.6);
+    /* 半透明のグレー */
 }
 
 /* ========== Hotkey Settings Styles ========== */
@@ -3479,7 +3518,8 @@ body[data-theme="dark"] .settings-nav-item.active {
 .search-input-wrapper input {
     border: none;
     background: transparent;
-    box-shadow: none !important; /* グローバルスタイルの打ち消し */
+    box-shadow: none !important;
+    /* グローバルスタイルの打ち消し */
     flex: 1;
     padding-left: 8px;
 }
@@ -3510,6 +3550,7 @@ body[data-theme="dark"] .settings-nav-item.active {
 .hotkey-item:hover {
     background-color: rgba(0, 0, 0, 0.02);
 }
+
 body[data-theme="dark"] .hotkey-item:hover {
     background-color: rgba(255, 255, 255, 0.02);
 }
@@ -3588,14 +3629,23 @@ body[data-theme="dark"] .hotkey-item:hover {
     opacity: 1;
     background-color: rgba(0, 0, 0, 0.1);
 }
+
 body[data-theme="dark"] .hotkey-reset-btn:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
 @keyframes pulse-border {
-    0% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0.7); }
-    70% { box-shadow: 0 0 0 4px rgba(0, 122, 204, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0); }
+    0% {
+        box-shadow: 0 0 0 0 rgba(0, 122, 204, 0.7);
+    }
+
+    70% {
+        box-shadow: 0 0 0 4px rgba(0, 122, 204, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(0, 122, 204, 0);
+    }
 }
 
 /* キー設定ボタン群 */
@@ -3664,7 +3714,8 @@ body[data-theme="dark"] .hotkey-action-btn:hover {
 .calendar-content {
     flex: 1;
     overflow: hidden;
-    background-color: #fff; /* カレンダー背景 */
+    background-color: #fff;
+    /* カレンダー背景 */
     display: flex;
     flex-direction: column;
 }
@@ -3676,7 +3727,8 @@ body[data-theme="dark"] .calendar-content {
 
 /* CodeMirror の改ページ、カード、水平線などのバッファ要素を非表示にする */
 .ͼ1 .cm-widgetBuffer {
-    display: none; /* 要素を完全に非表示にして、挿入される隙間を削除 */
+    display: none;
+    /* 要素を完全に非表示にして、挿入される隙間を削除 */
 }
 
 /* 水平線（HR）ウィジェットのスタイル修正 */
@@ -3699,8 +3751,18 @@ body[data-theme="dark"] .calendar-content {
     top: 50%;
     left: 0;
     right: 0;
-    height: 3px; /* 線の太さ */
-    background-color: var(--sidebar-border); /* 線の色（サイドバーの枠線色などを流用、または #ccc） */
+    height: 3px;
+    /* 線の太さ */
+    background-color: var(--sidebar-border);
+    /* 線の色（サイドバーの枠線色などを流用、または #ccc） */
     transform: translateY(-50%);
     opacity: 0.5;
+}
+
+/* ファイル名部分: 省略記号の適用 */
+.tab-filename {
+    overflow: hidden;
+    /* はみ出しを隠す */
+    text-overflow: ellipsis;
+    /* 省略記号 (...) を表示 */
 }

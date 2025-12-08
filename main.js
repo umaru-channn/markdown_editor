@@ -130,6 +130,7 @@ function loadAppSettings() {
     fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
     autoSave: true,
+    autoSaveOnClose: false,
     wordWrap: true,
     windowTransparency: 0,
     tabSize: 4,
@@ -140,6 +141,7 @@ function loadAppSettings() {
     defaultImageLocation: '.',
     // デフォルトの除外設定
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
+    showStatusBar: true,
     // キーバインド設定
     keybindings: {},
     // PDFエクスポートのデフォルト設定

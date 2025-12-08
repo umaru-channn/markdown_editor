@@ -297,10 +297,10 @@ class PdfWidget extends WidgetType {
         wrapper.style.border = "1px solid #ccc";
 
         // ★ここが重要: 高さを固定してスクロールバーを出す
-        wrapper.style.height = "600px";
+        wrapper.style.height = "23.8em";
         wrapper.style.overflowY = "auto";
         wrapper.style.overflowX = "hidden";
-        wrapper.style.marginBottom = "10px";
+        wrapper.style.marginBottom = "0px";
 
         // 幅指定 (デフォルト600px)
         const displayWidth = this.width ? parseInt(this.width) : 600;

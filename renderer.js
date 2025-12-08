@@ -10,7 +10,7 @@
  */
 
 const path = require('path');
-const { webFrame } = require('electron'); 
+const { webFrame } = require('electron');
 const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
@@ -111,6 +111,7 @@ const fileTitleInput = document.getElementById('file-title-input');
 
 // ファイル統計情報
 const fileStatsElement = document.getElementById('file-stats');
+const statusBar = document.getElementById('status-bar');
 
 // ツールバーボタン
 const btnBulletList = document.getElementById('btn-bullet-list');
@@ -163,6 +164,7 @@ let appSettings = {
     fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
     autoSave: true,
+    autoSaveOnClose: false,
     wordWrap: true,
     windowTransparency: 0,
     tabSize: 4,
@@ -172,6 +174,7 @@ let appSettings = {
     highlightActiveLine: true,
     defaultImageLocation: '.',
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
+    showStatusBar: true,
     // PDF設定のデフォルト値
     pdfOptions: {
         pageSize: 'A4',
@@ -191,17 +194,19 @@ const COMMANDS_REGISTRY = [
     { id: 'file:save', name: 'ファイルを保存', defaultKey: 'Mod-s', context: 'global', run: () => saveCurrentFile() },
     { id: 'file:save-as', name: '名前を付けて保存', defaultKey: 'Mod-Shift-s', context: 'global', run: () => saveCurrentFile(true) },
     { id: 'file:new-tab', name: '新規タブ', defaultKey: 'Mod-t', context: 'global', run: () => createNewTab() },
-    { id: 'file:close-tab', name: 'タブを閉じる', defaultKey: 'Mod-w', context: 'global', run: () => { 
-        const tab = document.querySelector('.editor-tabs .tab.active'); if(tab) closeTab(tab, tab.id==='tab-settings'); 
-    }},
+    {
+        id: 'file:close-tab', name: 'タブを閉じる', defaultKey: 'Mod-w', context: 'global', run: () => {
+            const tab = document.querySelector('.editor-tabs .tab.active'); if (tab) closeTab(tab, tab.id === 'tab-settings');
+        }
+    },
     { id: 'file:reopen-tab', name: '閉じたタブを開く', defaultKey: 'Mod-Shift-t', context: 'global', run: () => reopenLastClosedTab() },
-    
+
     // サイドバー切替 (太字 Ctrl+B との競合を避けて Shift を追加)
-    { id: 'view:toggle-sidebar', name: 'サイドバーの表示/非表示', defaultKey: 'Mod-Shift-b', context: 'global', run: () => document.getElementById('btn-toggle-leftpane')?.click() }, 
+    { id: 'view:toggle-sidebar', name: 'サイドバーの表示/非表示', defaultKey: 'Mod-Shift-b', context: 'global', run: () => document.getElementById('btn-toggle-leftpane')?.click() },
     // ターミナル切替 (Ctrl+@)
-    { id: 'view:toggle-terminal', name: 'ターミナルの表示/非表示', defaultKey: 'Mod-@', context: 'global', run: () => { isTerminalVisible=!isTerminalVisible; updateTerminalVisibility(); } },
-    { id: 'view:toggle-right-pane', name: '右パネルの表示/非表示', defaultKey: 'Mod-l', context: 'global', run: () => { isRightActivityBarVisible=!isRightActivityBarVisible; updateTerminalVisibility(); } },
-    
+    { id: 'view:toggle-terminal', name: 'ターミナルの表示/非表示', defaultKey: 'Mod-@', context: 'global', run: () => { isTerminalVisible = !isTerminalVisible; updateTerminalVisibility(); } },
+    { id: 'view:toggle-right-pane', name: '右パネルの表示/非表示', defaultKey: 'Mod-l', context: 'global', run: () => { isRightActivityBarVisible = !isRightActivityBarVisible; updateTerminalVisibility(); } },
+
     // 1. アプリ全体(ウィンドウ)の拡大縮小 (新規追加)
     // 拡大: Ctrl + Shift + + (US配列等では = キー)
     { id: 'view:window-zoom-in', name: 'ウィンドウ拡大', defaultKey: 'Mod-Shift-+', context: 'global', run: () => adjustWindowZoom(0.5) },
@@ -238,7 +243,7 @@ const COMMANDS_REGISTRY = [
     { id: 'editor:link', name: 'リンク挿入', defaultKey: 'Mod-k', context: 'editor', run: (view) => insertLink(view) },
     { id: 'editor:code-block', name: 'コードブロック', defaultKey: 'Mod-Shift-c', context: 'editor', run: (view) => insertCodeBlock(view) },
     { id: 'editor:quote', name: '引用', defaultKey: 'Mod-Shift-.', context: 'editor', run: (view) => toggleLinePrefix(view, ">") },
-    
+
     // リスト
     { id: 'editor:list-bullet', name: '箇条書きリスト', defaultKey: 'Mod-Shift-8', context: 'editor', run: (view) => toggleList(view, 'ul') },
     { id: 'editor:list-number', name: '番号付きリスト', defaultKey: 'Mod-Shift-9', context: 'editor', run: (view) => toggleList(view, 'ol') },
@@ -319,6 +324,139 @@ let fileModificationState = new Map();
 let currentSortOrder = 'asc';
 let currentFilePath = null;
 let recentFiles = []; // 最近開いたファイルのリスト
+
+// PDFのズームレベルを管理するグローバル変数 (初期値: 1.5倍)
+let pdfCurrentScale = 1.5;
+
+/**
+ * 単一のPDFページを指定されたスケールでCanvasにレンダリングする
+ */
+async function renderPdfPageToCanvas(page, canvas, scale) {
+    // デバイスのピクセル比（Retinaディスプレイなどで重要）を取得
+    const pixelRatio = window.devicePixelRatio || 1;
+
+    // スケールをデバイスピクセル比で補正
+    const actualScale = scale; // PDF.jsが内部でdevicePixelRatioを考慮するため、ここでは補正しない
+
+    const viewport = page.getViewport({ scale: actualScale });
+
+    const context = canvas.getContext('2d');
+
+    // Canvasの解像度（高解像度画像として描画）
+    canvas.height = viewport.height * pixelRatio; // 縦方向の解像度
+    canvas.width = viewport.width * pixelRatio;   // 横方向の解像度
+
+    // CSSサイズ（見た目のサイズ）をViewportのサイズに設定
+    // これがCanvasを視覚的に拡大・縮小する部分です
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
+
+    // 描画コンテキストをピクセル比に応じてスケールさせる
+    context.scale(pixelRatio, pixelRatio);
+
+    // 描画
+    await page.render({
+        canvasContext: context,
+        viewport: viewport
+    }).promise;
+}
+
+/**
+ * PDF全体の描画とコントロールUIの生成を行う
+ * (ズーム変更時や初期描画時に呼び出される)
+ */
+async function renderAllPdfPages(pdf, container, filePath) {
+    // ズーム変更時にコンテナ全体を一旦クリア
+    container.innerHTML = '';
+
+    const numPages = pdf.numPages;
+
+    // 1. コントロールパネルのコンテナを作成 (ブロック要素として配置)
+    const controlsContainer = document.createElement('div');
+    controlsContainer.className = 'pdf-controls-top';
+    // ★修正: position:sticky を削除し、flex-shrink: 0 で固定領域化
+    controlsContainer.style.cssText = 'display:flex; justify-content:center; align-items:center; padding:10px 0; background-color:var(--sidebar-bg); width:100%; border-bottom: 1px solid var(--sidebar-border); color: var(--text-color); flex-shrink: 0;';
+    container.appendChild(controlsContainer);
+
+    // 2. ページ数とスケール表示エリア
+    const pageInfo = document.createElement('span');
+    pageInfo.id = 'pdf-page-indicator';
+    pageInfo.textContent = `1 / ${numPages} | Scale: ${Math.round(pdfCurrentScale * 100)}%`;
+    pageInfo.style.margin = '0 20px';
+    pageInfo.style.minWidth = '150px';
+    pageInfo.style.textAlign = 'center';
+    pageInfo.style.fontSize = '13px';
+    controlsContainer.appendChild(pageInfo);
+
+    // 3. ズームイン/アウトボタン
+    const createZoomBtn = (text, onClick) => {
+        const btn = document.createElement('button');
+        btn.textContent = text;
+        btn.onclick = onClick;
+        btn.style.cssText = 'background:transparent; border:1px solid var(--sidebar-border); color:var(--text-color); border-radius:3px; padding:2px 8px; cursor:pointer; margin:0 2px;';
+        return btn;
+    };
+
+    const zoomOutBtn = createZoomBtn('🔍 -', () => {
+        pdfCurrentScale = Math.max(0.5, pdfCurrentScale - 0.25);
+        renderAllPdfPages(pdf, container, filePath);
+    });
+    controlsContainer.appendChild(zoomOutBtn);
+
+    const zoomInBtn = createZoomBtn('🔍 +', () => {
+        pdfCurrentScale = Math.min(3.0, pdfCurrentScale + 0.25);
+        renderAllPdfPages(pdf, container, filePath);
+    });
+    controlsContainer.appendChild(zoomInBtn);
+
+
+    // 4. 描画エリア (ここだけスクロールさせる)
+    const pageRenderArea = document.createElement('div');
+    pageRenderArea.className = 'pdf-page-render-area';
+    // ★修正: flex: 1 と overflow-y: auto を追加してスクロール領域にする
+    pageRenderArea.style.cssText = 'flex: 1; overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; padding: 20px 0;';
+    container.appendChild(pageRenderArea);
+
+    // 5. Intersection Observer の設定
+    let activePageNum = 1;
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const pageNum = parseInt(entry.target.dataset.pageNum);
+                activePageNum = pageNum;
+
+                const indicator = document.getElementById('pdf-page-indicator');
+                if (indicator) {
+                    indicator.textContent = `${activePageNum} / ${numPages} | Scale: ${Math.round(pdfCurrentScale * 100)}%`;
+                }
+            }
+        });
+    }, {
+        root: pageRenderArea, // ★修正: 監視対象のスクロールコンテナを pageRenderArea に変更
+        rootMargin: '-40% 0px -40% 0px',
+        threshold: 0
+    });
+
+    // 6. 各ページをレンダリング
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const pageContainer = document.createElement('div');
+        pageContainer.className = 'pdf-page-container';
+        pageContainer.dataset.pageNum = pageNum;
+
+        pageContainer.style.cssText = 'margin-bottom:20px; position: relative;';
+        pageRenderArea.appendChild(pageContainer);
+
+        const canvas = document.createElement('canvas');
+        canvas.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+        pageContainer.appendChild(canvas);
+
+        const page = await pdf.getPage(pageNum);
+
+        await renderPdfPageToCanvas(page, canvas, pdfCurrentScale);
+
+        observer.observe(pageContainer);
+    }
+}
 
 // ========== 左ペイン幅の動的制御用変数更新関数 ==========
 function updateLeftPaneWidthVariable() {
@@ -449,7 +587,9 @@ function applySettingsToUI() {
     const fontSizeInput = document.getElementById('font-size');
     const fontFamilyInput = document.getElementById('font-family');
     const themeInput = document.getElementById('theme');
+    const showStatusBarInput = document.getElementById('show-status-bar');
     const autoSaveInput = document.getElementById('auto-save');
+    const autoSaveOnCloseInput = document.getElementById('auto-save-on-close');
     const wordWrapInput = document.getElementById('word-wrap');
     const tabSizeInput = document.getElementById('tab-size');
     const insertSpacesInput = document.getElementById('insert-spaces');
@@ -463,7 +603,9 @@ function applySettingsToUI() {
     if (fontSizeInput) fontSizeInput.value = appSettings.fontSize;
     if (fontFamilyInput) fontFamilyInput.value = appSettings.fontFamily;
     if (themeInput) themeInput.value = appSettings.theme;
+    if (showStatusBarInput) showStatusBarInput.checked = appSettings.showStatusBar;
     if (autoSaveInput) autoSaveInput.checked = appSettings.autoSave;
+    if (autoSaveOnCloseInput) autoSaveOnCloseInput.checked = appSettings.autoSaveOnClose;
     if (tabSizeInput) tabSizeInput.value = appSettings.tabSize;
     if (insertSpacesInput) insertSpacesInput.checked = appSettings.insertSpaces;
     if (showLineNumbersInput) showLineNumbersInput.checked = appSettings.showLineNumbers;
@@ -480,6 +622,33 @@ function applySettingsToUI() {
         const val = appSettings.windowTransparency !== undefined ? appSettings.windowTransparency : 0;
         opacityInput.value = val;
         opacityValue.textContent = `${val}%`;
+    }
+
+    // ステータスバーの表示制御
+    if (statusBar) {
+        statusBar.classList.toggle('hidden', !appSettings.showStatusBar);
+        // ステータスバーを非表示にするときは、下ペイン/リサイザーの bottom を 0 にする必要がある
+        const bottomOffset = appSettings.showStatusBar ? '24px' : '0px';
+        document.documentElement.style.setProperty('--status-bar-height', bottomOffset);
+
+        // bottom-paneの位置を調整
+        if (bottomPane) {
+            bottomPane.style.bottom = bottomOffset;
+
+            // 下ペインが隠れている状態でも、centerPane のマージンを適切に設定する
+            if (bottomPane.classList.contains('hidden') || !isTerminalVisible) {
+                centerPane.style.marginBottom = bottomOffset;
+            }
+        }
+
+        // リサイザー位置も調整（bottom-paneの高さが0になるため、リサイザーも隠す）
+        const resizerBottom = document.getElementById('resizer-bottom');
+        if (resizerBottom) {
+            resizerBottom.style.bottom = `calc(${parseInt(bottomPane?.style.height || '200px')}px + ${bottomOffset})`;
+            // ステータスバー非表示、またはターミナルが非表示の場合にリサイザーを隠す
+            const hideResizer = !appSettings.showStatusBar || bottomPane.classList.contains('hidden');
+            resizerBottom.classList.toggle('hidden', hideResizer);
+        }
     }
 
     // ステータスバーのフォントサイズ更新
@@ -583,6 +752,12 @@ function setupSettingsListeners() {
         updateEditorSettings();
     });
 
+    document.getElementById('show-status-bar')?.addEventListener('change', (e) => { // + 追加
+        appSettings.showStatusBar = e.target.checked;
+        saveSettings();
+        applySettingsToUI();
+    });
+
     // 透明度スライダーのリスナー
     const opacityInput = document.getElementById('window-opacity');
     if (opacityInput) {
@@ -606,6 +781,11 @@ function setupSettingsListeners() {
 
     document.getElementById('auto-save')?.addEventListener('change', (e) => {
         appSettings.autoSave = e.target.checked;
+        saveSettings();
+    });
+
+    document.getElementById('auto-save-on-close')?.addEventListener('change', (e) => { // 新規
+        appSettings.autoSaveOnClose = e.target.checked;
         saveSettings();
     });
 
@@ -1818,7 +1998,7 @@ const keybindingsCompartment = new Compartment();
 // 現在の設定に基づいてキーマップ配列を生成するヘルパー関数 (配列対応版)
 function getCombinedKeymap() {
     const dynamicKeymap = [];
-    
+
     // ユーザー設定のコマンド (COMMANDS_REGISTRY)
     COMMANDS_REGISTRY.filter(c => c.context === 'editor').forEach(cmd => {
         // キー設定を配列で取得 (ヘルパーを使用)
@@ -1885,7 +2065,7 @@ function createEditorState(content, filePath) {
             indentUnitCompartment.of(indentUnit.of(indentString)),
             tabSizeCompartment.of(EditorState.tabSize.of(appSettings.tabSize)),
             lineWrappingCompartment.of(appSettings.wordWrap ? EditorView.lineWrapping : []),
-            
+
             // コンパートメントを使って動的キーマップを適用
             // これにより、後から reconfigure でキー設定だけを即座に入れ替え可能になります
             keybindingsCompartment.of(Prec.highest(keymap.of(getCombinedKeymap()))),
@@ -1896,16 +2076,16 @@ function createEditorState(content, filePath) {
             search(),
             drawSelection(),
             dropCursor(),
-            
+
             // デフォルトキーマップ (優先度低)
             keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-            
+
             syntaxHighlighting(defaultHighlightStyle),
             languageCompartment.of(getLanguageExtensions(filePath)),
             activeLineCompartment.of(appSettings.highlightActiveLine ? highlightActiveLine() : []),
             autoCloseBracketsCompartment.of(appSettings.autoCloseBrackets ? closeBrackets() : []),
             lineNumbersCompartment.of(appSettings.showLineNumbers ? lineNumbers() : []),
-            
+
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
                     const isExternal = update.transactions.some(tr => tr.annotation(ExternalChange));
@@ -1931,18 +2111,18 @@ function renderHotkeysList() {
     COMMANDS_REGISTRY.forEach(cmd => {
         // 設定されているキーの配列を取得
         const keys = getKeybindingsForCommand(cmd.id);
-        
+
         // テキストフィルター
         if (hotkeySearchFilter) {
             const lowerFilter = hotkeySearchFilter.toLowerCase();
             const keysStr = keys.map(k => formatKeyDisplay(k)).join(' ').toLowerCase();
-            if (!cmd.name.toLowerCase().includes(lowerFilter) && 
+            if (!cmd.name.toLowerCase().includes(lowerFilter) &&
                 !cmd.id.includes(lowerFilter) &&
                 !keysStr.includes(lowerFilter)) {
                 return;
             }
         }
-        
+
         // キーフィルター (特定のキーバインドが含まれているか)
         if (hotkeyKeyFilter) {
             if (!keys.includes(hotkeyKeyFilter)) return;
@@ -1951,7 +2131,7 @@ function renderHotkeysList() {
         // 行要素の作成
         const row = document.createElement('div');
         row.className = 'hotkey-item';
-        
+
         // 設定があるかどうか
         const hasCustomSettings = appSettings.keybindings && appSettings.keybindings[cmd.id] !== undefined;
 
@@ -1971,7 +2151,7 @@ function renderHotkeysList() {
                 <span>${formatKeyDisplay(key)}</span>
                 <span class="remove-key-btn" title="削除" style="margin-left:6px; opacity:0.5; font-weight:bold; cursor:pointer;">×</span>
             `;
-            
+
             // 変更イベント
             badge.addEventListener('click', (e) => {
                 // 削除ボタンがクリックされた場合
@@ -2027,7 +2207,7 @@ function renderHotkeysList() {
             tempBadge.className = 'kbd-shortcut temp-badge';
             tempBadge.textContent = '...';
             badgesContainer.appendChild(tempBadge);
-            
+
             // 新規追加モードで記録開始 (oldKey = null)
             startRecordingKey(cmd.id, tempBadge, null);
         });
@@ -2074,7 +2254,7 @@ function startRecordingKey(commandId, element, oldKey = null) {
 
     // 元のHTMLを保存（バッジの中身など）
     const originalHTML = element.innerHTML;
-    
+
     // UI上の見た目を入力待ち状態にする
     element.innerHTML = '<span style="font-size:10px;">Type key...</span>';
     element.classList.add('recording');
@@ -2129,7 +2309,7 @@ function startRecordingKey(commandId, element, oldKey = null) {
         element.classList.remove('recording');
         window.removeEventListener('keydown', handleKeyDown, true);
         window.removeEventListener('mousedown', handleMouseDown);
-        
+
         if (cancelled) {
             element.innerHTML = originalHTML; // 元に戻す
             // 新規追加用の仮要素（...）だった場合は削除する
@@ -2149,10 +2329,10 @@ function startRecordingKey(commandId, element, oldKey = null) {
 // 設定の更新（追加・変更・削除対応）
 function updateKeybinding(id, newKey, oldKeyToReplace = null) {
     if (!appSettings.keybindings) appSettings.keybindings = {};
-    
+
     // 現在の設定を配列として取得
     let currentKeys = getKeybindingsForCommand(id);
-    
+
     if (oldKeyToReplace) {
         // --- 既存キーの変更または削除 ---
         if (newKey) {
@@ -2181,9 +2361,9 @@ function updateKeybinding(id, newKey, oldKeyToReplace = null) {
     } else {
         appSettings.keybindings[id] = currentKeys;
     }
-    
+
     saveSettings();
-    
+
     // 現在開いているエディタのキーマップを即座に更新
     if (globalEditorView) {
         globalEditorView.dispatch({
@@ -2621,7 +2801,13 @@ colorPicker.addEventListener('input', (e) => {
     applyTextColor(color);
 
     // ボタンのアイコン色も選んだ色に合わせて更新すると直感的です
-    colorBtn.querySelector('span').style.borderColor = color;
+    if (colorBtn) {
+        const iconSpan = colorBtn.querySelector('span');
+        // spanが存在する場合のみ色を適用（エラー回避）
+        if (iconSpan) {
+            iconSpan.style.borderColor = color;
+        }
+    }
 });
 
 // 3. 選択範囲のテキストを<span>タグで囲んで色をつける関数
@@ -2638,7 +2824,14 @@ function applyTextColor(color) {
     if (from === to) return;
 
     // 選択されているテキストを取得
-    const text = state.sliceDoc(from, to);
+    let text = state.sliceDoc(from, to);
+
+    // 既に色がついている場合（<span>で囲まれている場合）は、中身を取り出してネストを防ぐ
+    // これにより、パレットを動かしている間に <span><span>...</span></span> と増殖するのを防ぎます
+    const spanMatch = text.match(/^<span style="color: [^"]+">([\s\S]*?)<\/span>$/);
+    if (spanMatch) {
+        text = spanMatch[1];
+    }
 
     // HTMLタグ形式で色を指定
     const coloredText = `<span style="color: ${color}">${text}</span>`;
@@ -2646,8 +2839,9 @@ function applyTextColor(color) {
     // エディタの内容を書き換える
     globalEditorView.dispatch({
         changes: { from, to, insert: coloredText },
-        // 挿入後、カーソルを挿入テキストの直後に移動（選択解除）
-        selection: { anchor: from + coloredText.length }
+        // 挿入後、挿入したテキスト全体を選択状態にする
+        // これにより、連続して色を変更（ドラッグ操作）した際に、同じ範囲に対して色を上書きできます
+        selection: { anchor: from, head: from + coloredText.length }
     });
 
     // エディタにフォーカスを戻す
@@ -2777,13 +2971,20 @@ function onEditorInput(markAsDirty = true) {
     updateFileStats();
 
     // 3. 自動保存の実装
-    if (appSettings.autoSave && currentFilePath && currentFilePath !== 'README.md') {
+    const fileData = openedFiles.get(currentFilePath);
+    const isVirtual = fileData && fileData.isVirtual;
+
+    if (appSettings.autoSave && currentFilePath && currentFilePath !== 'README.md' && !isVirtual) { // 仮想ファイルでない場合のみ実行
         if (autoSaveTimer) clearTimeout(autoSaveTimer);
         // 2秒間入力がなければ保存
         autoSaveTimer = setTimeout(() => {
             saveCurrentFile(false);
             console.log('Auto-saved:', currentFilePath);
         }, 2000);
+    } else if (autoSaveTimer) {
+        // 仮想ファイルに切り替わった場合や設定がOFFの場合にタイマーをクリア
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
     }
 }
 
@@ -3119,23 +3320,29 @@ function updateTerminalVisibility() {
     if (isTerminalVisible && !isPositionRight) {
         bottomPane.classList.remove('hidden');
         if (resizerBottom) resizerBottom.classList.remove('hidden');
+
+        // ステータスバーの高さ (0px or 24px)
+        const statusBarHeight = appSettings.showStatusBar ? 24 : 0;
+
         if (!bottomPane.style.height || bottomPane.style.height === '0px') {
             bottomPane.style.height = '200px';
-            resizerBottom.style.top = `calc(100vh - 200px - 24px)`;
+            // resizerBottom の top を直接計算（status-bar-height CSS変数は bottom-pane の bottom に使用される）
+            const newResizerTop = window.innerHeight - 200 - statusBarHeight;
+            if (resizerBottom) resizerBottom.style.top = `${newResizerTop}px`;
         }
 
         const currentHeight = bottomPane.style.height || '200px';
         const heightVal = parseInt(currentHeight);
 
-        centerPane.style.marginBottom = heightVal + 'px';
+        centerPane.style.marginBottom = (heightVal + statusBarHeight) + 'px';
 
     } else {
         bottomPane.classList.add('hidden');
         if (resizerBottom) resizerBottom.classList.add('hidden');
 
-        if (!isTerminalVisible || isPositionRight) {
-            centerPane.style.marginBottom = '0px';
-        }
+        // 非表示の場合、ステータスバーが表示されていればステータスバーの高さだけマージンを確保
+        const statusBarHeight = appSettings.showStatusBar ? 24 : 0;
+        centerPane.style.marginBottom = `${statusBarHeight}px`;
     }
 
     const tabsContainer = document.getElementById('terminal-tabs-container');
@@ -3535,10 +3742,6 @@ async function createCanvasBasedPreview(htmlElement) {
 
 async function displayPdfFromData(pdfData) {
     try {
-        if (typeof pdfjsLib === 'undefined') {
-            console.error('PDF.js library not loaded');
-            return;
-        }
 
         const pdfDataArray = Uint8Array.from(atob(pdfData), c => c.charCodeAt(0));
         const loadingTask = pdfjsLib.getDocument({ data: pdfDataArray });
@@ -5531,6 +5734,18 @@ function setupFileExplorerEvents() {
                     showNotification(`Redoエラー: ${err.message}`, 'error');
                 }
             }
+
+            // Delete Key (Delete or Backspace)
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const selectedItem = fileContentContainer.querySelector('.tree-item.selected');
+                if (selectedItem && selectedItem.dataset.path) {
+                    // 削除確認はconfirmAndDelete内で行っている
+                    await confirmAndDelete(selectedItem.dataset.path);
+                }
+            }
         });
 
         fileContentContainer.addEventListener('click', (e) => {
@@ -6158,7 +6373,7 @@ function getFileType(filePath) {
 async function renderMediaContent(filePath, type) {
     const container = document.getElementById('media-view');
     if (!container) return;
-    container.innerHTML = ''; // クリア
+    container.innerHTML = '';
 
     if (type === 'image') {
         const img = document.createElement('img');
@@ -6175,40 +6390,17 @@ async function renderMediaContent(filePath, type) {
         container.appendChild(loading);
 
         try {
-            if (typeof pdfjsLib === 'undefined') {
-                loading.textContent = 'PDF.js library not loaded.';
-                return;
-            }
-            
+
             const url = `file://${filePath.replace(/\\/g, '/')}`;
             const loadingTask = pdfjsLib.getDocument(url);
             const pdf = await loadingTask.promise;
-            
-            container.removeChild(loading);
-            
-            // 全ページ描画
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                const canvas = document.createElement('canvas');
-                canvas.style.marginBottom = '10px';
-                canvas.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-                container.appendChild(canvas);
-                
-                const page = await pdf.getPage(pageNum);
-                const viewport = page.getViewport({ scale: 1.5 });
-                
-                const context = canvas.getContext('2d');
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
-                
-                // CSSで幅を調整（コンテナに合わせる）
-                canvas.style.maxWidth = '100%';
-                canvas.style.height = 'auto';
 
-                await page.render({
-                    canvasContext: context,
-                    viewport: viewport
-                }).promise;
-            }
+            // ロードが完了したら、ローディングメッセージを削除
+            container.removeChild(loading);
+
+            // 新しい描画関数を呼び出し、コントロールUIと全ページを描画
+            await renderAllPdfPages(pdf, container, filePath);
+
         } catch (e) {
             loading.textContent = `Error loading PDF: ${e.message}`;
             console.error(e);
@@ -6261,14 +6453,14 @@ async function openFile(filePath, fileName) {
             tab = document.createElement('div');
             tab.className = 'tab';
             tab.dataset.filepath = normalizedPath;
-            tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
+            tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
             editorTabsContainer.appendChild(tab);
-            
+
             // type情報を保存
-            openedFiles.set(normalizedPath, { 
-                content: fileContent, 
+            openedFiles.set(normalizedPath, {
+                content: fileContent,
                 fileName: fileName,
-                type: fileType 
+                type: fileType
             });
         }
 
@@ -6284,7 +6476,8 @@ function showWelcomeReadme() {
 
     openedFiles.set(readmePath, {
         content: startDoc,
-        fileName: 'README.md'
+        fileName: 'README.md',
+        isVirtual: true
     });
 
     const tab = document.createElement('div');
@@ -6311,9 +6504,18 @@ function closeWelcomeReadme() {
 }
 
 function switchToFile(filePath) {
-    // 1. 現在開いているファイルの状態保存 (テキストファイルの場合のみ)
-    if (currentFilePath && globalEditorView && openedFiles.has(currentFilePath)) {
-        const currentFileData = openedFiles.get(currentFilePath);
+    // 古いパスを保存
+    const previouslyActivePath = currentFilePath;
+
+    // ファイル切り替え時に古いファイルの自動保存タイマーをクリア
+    if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+    }
+
+    // 1. 現在開いているファイルの状態を保存する (テキストファイルの場合のみ)
+    if (previouslyActivePath && globalEditorView && openedFiles.has(previouslyActivePath)) {
+        const currentFileData = openedFiles.get(previouslyActivePath);
         // typeが'text'または未定義の場合のみ保存
         if (!currentFileData.type || currentFileData.type === 'text') {
             currentFileData.editorState = globalEditorView.state;
@@ -6322,15 +6524,29 @@ function switchToFile(filePath) {
     }
 
     // 2. 新しいファイル情報取得
+    const fileDataForCheck = openedFiles.get(filePath);
+    const fileTypeForCheck = fileDataForCheck ? (fileDataForCheck.type || 'text') : getFileType(filePath);
+
+    // 既にアクティブなメディアファイルが再度クリックされた場合は、重い処理をスキップ
+    if (filePath === previouslyActivePath && fileTypeForCheck !== 'text') {
+        // メディアファイル（画像/PDF）で、既に表示中の場合は再描画を避けるため処理を終了
+        return;
+    }
+
+    // 3. パスを更新し、処理を継続
     currentFilePath = filePath;
     const fileData = openedFiles.get(filePath);
     const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
+
+    // ★修正: 仮想的なREADME.mdかどうかを判定する
+    const isVirtualReadme = fileData && fileData.isVirtual === true;
 
     // DOM要素取得
     const editorEl = document.getElementById('editor');
     const mediaViewEl = document.getElementById('media-view');
     const toolbar = document.querySelector('.toolbar');
     const searchWidget = document.getElementById('custom-search-widget');
+    const fileTitleBarEl = document.getElementById('file-title-bar');
 
     // 親コンテナを表示
     switchMainView('content-readme');
@@ -6338,34 +6554,49 @@ function switchToFile(filePath) {
     // --- ビューの切り替え ---
     if (fileType === 'text') {
         // テキストモード
+
         if (editorEl) editorEl.style.display = 'block';
         if (mediaViewEl) mediaViewEl.classList.add('hidden');
-        if (toolbar) toolbar.classList.remove('hidden'); // ツールバー表示
 
+        // ツールバーは常にテキストモードで表示
+        if (toolbar) toolbar.classList.remove('hidden');
+
+        // 仮想README.mdの場合のみタイトルバーを非表示
+        if (fileTitleBarEl) {
+            if (isVirtualReadme) {
+                fileTitleBarEl.classList.add('hidden');
+            } else {
+                fileTitleBarEl.classList.remove('hidden');
+            }
+        }
+
+        // エディタの状態復元
         if (globalEditorView) {
-            if (fileData.editorState) {
+            if (fileData && fileData.editorState) {
                 globalEditorView.setState(fileData.editorState);
             } else {
                 const fileContent = fileData ? fileData.content : '';
                 const newState = createEditorState(fileContent, filePath);
                 globalEditorView.setState(newState);
             }
-            // フォーカスを戻す
-            globalEditorView.focus();
         }
     } else {
         // メディアモード (画像/PDF)
         if (editorEl) editorEl.style.display = 'none';
         if (mediaViewEl) mediaViewEl.classList.remove('hidden');
         if (toolbar) toolbar.classList.add('hidden'); // ツールバー非表示
-        if (searchWidget) searchWidget.classList.add('hidden'); // 検索無効
+        if (searchWidget) searchWidget.classList.add('hidden'); // 検索窓非表示
+
+        // メディアファイルの場合はタイトルバーを隠す
+        if (fileTitleBarEl) fileTitleBarEl.classList.add('hidden');
 
         // メディア描画
         renderMediaContent(filePath, fileType);
     }
 
     // --- UI更新処理 ---
-    if (fileTitleInput) {
+    // 仮想README.mdではないテキストファイルの場合のみタイトル入力欄を更新
+    if (fileType === 'text' && !isVirtualReadme && fileTitleInput) {
         const fileName = fileData ? fileData.fileName : filePath.split(/[\/\\]/).pop();
         const extIndex = fileName.lastIndexOf('.');
         const fileNameWithoutExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
@@ -6375,8 +6606,8 @@ function switchToFile(filePath) {
     updateOutline();
 
     if (isPdfPreviewVisible) {
-        // PDFプレビュー画面（右ペイン）はテキストファイル以外なら空にするか、何もしない
-        if (fileType === 'text') {
+        // PDFプレビュー画面（右ペイン）はテキストファイル以外または仮想README.md以外で更新
+        if (fileType === 'text' && !isVirtualReadme) {
             generatePdfPreview();
         }
     }
@@ -6387,6 +6618,10 @@ function switchToFile(filePath) {
     }
 
     updateFileStats();
+
+    // switchToFileの最後にonEditorInputを呼び出し、新しいファイルの状態に合わせて自動保存のタイマーを再設定する
+    // onEditorInput 内で自動保存の有効・無効を判定するロジックが走ります
+    onEditorInput(false);
 }
 
 function closeTab(element, isSettings = false) {
@@ -6398,8 +6633,17 @@ function closeTab(element, isSettings = false) {
         const filePath = element.dataset.filepath;
 
         if (filePath) {
-            // 閉じたタブの情報を履歴に保存
+
+            // 自動保存がONかつ未保存の場合の処理を追加
+            const isDirty = fileModificationState.get(filePath);
             const fileData = openedFiles.get(filePath);
+
+            if (isDirty && appSettings.autoSave && appSettings.autoSaveOnClose && !(fileData && fileData.isVirtual)) {
+                // 未保存かつ自動保存(大元)と閉じる時保存がON、かつ新規ファイル(仮想ファイル)ではない場合
+                saveCurrentFile(false, filePath); // ファイルパスを渡して、このファイルを保存
+            }
+
+            // 閉じたタブの情報を履歴に保存
             if (fileData) {
                 closedTabsHistory.push({
                     path: filePath,
@@ -6508,7 +6752,7 @@ function switchTab(direction) {
     if (nextIndex < 0) nextIndex = tabs.length - 1;
 
     const targetTab = tabs[nextIndex];
-    
+
     // タブの種類に応じて切り替え
     if (targetTab.id === 'tab-settings') {
         openSettingsTab();
@@ -6517,12 +6761,29 @@ function switchTab(direction) {
     }
 }
 
-async function saveCurrentFile(isSaveAs = false) {
-    if (!currentFilePath) {
+async function saveCurrentFile(isSaveAs = false, targetPath = null) {
+    const filePath = targetPath || currentFilePath;
+
+    if (!filePath) {
         console.warn('ファイルが選択されていません');
         return;
     }
-    if (!globalEditorView) return;
+
+    let content;
+    if (targetPath && targetPath !== currentFilePath) {
+        const targetFileData = openedFiles.get(targetPath);
+        content = targetFileData ? targetFileData.content : null;
+
+        if (!content) {
+            console.warn(`Target file content not found for path: ${targetPath}`);
+            return;
+        }
+    } else {
+        // 現在アクティブなファイルの場合
+        if (!globalEditorView) return;
+        content = globalEditorView.state.doc.toString();
+    }
+
     if (currentFilePath === 'README.md') return;
 
     try {
@@ -6571,7 +6832,7 @@ async function saveCurrentFile(isSaveAs = false) {
                 const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
                 if (tab) {
                     const fileName = path.basename(currentFilePath);
-                    tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${currentFilePath}">×</span>`;
+                    tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${filePath}}">×</span>`;
                 }
                 console.log(`✅ ファイルを保存しました: ${currentFilePath}`);
 
@@ -7233,9 +7494,9 @@ document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey) parts.push('Mod');
     if (e.altKey) parts.push('Alt');
     if (e.shiftKey) parts.push('Shift');
-    
+
     let keyChar = e.key;
-    
+
     // 特殊キーの名称統一 (CodeMirrorの形式に合わせる)
     if (keyChar === ' ') keyChar = 'Space';
     else if (keyChar === 'ArrowUp') keyChar = 'ArrowUp';
@@ -7256,10 +7517,10 @@ document.addEventListener('keydown', (e) => {
     const matchedCommand = COMMANDS_REGISTRY.find(cmd => {
         // グローバルコンテキストのコマンドのみ対象
         if (cmd.context !== 'global') return false;
-        
+
         // 配列対応版のヘルパー関数を使って設定を取得
         const keys = getKeybindingsForCommand(cmd.id);
-        
+
         // 入力されたキーが、設定されたキー配列の中に含まれているかチェック
         return keys.includes(currentKeyStr);
     });

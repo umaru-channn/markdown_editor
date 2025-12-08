@@ -641,7 +641,9 @@
                 <div class="editor-area" id="content-readme">
                     <div id="editor" style="height: 100%;"></div>
 
-                    <div id="media-view" class="hidden" style="height: 100%; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 20px; box-sizing: border-box;"></div>
+                    <div id="media-view" class="hidden"
+                        style="height: 100%; width: 100%; display: flex; flex-direction: column; overflow: hidden; background-color: var(--main-bg);">
+                    </div>
 
                     <div id="custom-search-widget" class="search-widget hidden">
                         <div class="search-widget-row">
@@ -744,6 +746,17 @@
                                     </label>
                                 </div>
                                 <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="auto-save-on-close">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">タブを閉じる際に自動保存する</span>
+                                            <span
+                                                class="label-desc">未保存のファイルを閉じる際に確認なしで自動的に保存します。（自動保存がONの場合のみ有効）</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
                                     <label for="exclude-patterns">除外するファイル/フォルダ (Exclude Patterns)</label>
                                     <input type="text" id="exclude-patterns"
                                         placeholder="例: node_modules, .git, dist, build">
@@ -821,6 +834,18 @@
                                         </div>
                                     </label>
                                 </div>
+                            </div>
+
+                            <div class="settings-section" id="settings-section-appearance">
+                                <h2>外観 (Appearance)</h2>
+                                <div class="setting-item">
+                                    <label for="theme">テーマ</label>
+                                    <select id="theme">
+                                        <option value="light">ライト (Light)</option>
+                                        <option value="dark">ダーク (Dark)</option>
+                                    </select>
+                                </div>
+
                                 <div class="setting-item">
                                     <label for="font-size">フォントサイズ</label>
                                     <select id="font-size">
@@ -871,16 +896,16 @@
                                         <option value='"Comic Sans MS", cursive'>Comic Sans MS (手書き風)</option>
                                     </select>
                                 </div>
-                            </div>
 
-                            <div class="settings-section" id="settings-section-appearance">
-                                <h2>外観 (Appearance)</h2>
                                 <div class="setting-item">
-                                    <label for="theme">テーマ</label>
-                                    <select id="theme">
-                                        <option value="light">ライト (Light)</option>
-                                        <option value="dark">ダーク (Dark)</option>
-                                    </select>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-status-bar">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">ステータスバーを表示</span>
+                                            <span class="label-desc">画面下部にファイル統計情報やGitブランチ情報を表示します。</span>
+                                        </div>
+                                    </label>
                                 </div>
 
                                 <div class="setting-item">
@@ -1091,7 +1116,8 @@
                     </svg>
                 </div>
                 <div class="icon" id="btn-calendar" title="カレンダー">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                         <line x1="16" y1="2" x2="16" y2="6"></line>
                         <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -1118,7 +1144,7 @@
 
         <div class="resizer" id="resizer-bottom"></div>
 
-        <div class="status-bar">
+        <div class="status-bar" id="status-bar">
             <div class="status-left">
                 <span id="status-bar-branch" class="status-bar-item hidden" title="ブランチを作成・切り替え"></span>
                 <span id="sync-status-text" style="margin-left: 10px;"></span>
@@ -1149,6 +1175,17 @@
         import * as pdfjsLib from './node_modules/pdfjs-dist/build/pdf.min.mjs';
         pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
         window.pdfjsLib = pdfjsLib;
+    </script>
+    <script src="./node_modules/pdfjs-dist/build/pdf.min.mjs" type="module"></script>
+    <script src="./node_modules/pdfjs-dist/build/pdf.worker.min.mjs" type="module"></script>
+    <script>
+        // PDF.jsがグローバルに定義されていることを前提とする
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.cMapUrl = './node_modules/pdfjs-dist/cmaps/';
+            pdfjsLib.GlobalWorkerOptions.cMapPacked = true;
+            // ワーカースクリプトのパスも明示的に設定
+            pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
+        }
     </script>
     <script src="./calendar.js"></script>
     <script src="./renderer.js"></script>
