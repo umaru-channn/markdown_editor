@@ -1007,14 +1007,20 @@ function createWindow() {
 
   // CSPヘッダーを設定する処理
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self'; img-src 'self' https: data: file:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com;"
-        ]
-      }
-    })
+    // アプリ本体（file:// プロトコル）にのみCSPを適用する
+    if (details.url.startsWith('file://')) {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; img-src 'self' https: data: file:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https://calendar.google.com/ https://www.google.com/;"
+          ]
+        }
+      })
+    } else {
+      // Googleカレンダーなどの外部URLには、アプリ側のCSPを強制しない（元のヘッダーをそのまま返す）
+      callback({ responseHeaders: details.responseHeaders })
+    }
   })
 
   // --- Integrated Terminal Setup with TerminalService ---

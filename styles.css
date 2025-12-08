@@ -2299,7 +2299,7 @@ body[data-theme="dark"] .cm-page-break-widget::after {
     border: 1px solid #e5e7eb;
     border-radius: 6px;
     overflow: hidden;
-    margin: 0.5em 0;
+    margin: 0em 0;
     background-color: #ffffff;
     transition: background-color 0.2s;
     text-decoration: none;
@@ -3646,4 +3646,61 @@ body[data-theme="dark"] .hotkey-action-btn:hover {
     border-style: dashed;
     background-color: transparent;
     opacity: 0.7;
+}
+
+/* ========== Calendar Styles ========== */
+.calendar-header {
+    padding: 0 10px;
+    background: #252526;
+    border-bottom: 1px solid #333;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: #ccc;
+    flex-shrink: 0;
+}
+
+.calendar-content {
+    flex: 1;
+    overflow: hidden;
+    background-color: #fff; /* カレンダー背景 */
+    display: flex;
+    flex-direction: column;
+}
+
+/* ダークモード時のボーダー調整（iframeの中身はGoogle依存なので完全対応不可） */
+body[data-theme="dark"] .calendar-content {
+    background-color: #1e1e1e;
+}
+
+/* CodeMirror の改ページ、カード、水平線などのバッファ要素を非表示にする */
+.ͼ1 .cm-widgetBuffer {
+    display: none; /* 要素を完全に非表示にして、挿入される隙間を削除 */
+}
+
+/* 水平線（HR）ウィジェットのスタイル修正 */
+/* 以前の .cm-content hr 設定があれば削除または以下に書き換え */
+.cm-live-widget-hr {
+    /* 行の高さを通常のテキスト行と同じにする（行番号のズレ防止） */
+    height: var(--line-height);
+    margin: 0;
+    border: none;
+    background: transparent;
+    display: block;
+    position: relative;
+    box-sizing: border-box;
+}
+
+/* 線を中央に描画するための設定 */
+.cm-live-widget-hr::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 3px; /* 線の太さ */
+    background-color: var(--sidebar-border); /* 線の色（サイドバーの枠線色などを流用、または #ccc） */
+    transform: translateY(-50%);
+    opacity: 0.5;
 }

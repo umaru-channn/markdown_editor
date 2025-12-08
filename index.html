@@ -641,6 +641,8 @@
                 <div class="editor-area" id="content-readme">
                     <div id="editor" style="height: 100%;"></div>
 
+                    <div id="media-view" class="hidden" style="height: 100%; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 20px; box-sizing: border-box;"></div>
+
                     <div id="custom-search-widget" class="search-widget hidden">
                         <div class="search-widget-row">
                             <div class="search-input-container">
@@ -1088,6 +1090,14 @@
                         <circle cx="12" cy="12" r="3"></circle>
                     </svg>
                 </div>
+                <div class="icon" id="btn-calendar" title="カレンダー">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                </div>
                 <!-- <div class="icon" id="btn-info" title="情報">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10"></circle>
@@ -1140,6 +1150,7 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
         window.pdfjsLib = pdfjsLib;
     </script>
+    <script src="./calendar.js"></script>
     <script src="./renderer.js"></script>
 </body>
 

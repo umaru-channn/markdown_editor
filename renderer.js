@@ -72,6 +72,7 @@ const rightPane = document.getElementById('right-pane');
 const rightActivityBar = document.querySelector('.right-activity-bar');
 const bottomPane = document.getElementById('bottom-pane');
 const centerPane = document.getElementById('center-pane');
+const btnCalendar = document.getElementById('btn-calendar');
 
 // トップバー操作
 const btnToggleLeftPane = document.getElementById('btn-toggle-leftpane');
@@ -3061,6 +3062,7 @@ function updateTerminalVisibility() {
     const terminalHeader = document.getElementById('terminal-header');
     const pdfPreviewHeader = document.getElementById('pdf-preview-header');
     const pdfPreviewContainer = document.getElementById('pdf-preview-container');
+    const showCalendar = window.calendarAPI ? window.calendarAPI.getVisible() : false;
 
     if (rightActivityBar) {
         rightActivityBar.classList.toggle('hidden', !isRightActivityBarVisible);
@@ -3068,7 +3070,7 @@ function updateTerminalVisibility() {
 
     const showPdf = isPdfPreviewVisible;
     const showTerminalRight = isTerminalVisible && isPositionRight;
-    const needRightPane = (showPdf || showTerminalRight) && isRightActivityBarVisible;
+    const needRightPane = (showPdf || showTerminalRight || showCalendar) && isRightActivityBarVisible;
 
     const barWidth = isRightActivityBarVisible ? rightActivityBarWidth : 0;
     document.documentElement.style.setProperty('--right-activity-offset,', barWidth + 'px');
@@ -3080,16 +3082,24 @@ function updateTerminalVisibility() {
         rightPane.classList.remove('hidden');
         if (resizerRight) resizerRight.classList.remove('hidden');
 
-        if (showPdf) {
-            if (terminalHeader) terminalHeader.classList.add('hidden');
-            if (terminalContainer) terminalContainer.classList.add('hidden');
+        // ★修正: 排他制御に応じたヘッダー/コンテンツの表示・非表示
+        // まず全て隠す
+        if (terminalHeader) terminalHeader.classList.add('hidden');
+        if (terminalContainer) terminalContainer.classList.add('hidden');
+        if (pdfPreviewHeader) pdfPreviewHeader.classList.add('hidden');
+        if (pdfPreviewContainer) pdfPreviewContainer.classList.add('hidden');
+        // カレンダーはAPI側でDOM操作しているので、ここでは干渉しないか、APIの状態に任せる
+        // ただし、もし calendarAPI がDOMクラス操作だけで完結していない場合はここでも制御が必要だが、
+        // 今回は calendarAPI.updateView() が呼ばれている前提で、他要素を隠すだけで良い。
+
+        if (showCalendar) {
+            // カレンダーが表示中の場合、他は既に隠されている
+        } else if (showPdf) {
             if (pdfPreviewHeader) pdfPreviewHeader.classList.remove('hidden');
             if (pdfPreviewContainer) pdfPreviewContainer.classList.remove('hidden');
-        } else {
+        } else if (showTerminalRight) {
             if (terminalHeader) terminalHeader.classList.remove('hidden');
             if (terminalContainer) terminalContainer.classList.remove('hidden');
-            if (pdfPreviewHeader) pdfPreviewHeader.classList.add('hidden');
-            if (pdfPreviewContainer) pdfPreviewContainer.classList.add('hidden');
         }
 
         const rightPaneWidth = rightPane.style.width || '350px';
@@ -3157,6 +3167,7 @@ function updateTerminalVisibility() {
 
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
+    if (btnCalendar) btnCalendar.classList.toggle('active', showCalendar);
 
     // CSSのトランジションを削除したため、即座に完了処理を行う
     document.body.classList.remove('is-layout-changing');
@@ -3215,6 +3226,7 @@ if (btnTerminalRight) {
         } else {
             isTerminalVisible = true;
             isPdfPreviewVisible = false;
+            if (window.calendarAPI) window.calendarAPI.hide();
         }
         updateTerminalVisibility();
     });
@@ -3315,9 +3327,37 @@ if (btnZen) {
     });
 }
 
-if (btnPdfPreview) {
+if (btnPdfPreview) { // togglePdfPreview関数を直接呼んでいる既存コードを修正
     btnPdfPreview.addEventListener('click', () => {
-        togglePdfPreview();
+        if (isPdfPreviewVisible) {
+            isPdfPreviewVisible = false;
+        } else {
+            // 排他制御: PDFプレビューを開くときは他を閉じる
+            isPdfPreviewVisible = true;
+            isTerminalVisible = false;
+            if (window.calendarAPI) window.calendarAPI.hide();
+            generatePdfPreview(); // PDF生成
+        }
+        updateTerminalVisibility();
+    });
+}
+
+if (btnCalendar) {
+    btnCalendar.addEventListener('click', () => {
+        // calendarAPIが存在するか確認
+        if (!window.calendarAPI) return;
+
+        const isCalendarVisible = window.calendarAPI.getVisible();
+
+        if (isCalendarVisible) {
+            window.calendarAPI.hide();
+        } else {
+            // 排他制御: カレンダーを開くときは他を閉じる
+            window.calendarAPI.show();
+            isTerminalVisible = false;
+            isPdfPreviewVisible = false;
+        }
+        updateTerminalVisibility();
     });
 }
 
@@ -5781,6 +5821,11 @@ window.addEventListener('load', async () => {
     updateLeftPaneWidthVariable();
     initToolbarOverflow();
 
+    // カレンダー機能の初期化
+    if (window.calendarAPI) {
+        window.calendarAPI.init();
+    }
+
     if (isTerminalVisible) {
         initializeTerminal();
     }
@@ -6092,8 +6137,87 @@ function showBranchMenu(targetElement, branches, currentBranch) {
 
 // ========== ファイルシステム操作 ==========
 
+/**
+ * ファイルパスからファイルタイプを判定するヘルパー
+ */
+function getFileType(filePath) {
+    if (!filePath) return 'text';
+    const ext = path.extname(filePath).toLowerCase();
+    if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico'].includes(ext)) {
+        return 'image';
+    }
+    if (ext === '.pdf') {
+        return 'pdf';
+    }
+    return 'text';
+}
+
+/**
+ * 画像やPDFを #media-view に描画する関数
+ */
+async function renderMediaContent(filePath, type) {
+    const container = document.getElementById('media-view');
+    if (!container) return;
+    container.innerHTML = ''; // クリア
+
+    if (type === 'image') {
+        const img = document.createElement('img');
+        // Windowsパスのバックスラッシュをスラッシュに置換して file:// プロトコルで使用
+        img.src = `file://${filePath.replace(/\\/g, '/')}`;
+        img.style.maxWidth = '100%';
+        img.style.boxShadow = '0 0 10px rgba(0,0,0,0.1)';
+        container.appendChild(img);
+    } else if (type === 'pdf') {
+        const loading = document.createElement('div');
+        loading.textContent = 'Loading PDF...';
+        loading.style.color = '#888';
+        loading.style.marginTop = '20px';
+        container.appendChild(loading);
+
+        try {
+            if (typeof pdfjsLib === 'undefined') {
+                loading.textContent = 'PDF.js library not loaded.';
+                return;
+            }
+            
+            const url = `file://${filePath.replace(/\\/g, '/')}`;
+            const loadingTask = pdfjsLib.getDocument(url);
+            const pdf = await loadingTask.promise;
+            
+            container.removeChild(loading);
+            
+            // 全ページ描画
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const canvas = document.createElement('canvas');
+                canvas.style.marginBottom = '10px';
+                canvas.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+                container.appendChild(canvas);
+                
+                const page = await pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 1.5 });
+                
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                // CSSで幅を調整（コンテナに合わせる）
+                canvas.style.maxWidth = '100%';
+                canvas.style.height = 'auto';
+
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+            }
+        } catch (e) {
+            loading.textContent = `Error loading PDF: ${e.message}`;
+            console.error(e);
+        }
+    }
+}
+
 async function openFile(filePath, fileName) {
-    // パスを正規化して統一（区切り文字の違いや相対パスの問題を解消）
+    // パスを正規化して統一
     const normalizedPath = path.resolve(filePath);
 
     // 履歴に追加
@@ -6104,25 +6228,33 @@ async function openFile(filePath, fileName) {
             closeWelcomeReadme();
         }
 
-        // 既に開いているかチェック（正規化されたパスを使用）
+        // 既に開いているかチェック
         let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
 
-        // 既にタブがある場合は、ファイル読み込みをスキップして切り替えるだけにする
         if (tab) {
             switchToFile(normalizedPath);
             return;
         }
 
+        // ファイルタイプ判定
+        const fileType = getFileType(normalizedPath);
         let fileContent = '';
-        if (typeof window.electronAPI?.loadFile === 'function') {
-            try {
-                fileContent = await window.electronAPI.loadFile(normalizedPath);
-            } catch (error) {
-                console.error('Failed to load file content:', error);
-                fileContent = `ファイルを読み込めません: ${error.message}`;
+
+        // テキストファイルの場合のみ内容を読み込む
+        if (fileType === 'text') {
+            if (typeof window.electronAPI?.loadFile === 'function') {
+                try {
+                    fileContent = await window.electronAPI.loadFile(normalizedPath);
+                } catch (error) {
+                    console.error('Failed to load file content:', error);
+                    fileContent = `ファイルを読み込めません: ${error.message}`;
+                }
+            } else {
+                fileContent = `ファイル: ${fileName}\n(内容は読み込めません)`;
             }
         } else {
-            fileContent = `ファイル: ${fileName}\n(内容は読み込めません)`;
+            // 画像やPDFの場合は内容は空でOK（パスを使って表示するため）
+            fileContent = null;
         }
 
         if (!tab) {
@@ -6131,7 +6263,13 @@ async function openFile(filePath, fileName) {
             tab.dataset.filepath = normalizedPath;
             tab.innerHTML = `${fileName} <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
             editorTabsContainer.appendChild(tab);
-            openedFiles.set(normalizedPath, { content: fileContent, fileName: fileName });
+            
+            // type情報を保存
+            openedFiles.set(normalizedPath, { 
+                content: fileContent, 
+                fileName: fileName,
+                type: fileType 
+            });
         }
 
         switchToFile(normalizedPath);
@@ -6173,32 +6311,60 @@ function closeWelcomeReadme() {
 }
 
 function switchToFile(filePath) {
-    // 1. 現在開いているファイルの状態を保存する (切り替え前)
+    // 1. 現在開いているファイルの状態保存 (テキストファイルの場合のみ)
     if (currentFilePath && globalEditorView && openedFiles.has(currentFilePath)) {
         const currentFileData = openedFiles.get(currentFilePath);
-        // エディタの完全な状態(履歴含む)を保存
-        currentFileData.editorState = globalEditorView.state;
-        // 内容テキストも念のため更新
-        currentFileData.content = globalEditorView.state.doc.toString();
-    }
-
-    // 2. 新しいファイルに切り替え
-    currentFilePath = filePath;
-    const fileData = openedFiles.get(filePath);
-
-    if (globalEditorView) {
-        if (fileData.editorState) {
-            // 保存された状態(履歴含む)があれば復元
-            globalEditorView.setState(fileData.editorState);
-        } else {
-            // なければ新規作成 (ファイルロード直後など)
-            const fileContent = fileData ? fileData.content : '';
-            const newState = createEditorState(fileContent, filePath);
-            globalEditorView.setState(newState);
+        // typeが'text'または未定義の場合のみ保存
+        if (!currentFileData.type || currentFileData.type === 'text') {
+            currentFileData.editorState = globalEditorView.state;
+            currentFileData.content = globalEditorView.state.doc.toString();
         }
     }
 
-    // --- 以下は既存のUI更新処理 ---
+    // 2. 新しいファイル情報取得
+    currentFilePath = filePath;
+    const fileData = openedFiles.get(filePath);
+    const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
+
+    // DOM要素取得
+    const editorEl = document.getElementById('editor');
+    const mediaViewEl = document.getElementById('media-view');
+    const toolbar = document.querySelector('.toolbar');
+    const searchWidget = document.getElementById('custom-search-widget');
+
+    // 親コンテナを表示
+    switchMainView('content-readme');
+
+    // --- ビューの切り替え ---
+    if (fileType === 'text') {
+        // テキストモード
+        if (editorEl) editorEl.style.display = 'block';
+        if (mediaViewEl) mediaViewEl.classList.add('hidden');
+        if (toolbar) toolbar.classList.remove('hidden'); // ツールバー表示
+
+        if (globalEditorView) {
+            if (fileData.editorState) {
+                globalEditorView.setState(fileData.editorState);
+            } else {
+                const fileContent = fileData ? fileData.content : '';
+                const newState = createEditorState(fileContent, filePath);
+                globalEditorView.setState(newState);
+            }
+            // フォーカスを戻す
+            globalEditorView.focus();
+        }
+    } else {
+        // メディアモード (画像/PDF)
+        if (editorEl) editorEl.style.display = 'none';
+        if (mediaViewEl) mediaViewEl.classList.remove('hidden');
+        if (toolbar) toolbar.classList.add('hidden'); // ツールバー非表示
+        if (searchWidget) searchWidget.classList.add('hidden'); // 検索無効
+
+        // メディア描画
+        renderMediaContent(filePath, fileType);
+    }
+
+    // --- UI更新処理 ---
     if (fileTitleInput) {
         const fileName = fileData ? fileData.fileName : filePath.split(/[\/\\]/).pop();
         const extIndex = fileName.lastIndexOf('.');
@@ -6206,16 +6372,17 @@ function switchToFile(filePath) {
         fileTitleInput.value = fileNameWithoutExt;
     }
 
-    switchMainView('content-readme');
     updateOutline();
 
     if (isPdfPreviewVisible) {
-        generatePdfPreview();
+        // PDFプレビュー画面（右ペイン）はテキストファイル以外なら空にするか、何もしない
+        if (fileType === 'text') {
+            generatePdfPreview();
+        }
     }
 
     if (fileData) {
         document.title = `${fileData.fileName} - Markdown IDE`;
-        // プレビュー用に、現在開いているファイルのディレクトリパスを保存
         document.body.dataset.activeFileDir = path.dirname(filePath);
     }
 
