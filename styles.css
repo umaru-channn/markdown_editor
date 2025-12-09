@@ -1277,12 +1277,7 @@ body[data-theme="dark"] .cm-live-highlight {
     background: var(--sidebar-bg);
     padding: 2px 4px;
     border-radius: 3px;
-    color: #e01e5a;
     font-size: 0.9em;
-}
-
-body[data-theme="dark"] .cm-live-code {
-    color: #ff7b72;
 }
 
 .cm-live-link {
@@ -2053,28 +2048,142 @@ body[data-theme="dark"] .cm-language-item:hover {
 
 /* ========== UI Components ========== */
 
-/* Context Menu */
-.context-menu {
+/* ========== Context Menu (Compact VS Code Style) ========== */
+.context-menu,
+.account-menu {
     position: fixed;
-    background: var(--main-bg);
+    background-color: var(--main-bg);
     border: 1px solid var(--sidebar-border);
-    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
-    z-index: 1000;
-    min-width: 120px;
-    border-radius: 3px;
-    padding: 4px 0;
-}
-
-.context-menu-item {
-    padding: 6px 12px;
-    cursor: pointer;
-    font-size: 13px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 9999;
+    min-width: 160px; /* 幅をコンパクトに */
+    border-radius: 4px; /* 角丸を少し小さく */
+    padding: 2px; /* 全体の余白を詰める */
     color: var(--text-color);
+    font-family: var(--editor-font-family, sans-serif);
+    animation: fadeIn 0.05s ease-out;
 }
 
-.context-menu-item:hover {
-    background-color: #007acc;
+/* ダークモード時の調整 */
+body[data-theme="dark"] .context-menu,
+body[data-theme="dark"] .account-menu {
+    background-color: #252526; /* VS Code 標準のメニュー背景色 */
+    border-color: #454545;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu-item,
+.account-menu-item {
+    padding: 3px 8px; /* 上下の余白を大幅に削減 */
+    cursor: pointer;
+    font-size: 16px; /* 文字サイズは維持 */
+    color: inherit;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0; /* マージンを削除 */
+    line-height: 1.2; /* 行の高さも詰める */
+}
+
+.context-menu-item:hover,
+.account-menu-item:hover {
+    background-color: #04395e; /* ホバー色を少し濃い目に(VS Code風) */
     color: white;
+}
+/* ダークモード以外のホバーは青 */
+body:not([data-theme="dark"]) .context-menu-item:hover,
+body:not([data-theme="dark"]) .account-menu-item:hover {
+    background-color: #0060c0;
+}
+
+/* ショートカットキー */
+.context-menu-shortcut {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-left: 12px;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+.context-menu-item:hover .context-menu-shortcut {
+    opacity: 0.9;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* セパレータ */
+.context-menu-separator,
+.account-menu-separator {
+    height: 1px;
+    background-color: var(--sidebar-border);
+    margin: 3px 4px; /* セパレータの上下余白も詰める */
+    opacity: 0.5;
+}
+
+/* アカウントメニュー (個別用) */
+.account-menu {
+    bottom: 50px;
+    left: 50px;
+}
+
+.account-menu-item {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+/* ========== Submenu & Color Preview ========== */
+
+/* 親アイテムのスタイル調整 */
+.context-menu-item {
+    position: relative; /* サブメニューの基準位置にするため必須 */
+}
+
+/* サブメニューのコンテナ（通常は非表示） */
+.context-submenu {
+    display: none;
+    position: absolute;
+    color: #000;
+    left: 98%; /* 親の右側に表示 */
+    top: -4px; /* 位置微調整 */
+    background-color: var(--main-bg);
+    border: 1px solid var(--sidebar-border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    padding: 2px;
+    min-width: 140px;
+    z-index: 10001;
+}
+
+/* 親アイテムホバー時にサブメニューを表示 */
+.context-menu-item:hover > .context-submenu {
+    display: block;
+    animation: fadeIn 0.05s ease-out;
+}
+
+/* ダークモード対応 */
+body[data-theme="dark"] .context-submenu {
+    background-color: #252526;
+    border-color: #454545;
+    color: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* サブメニューがあることを示す矢印 */
+.submenu-arrow {
+    font-size: 10px;
+    margin-left: auto; /* 右端に寄せる */
+    opacity: 0.6;
+    padding-left: 10px;
+}
+
+/* 色プレビューの丸印 */
+.color-preview-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    margin-right: 8px;
+    display: inline-block;
+    flex-shrink: 0;
 }
 
 /* Modal */
@@ -2724,23 +2833,22 @@ body[data-theme="dark"] .icon-btn.active {
     border-radius: 2px;
 }
 
-/* 選択範囲そのもの（Native Selection）と色が混ざらないように調整 */
-/* ★変更: 非フォーカス時も青系の色を維持するように変更 */
-.cm-content ::selection,
+/* 変更後：Obsidianのように塗りつぶす設定 */
 .cm-selectionBackground {
-    background-color: rgba(0, 122, 204, 0.3) !important;
+    /* 色の設定 */
+    background-color: rgba(0, 122, 204, 0.4) !important;
+    
+    /* 【重要】ここにあった position: relative; は削除してください */
+    
+    /* 文字やコードブロック背景の上から色を重ねる設定 */
+    mix-blend-mode: multiply;
 }
 
 /* ダークモード時の調整 */
-body[data-theme="dark"] .cm-searchMatch {
-    background-color: rgba(255, 235, 59, 0.2);
-}
-
-body[data-theme="dark"] .cm-searchMatch-selected {
-    background-color: #264f78 !important;
-    /* ダークモードでの濃い青 */
-    color: white !important;
-    border: 1px solid #569cd6;
+body[data-theme="dark"] .cm-selectionBackground {
+    background-color: rgba(66, 133, 244, 0.4) !important;
+    /* ダークモードでは multiply だと暗くなるので screen にする */
+    mix-blend-mode: screen; 
 }
 
 /* 標準の検索パネルを強制的に非表示にする (ゾンビ表示対策) */
@@ -3187,50 +3295,6 @@ body[data-theme="dark"] .git-ref-badge.current-branch {
 
 .status-bar-item.hidden {
     display: none !important;
-}
-
-/* styles.css の末尾に追加 */
-
-/* アカウントメニュー (左下用) */
-.account-menu {
-    position: fixed;
-    bottom: 50px;
-    /* 設定ボタンの少し上 */
-    left: 50px;
-    /* アクティビティバーの幅 */
-    background-color: var(--main-bg);
-    border: 1px solid var(--sidebar-border);
-    border-radius: 4px;
-    box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
-    z-index: 2000;
-    min-width: 200px;
-    padding: 4px 0;
-    color: var(--text-color);
-}
-
-body[data-theme="dark"] .account-menu {
-    background-color: #252526;
-    border-color: #454545;
-}
-
-.account-menu-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.account-menu-item:hover {
-    background-color: #007acc;
-    color: white;
-}
-
-.account-menu-separator {
-    height: 1px;
-    background-color: var(--sidebar-border);
-    margin: 4px 0;
 }
 
 /* ========== Settings Panel Styles ========== */
@@ -3950,4 +4014,108 @@ body[data-theme="dark"] .cm-content .cm-highlightSpace {
 
 .cm-hide-marker {
     display: none;
+}
+
+/* 2. テキスト編集・入力領域: Iビーム (縦棒) カーソル */
+input[type="text"],
+input[type="number"],
+input[type="search"],
+input[type="password"],
+textarea,
+.cm-content,      /* エディタ本文 */
+.cm-scroller,     /* エディタスクロール領域 */
+.terminal-content, /* ターミナル領域 */
+.xterm-screen canvas {
+    cursor: text !important;
+}
+
+/* 1. 基本領域: 通常の矢印カーソル */
+html, body, 
+.top-bar, 
+.status-bar, 
+.left-pane, 
+.right-pane, 
+.activity-bar,
+.cm-gutters { /* 行番号エリア */
+    cursor: default;
+}
+
+/* 2. テキスト編集・入力領域: Iビーム (縦棒) カーソル */
+input[type="text"],
+input[type="number"],
+input[type="search"],
+input[type="password"],
+textarea,
+.cm-content,      /* エディタ本文 */
+.cm-scroller,     /* エディタスクロール領域 */
+.terminal-content, /* ターミナル領域 */
+.xterm-screen canvas {
+    cursor: text !important;
+}
+
+/* 3. クリック可能な要素: 指マーク (ポインター) */
+button, 
+a, 
+select, 
+label.checkbox-label,
+.tab, 
+.tree-item, 
+.icon, 
+.header-btn,
+.window-control-btn,
+.settings-nav-item,
+.dropdown-item,
+.context-menu-item,
+.cm-live-link,     /* リンクテキスト */
+.cm-table-add-row-btn,
+.cm-table-add-col-btn {
+    cursor: pointer;
+}
+
+/* 4. 無効な要素: 禁止マーク */
+button:disabled,
+input:disabled,
+select:disabled,
+.disabled {
+    cursor: not-allowed !important;
+}
+
+/* 5. 待機状態 (同期中など): 待機カーソル */
+.syncing {
+    cursor: progress;
+}
+
+/* 6. リサイズ操作: 矢印 (既存設定の再確認用) */
+.resizer#resizer-left,
+.resizer#resizer-right,
+.cm-image-resize-handle {
+    cursor: col-resize;
+}
+
+.resizer#resizer-bottom {
+    cursor: row-resize;
+}
+
+/* ========== Table Content Styles ========== */
+body[data-theme="dark"] .cm-table-cell-content mark {
+    background-color: #FFFF0033;
+    color: inherit;
+}
+
+/* テーブル内のインラインコード (code) */
+.cm-table-cell-content code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+body[data-theme="dark"] .cm-table-cell-content code {
+    background-color: rgba(255, 255, 255, 0.1);
+    
+}
+
+.ͼ11 {
+    color: white;
 }

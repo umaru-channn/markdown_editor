@@ -11,9 +11,9 @@
 
 const path = require('path');
 const { webFrame } = require('electron');
-const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
+const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration } = require("@codemirror/view");
-const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
+const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess, selectAll } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit, StreamLanguage, LanguageSupport } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
 const { closeBrackets } = require("@codemirror/autocomplete");
@@ -22,31 +22,6 @@ const { tablePlugin } = require("./tablePlugin.js");
 
 // 言語パッケージのインポート（Modern）
 const { markdown, markdownLanguage } = require("@codemirror/lang-markdown");
-const { javascript } = require("@codemirror/lang-javascript");
-const { html: htmlLang } = require("@codemirror/lang-html");
-const { css } = require("@codemirror/lang-css");
-const { json } = require("@codemirror/lang-json");
-const { python } = require("@codemirror/lang-python");
-const { cpp } = require("@codemirror/lang-cpp");
-const { java } = require("@codemirror/lang-java");
-const { rust } = require("@codemirror/lang-rust");
-const { sql } = require("@codemirror/lang-sql");
-const { php } = require("@codemirror/lang-php");
-const { go } = require("@codemirror/lang-go");
-const { xml } = require("@codemirror/lang-xml");
-const { yaml } = require("@codemirror/lang-yaml");
-
-// 言語パッケージのインポート（Legacy / StreamLanguage）
-const { csharp, scala, kotlin, dart } = require("@codemirror/legacy-modes/mode/clike");
-const { ruby } = require("@codemirror/legacy-modes/mode/ruby");
-const { swift } = require("@codemirror/legacy-modes/mode/swift");
-const { shell } = require("@codemirror/legacy-modes/mode/shell");
-const { powerShell } = require("@codemirror/legacy-modes/mode/powershell");
-const { dockerFile } = require("@codemirror/legacy-modes/mode/dockerfile");
-const { lua } = require("@codemirror/legacy-modes/mode/lua");
-const { perl } = require("@codemirror/legacy-modes/mode/perl");
-const { r } = require("@codemirror/legacy-modes/mode/r");
-const { diff: diffLanguage } = require("@codemirror/legacy-modes/mode/diff");
 
 // @codemirror/search から必要なクラスをインポート
 const {
@@ -176,6 +151,7 @@ let isTerminalVisible = false;
 let isRightActivityBarVisible = true;
 let isMaximized = false;
 let savedRightActivityBarState = true;
+let activeContextMenu = null;
 
 // 設定管理
 let appSettings = {
@@ -195,6 +171,7 @@ let appSettings = {
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
     showStatusBar: true,
     showToolbar: true,
+    showFileTitleBar: true,
     showWhitespace: false,
     enabledSnippets: [],
     // PDF設定のデフォルト値
@@ -283,7 +260,7 @@ const COMMANDS_REGISTRY = [
 
     // タブ切り替え (Ctrl+Tab / Ctrl+Shift+Tab)
     { id: 'view:next-tab', name: '次のタブ', defaultKey: 'Mod-tab', context: 'global', run: () => switchTab(1) },
-    { id: 'view:prev-tab', name: '前のタブ', defaultKey: 'Mod-Shift-tab', context: 'global', run: () => switchTab(-1) }
+    { id: 'view:prev-tab', name: '前のタブ', defaultKey: 'Mod-Shift-tab', context: 'global', run: () => switchTab(-1) },
 ];
 
 /**
@@ -383,7 +360,7 @@ async function renderAllPdfPages(pdf, container, filePath) {
     // 1. コントロールパネルのコンテナを作成 (ブロック要素として配置)
     const controlsContainer = document.createElement('div');
     controlsContainer.className = 'pdf-controls-top';
-    // ★修正: position:sticky を削除し、flex-shrink: 0 で固定領域化
+    // position:sticky を削除し、flex-shrink: 0 で固定領域化
     controlsContainer.style.cssText = 'display:flex; justify-content:center; align-items:center; padding:10px 0; background-color:var(--sidebar-bg); width:100%; border-bottom: 1px solid var(--sidebar-border); color: var(--text-color); flex-shrink: 0;';
     container.appendChild(controlsContainer);
 
@@ -422,7 +399,7 @@ async function renderAllPdfPages(pdf, container, filePath) {
     // 4. 描画エリア (ここだけスクロールさせる)
     const pageRenderArea = document.createElement('div');
     pageRenderArea.className = 'pdf-page-render-area';
-    // ★修正: flex: 1 と overflow-y: auto を追加してスクロール領域にする
+    // flex: 1 と overflow-y: auto を追加してスクロール領域にする
     pageRenderArea.style.cssText = 'flex: 1; overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; padding: 20px 0;';
     container.appendChild(pageRenderArea);
 
@@ -441,7 +418,7 @@ async function renderAllPdfPages(pdf, container, filePath) {
             }
         });
     }, {
-        root: pageRenderArea, // ★修正: 監視対象のスクロールコンテナを pageRenderArea に変更
+        root: pageRenderArea, // 監視対象のスクロールコンテナを pageRenderArea に変更
         rootMargin: '-40% 0px -40% 0px',
         threshold: 0
     });
@@ -524,8 +501,8 @@ function switchMainView(targetId) {
             }
         }
 
-        // タイトルバーはREADME以外で表示
-        if (currentFilePath !== 'README.md') {
+        // タイトルバーはREADME以外 かつ 設定がONの場合のみ表示
+        if (currentFilePath !== 'README.md' && appSettings.showFileTitleBar) {
             if (fileTitleBar) fileTitleBar.classList.remove('hidden');
         } else {
             if (fileTitleBar) fileTitleBar.classList.add('hidden');
@@ -614,6 +591,7 @@ function applySettingsToUI() {
     const defaultImageLocationInput = document.getElementById('default-image-location');
     const excludePatternsInput = document.getElementById('exclude-patterns');
     const showToolbarInput = document.getElementById('show-toolbar');
+    const showFileTitleBarInput = document.getElementById('show-file-title-bar');
     const showWhitespaceInput = document.getElementById('show-whitespace');
     const lineHeightInput = document.getElementById('line-height');
 
@@ -632,6 +610,7 @@ function applySettingsToUI() {
     if (defaultImageLocationInput) defaultImageLocationInput.value = appSettings.defaultImageLocation || '.';
     if (excludePatternsInput) excludePatternsInput.value = appSettings.excludePatterns || '';
     if (showToolbarInput) showToolbarInput.checked = appSettings.showToolbar;
+    if (showFileTitleBarInput) showFileTitleBarInput.checked = appSettings.showFileTitleBar;
     if (showWhitespaceInput) showWhitespaceInput.checked = appSettings.showWhitespace;
 
     // 行間設定の反映とCSS変数の更新
@@ -648,6 +627,7 @@ function applySettingsToUI() {
     // ツールバーの表示/非表示制御 (設定画面では表示しないように条件を追加)
     const toolbar = document.querySelector('.toolbar');
     const readmeContent = document.getElementById('content-readme');
+    const fileTitleBarEl = document.getElementById('file-title-bar');
 
     if (toolbar && readmeContent) {
         // 現在エディタ画面(content-readme)が表示されているかチェック
@@ -660,6 +640,16 @@ function applySettingsToUI() {
             toolbar.classList.remove('hidden');
         } else {
             toolbar.classList.add('hidden');
+        }
+
+        // ファイルタイトルバーの即時反映
+        if (fileTitleBarEl) {
+            // 設定ON かつ エディタ表示中 かつ README以外なら表示
+            if (appSettings.showFileTitleBar && isEditorViewActive && currentFilePath !== 'README.md') {
+                fileTitleBarEl.classList.remove('hidden');
+            } else {
+                fileTitleBarEl.classList.add('hidden');
+            }
         }
     }
 
@@ -810,6 +800,13 @@ function setupSettingsListeners() {
     // ツールバー表示設定のリスナー
     document.getElementById('show-toolbar')?.addEventListener('change', (e) => {
         appSettings.showToolbar = e.target.checked;
+        saveSettings();
+        applySettingsToUI();
+    });
+
+    // ファイル名バー表示設定のリスナー
+    document.getElementById('show-file-title-bar')?.addEventListener('change', (e) => {
+        appSettings.showFileTitleBar = e.target.checked;
         saveSettings();
         applySettingsToUI();
     });
@@ -1089,7 +1086,7 @@ function createNewTab() {
  * MarkdownをHTMLに変換する（目次・タイトル生成オプション対応）
  * @param {string} markdown - 生のMarkdownテキスト
  * @param {object} pdfOptions - PDF設定オブジェクト
- * @param {string} title - ★追加: 文書タイトル（ファイル名）を受け取る
+ * @param {string} title - 文書タイトル（ファイル名）を受け取る
  */
 async function convertMarkdownToHtml(markdown, pdfOptions, title) {
     // 1. 特殊記法の事前処理
@@ -1099,7 +1096,7 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
     const renderer = new marked.Renderer();
     const toc = [];
 
-    // ★変更: 目次生成が有効な場合のみ、見出しの収集ロジックを設定する
+    // 目次生成が有効な場合のみ、見出しの収集ロジックを設定する
     // (以前はここで早期リターンしていましたが、タイトル処理のために削除しました)
     if (pdfOptions && pdfOptions.enableToc) {
         renderer.heading = (text, level, raw) => {
@@ -1138,7 +1135,7 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
         resultHtml = tocHtml + resultHtml;
     }
 
-    // ★追加: タイトルを含める設定がONの場合、先頭に追加する
+    // タイトルを含める設定がONの場合、先頭に追加する
     if (pdfOptions && pdfOptions.includeTitle && title) {
         const titleHtml = `<h1 class="pdf-title">${title}</h1>`;
         resultHtml = titleHtml + resultHtml;
@@ -1150,227 +1147,77 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
 // ========== CodeMirror Initialization (LiveMark機能の統合) ==========
 
 const codeLanguages = (info) => {
-    const lang = String(info).trim().toLowerCase();
-    if (!lang) return null;
-
-    if (lang === 'js' || lang === 'javascript' || lang === 'node') return LanguageDescription.of({ name: 'javascript', support: javascript() });
-    if (lang === 'ts' || lang === 'typescript') return LanguageDescription.of({ name: 'typescript', support: javascript({ typescript: true }) });
-    if (lang === 'html' || lang === 'htm') return LanguageDescription.of({ name: 'html', support: htmlLang() });
-    if (lang === 'css' || lang === 'scss') return LanguageDescription.of({ name: 'css', support: css() });
-    if (lang === 'py' || lang === 'python') return LanguageDescription.of({ name: 'python', support: python() });
-    if (lang === 'md' || lang === 'markdown') return LanguageDescription.of({ name: 'markdown', support: markdown({ base: markdownLanguage, codeLanguages: codeLanguages }) });
-    if (lang === 'c' || lang === 'cpp') return LanguageDescription.of({ name: 'cpp', support: cpp() });
-    if (lang === 'java') return LanguageDescription.of({ name: 'java', support: java() });
-    if (lang === 'rust') return LanguageDescription.of({ name: 'rust', support: rust() });
-    if (lang === 'sql') return LanguageDescription.of({ name: 'sql', support: sql() });
-    if (lang === 'json') return LanguageDescription.of({ name: 'json', support: json() });
-    if (lang === 'php') return LanguageDescription.of({ name: 'php', support: php() });
-    if (lang === 'go' || lang === 'golang') return LanguageDescription.of({ name: 'go', support: go() });
-    if (lang === 'xml') return LanguageDescription.of({ name: 'xml', support: xml() });
-    if (lang === 'yaml' || lang === 'yml') return LanguageDescription.of({ name: 'yaml', support: yaml() });
-
-    // Legacy / StreamLanguage supports (変更点: new LanguageSupport()でラップする)
-    if (lang === 'c#' || lang === 'csharp' || lang === 'cs') return LanguageDescription.of({ name: 'csharp', support: new LanguageSupport(StreamLanguage.define(csharp)) });
-    if (lang === 'ruby' || lang === 'rb') return LanguageDescription.of({ name: 'ruby', support: new LanguageSupport(StreamLanguage.define(ruby)) });
-    if (lang === 'swift') return LanguageDescription.of({ name: 'swift', support: new LanguageSupport(StreamLanguage.define(swift)) });
-    if (lang === 'kotlin' || lang === 'kt') return LanguageDescription.of({ name: 'kotlin', support: new LanguageSupport(StreamLanguage.define(kotlin)) });
-    if (lang === 'bash' || lang === 'sh' || lang === 'shell' || lang === 'zsh') return LanguageDescription.of({ name: 'bash', support: new LanguageSupport(StreamLanguage.define(shell)) });
-    if (lang === 'powershell' || lang === 'ps1') return LanguageDescription.of({ name: 'powershell', support: new LanguageSupport(StreamLanguage.define(powerShell)) });
-    if (lang === 'dockerfile' || lang === 'docker') return LanguageDescription.of({ name: 'dockerfile', support: new LanguageSupport(StreamLanguage.define(dockerFile)) });
-    if (lang === 'lua') return LanguageDescription.of({ name: 'lua', support: new LanguageSupport(StreamLanguage.define(lua)) });
-    if (lang === 'perl' || lang === 'pl') return LanguageDescription.of({ name: 'perl', support: new LanguageSupport(StreamLanguage.define(perl)) });
-    if (lang === 'r') return LanguageDescription.of({ name: 'r', support: new LanguageSupport(StreamLanguage.define(r)) });
-    if (lang === 'dart') return LanguageDescription.of({ name: 'dart', support: new LanguageSupport(StreamLanguage.define(dart)) });
-    if (lang === 'scala') return LanguageDescription.of({ name: 'scala', support: new LanguageSupport(StreamLanguage.define(scala)) });
-    if (lang === 'diff' || lang === 'patch') return LanguageDescription.of({ name: 'diff', support: new LanguageSupport(StreamLanguage.define(diffLanguage)) });
-
     return null;
 };
 
-// 拡張子に基づいて適切な言語Extensionの配列を返す関数
+// 変更後（常にMarkdownモード + Prismプラグインを返すように単純化）
 function getLanguageExtensions(filePath) {
-    // デフォルト（ファイルパスがない、または不明な場合）はMarkdownとして扱う
-    const defaultMarkdown = [
+    return [
         markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
         livePreviewPlugin,
-        tablePlugin
+        tablePlugin,
+        prismHighlightPlugin // ★ここで自作プラグインを追加
     ];
-
-    if (!filePath) return defaultMarkdown;
-
-    const ext = path.extname(filePath).toLowerCase();
-
-    // 拡張子に応じた言語設定
-    switch (ext) {
-        // Markdownとして扱う拡張子 (.md, .markdown, .txt など)
-        case '.md':
-        case '.markdown':
-        case '.txt':
-        case '.text':
-        case '.log':
-            return defaultMarkdown;
-
-        // 各プログラミング言語
-        case '.js':
-        case '.jsx':
-            return [javascript({ jsx: true })];
-        case '.ts':
-        case '.tsx':
-            return [javascript({ typescript: true, jsx: true })];
-        case '.html':
-        case '.htm':
-            return [htmlLang()];
-        case '.css':
-        case '.scss':
-        case '.less':
-            return [css()];
-        case '.json':
-            return [json()];
-        case '.py':
-            return [python()];
-        case '.c':
-        case '.cpp':
-        case '.h':
-        case '.hpp':
-            return [cpp()];
-        case '.java':
-            return [java()];
-        case '.rs':
-            return [rust()];
-        case '.sql':
-            return [sql()];
-        case '.php':
-            return [php()];
-        case '.go':
-            return [go()];
-        case '.xml':
-            return [xml()];
-        case '.yaml':
-        case '.yml':
-            return [yaml()];
-
-        // Legacy Modes (変更点: new LanguageSupport()でラップする)
-        case '.cs':
-            return [new LanguageSupport(StreamLanguage.define(csharp))];
-        case '.rb':
-            return [new LanguageSupport(StreamLanguage.define(ruby))];
-        case '.swift':
-            return [new LanguageSupport(StreamLanguage.define(swift))];
-        case '.kt':
-        case '.kts':
-            return [new LanguageSupport(StreamLanguage.define(kotlin))];
-        case '.sh':
-        case '.bash':
-        case '.zsh':
-            return [new LanguageSupport(StreamLanguage.define(shell))];
-        case '.ps1':
-        case '.psm1':
-            return [new LanguageSupport(StreamLanguage.define(powerShell))];
-        case 'dockerfile':
-        case '.dockerfile':
-            return [new LanguageSupport(StreamLanguage.define(dockerFile))];
-        case '.lua':
-            return [new LanguageSupport(StreamLanguage.define(lua))];
-        case '.pl':
-        case '.pm':
-            return [new LanguageSupport(StreamLanguage.define(perl))];
-        case '.r':
-            return [new LanguageSupport(StreamLanguage.define(r))];
-        case '.dart':
-            return [new LanguageSupport(StreamLanguage.define(dart))];
-        case '.scala':
-            return [new LanguageSupport(StreamLanguage.define(scala))];
-        case '.diff':
-        case '.patch':
-            return [new LanguageSupport(StreamLanguage.define(diffLanguage))];
-
-        // 未知の拡張子や拡張子なしの場合も、このエディタの性質上Markdownとして扱う
-        default:
-            // "Dockerfile" (no ext) check
-            if (path.basename(filePath).toLowerCase() === 'dockerfile') {
-                return [new LanguageSupport(StreamLanguage.define(dockerFile))];
-            }
-            return defaultMarkdown;
-    }
 }
 
-const startDoc = `# Markdown IDE の使い方
+const startDoc = `# Markdown Editor マニュアル
 
-このエディタは、Markdown記法をリアルタイムでプレビューしながら記述できるIDEです。
-上部のツールバーを使って、簡単に装飾や要素を挿入できます。
+Markdown記法をリアルタイムでプレビューしながら記述できるエディタです。
+ショートカットキーやツールバーを利用して効率的に編集を行えます。
 
-## 🛠 ツールバー機能
+## テキスト装飾
 
-### 基本操作
-- 💾 **保存**: \`Ctrl + S\`
-- 📤 **PDFエクスポート**: 記述した内容をPDFとして保存します。
-- ↩/↪ **元に戻す/やり直し**: \`Ctrl + Z\` / \`Ctrl + Y\`
+| 機能 | 記法 | ショートカット |
+| :--- | :--- | :--- |
+| **太字** | \`**テキスト**\` | Ctrl + B |
+| *斜体* | \`*テキスト*\` | Ctrl + I |
+| ~~取り消し線~~ | \`~~テキスト~~\` | Ctrl + Shift + S |
+| ==ハイライト== | \`==テキスト==\` | Ctrl + Shift + H |
+| \`インラインコード\` | \` \`テキスト\` \` | Ctrl + E |
 
-### 検索機能
-- 🔍 **検索**: \`Ctrl + F\` (編集画面内を検索・置換できます)
+## 見出しと構成
 
-### テキスト装飾
-ツールバーのボタンで以下の装飾が可能です。
-- **太字**: \`**Bold**\` (Ctrl + B)
-- *斜体*: \`*Italic*\` (Ctrl + I)
-- ~~取り消し線~~: \`~~Strike~~\` (Ctrl + Shift + S)
-- ==ハイライト==: \`==Highlight==\`
+# H1 見出し
+## H2 見出し
+### H3 見出し
 
-### 見出し
-\`H2\`, \`H3\` ボタンで素早く見出しを作成できます。\`Ctrl + 1\` ~ \`Ctrl + 6\` のショートカットも利用可能です。
+- **リスト**: 行頭に \`- \` または \`* \` を入力
+1. **番号付きリスト**: 行頭に \`1. \` を入力
+- [ ] **タスクリスト**: 行頭に \`- [ ] \` を入力
+> **引用**: 行頭に \`> \` を入力
+---
+**区切り線**: \`---\` を入力
 
-### リスト
-- 箇条書きリスト
-1. 番号付きリスト
-- [ ] チェックリスト（タスクリスト）
+## リンクとメディア
 
-### 挿入機能
 - **リンク**: \`[タイトル](URL)\`
-- **画像**: \`![alt](画像URL)\`
-- **引用**: \`> 引用テキスト\`
-- **コード**: インライン \` \`code\` \` やコードブロック
-- **区切り線**: \`---\`
+- **画像**: \`![代替テキスト](画像URL)\`
+- **ブックマーク**: \`@card URL\` と入力するとカード形式で表示されます
 
-## ✨ 高度な機能
+## コードブロック
 
-### テーブル（表）
-ツールバーの \`Table\` ボタンで挿入できます。
-作成されたテーブルは、マウス操作で**列幅の変更**や**行・列の追加/削除**が可能です。
-
-| 機能 | 説明 | 対応 |
-| :--- | :--- | :---: |
-| リサイズ | 列の境界線をドラッグ | ✅ |
-| 編集 | セルを直接編集 | ✅ |
-| 右クリック | 行・列の操作メニュー | ✅ |
-
-### 改ページ (Page Break)
-PDFエクスポート時の改ページ位置を指定できます。ツールバーの改ページボタンを押すと挿入されます。
-
-<div class="page-break"></div>
-
-（↑ここに改ページが入っています）
-
-### ブックマークカード (URL貼り付け)
-URLをエディタに貼り付けると、メニューが表示され「ブックマーク」を選択するとリッチなカード形式で表示されます。
-
-@card https://www.electronjs.org/
-
-### コードブロック
-言語を指定してシンタックスハイライトが可能です。
+バッククォート3つで囲むとコードブロックになります。言語を指定するとシンタックスハイライトが適用されます。
 
 \`\`\`javascript
-function hello() {
-    console.log("Hello, Markdown IDE!");
-}
+console.log("Hello, World!");
 \`\`\`
 
-## ⌨️ ショートカットキー
-- \`Ctrl + S\`: 保存
-- \`Ctrl + B\`: 太字
-- \`Ctrl + I\`: 斜体
-- \`Ctrl + Shift + S\`: 取り消し線
-- \`Ctrl + 1\` ~ \`6\`: 見出し1~6
-- \`Ctrl + F\`: 検索
+## テーブル（表）
+
+ツールバーのテーブルボタンから挿入可能です。
+右クリックメニューから行・列の追加や削除ができます。
+
+| Header 1 | Header 2 |
+| :--- | :--- |
+| Cell 1 | Cell 2 |
+
+## その他の機能
+
+- **検索・置換**: Ctrl + F で検索バーを表示
+- **PDFエクスポート**: ツールバーのボタンからPDFとして保存
+- **改ページ**: 印刷用の改ページ位置を指定するにはツールバーの改ページボタンを使用
+  <div class="page-break"></div>
+- **自動保存**: 入力停止後、自動的にファイルが保存されます
 `;
 
 // ========== リスト操作ロジック (Custom List Handling) ==========
@@ -1518,6 +1365,79 @@ const handleListDedent = (view) => {
     return indentLess(view);
 };
 
+/**
+ * リストの文頭で「左」を押した際、マーカーを飛び越えて前の行の末尾へ移動する
+ */
+const handleListNavigationLeft = (view) => {
+    const { state, dispatch } = view;
+    const selection = state.selection.main;
+    // 範囲選択中はデフォルトの挙動に任せる
+    if (!selection.empty) return false;
+
+    const head = selection.head;
+    const line = state.doc.lineAt(head);
+    const text = line.text;
+
+    // 現在の行がリスト形式かどうか判定 (既存の定数 LIST_RE を使用)
+    const match = text.match(LIST_RE);
+    
+    if (match) {
+        // マーカー部分の長さ（インデント + 記号 + スペース）
+        const markerLength = match[0].length;
+        const contentStartPos = line.from + markerLength;
+
+        // カーソルが「文章の開始位置（マーカーの直後）」にある場合
+        if (head === contentStartPos) {
+            // 1行目でなければ、前の行の末尾へ移動
+            if (line.number > 1) {
+                const prevLine = state.doc.line(line.number - 1);
+                dispatch({
+                    selection: { anchor: prevLine.to, head: prevLine.to },
+                    scrollIntoView: true
+                });
+                return true; // 処理を行ったのでデフォルト挙動をキャンセル
+            }
+        }
+    }
+    return false; // デフォルト挙動
+};
+
+/**
+ * 行末で「右」を押した際、次の行がリストならマーカーを飛び越えて文頭へ移動する
+ */
+const handleListNavigationRight = (view) => {
+    const { state, dispatch } = view;
+    const selection = state.selection.main;
+    if (!selection.empty) return false;
+
+    const head = selection.head;
+    const line = state.doc.lineAt(head);
+    
+    // カーソルが行末にある場合
+    if (head === line.to) {
+        // 最終行でなければ
+        if (line.number < state.doc.lines) {
+            const nextLine = state.doc.line(line.number + 1);
+            const nextText = nextLine.text;
+            
+            // 次の行がリストかどうか判定
+            const match = nextText.match(LIST_RE);
+            if (match) {
+                // 次の行の「文章の開始位置」へジャンプ
+                const markerLength = match[0].length;
+                const targetPos = nextLine.from + markerLength;
+                
+                dispatch({
+                    selection: { anchor: targetPos, head: targetPos },
+                    scrollIntoView: true
+                });
+                return true;
+            }
+        }
+    }
+    return false;
+};
+
 const obsidianLikeListKeymap = [
     {
         key: "Enter",
@@ -1530,6 +1450,14 @@ const obsidianLikeListKeymap = [
     {
         key: "Shift-Tab",
         run: handleListDedent
+    },
+    {
+        key: "ArrowLeft",
+        run: handleListNavigationLeft
+    },
+    {
+        key: "ArrowRight",
+        run: handleListNavigationRight
     }
 ];
 
@@ -1688,9 +1616,9 @@ const pasteHandler = EditorView.domEventHandlers({
     }
 });
 
-// ★修正: 高機能ドロップハンドラー (dragover追加)
+// 高機能ドロップハンドラー (dragover追加)
 const dropHandler = EditorView.domEventHandlers({
-    // ★追加: これがないとドラッグ時に駐車禁止マークが出てドロップできません
+    // これがないとドラッグ時に駐車禁止マークが出てドロップできません
     dragover(event, view) {
         event.preventDefault();
         return false;
@@ -2116,6 +2044,125 @@ function getCombinedKeymap() {
         ...obsidianLikeListKeymap
     ];
 }
+
+// Prism.jsを使ってコードブロックをハイライトするカスタムプラグイン
+const prismHighlightPlugin = ViewPlugin.fromClass(class {
+    constructor(view) {
+        this.decorations = this.getPrismDecorations(view);
+    }
+
+    update(update) {
+        // ドキュメント変更、ビューポート変更、または言語ロード完了時の強制更新で装飾を再構築
+        if (update.docChanged || update.viewportChanged || update.transactions.length > 0) {
+            this.decorations = this.getPrismDecorations(update.view);
+        }
+    }
+
+    getPrismDecorations(view) {
+        const builder = new RangeSetBuilder();
+        const doc = view.state.doc;
+
+        // 構文解析ツリーを利用
+        const { syntaxTree } = require("@codemirror/language");
+
+        // Prism本体が読み込まれているかチェック
+        if (typeof Prism === 'undefined') return builder.finish();
+
+        for (const { from, to } of view.visibleRanges) {
+            syntaxTree(view.state).iterate({
+                from,
+                to,
+                enter: (node) => {
+                    // コードブロック(FencedCode)を見つけた場合
+                    if (node.name === "FencedCode") {
+                        const line = doc.lineAt(node.from);
+                        // 言語名を取得 (例: ```javascript の "javascript" 部分)
+                        const match = line.text.match(/^(\s*`{3,})([\w-]*)/);
+                        if (!match) return;
+
+                        let langName = match[2].toLowerCase();
+
+                        // Prism用に言語名のエイリアス対応 (代表的なもの)
+                        const langMap = {
+                            'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+                            'sh': 'bash', 'zsh': 'bash', 'shell': 'bash',
+                            'rb': 'ruby', 'cs': 'csharp', 'kt': 'kotlin',
+                            'rs': 'rust', 'go': 'go', 'md': 'markdown',
+                            'html': 'markup', 'xml': 'markup', 'svg': 'markup',
+                            'c++': 'cpp',
+                            'bf': 'brainfuck'
+                        };
+                        if (langMap[langName]) langName = langMap[langName];
+
+                        // その言語の文法定義がロードされているか確認
+                        const grammar = Prism.languages[langName];
+
+                        // 文法が未ロードの場合、Autoloaderを使って読み込む
+                        if (!grammar) {
+                            if (langName && Prism.plugins && Prism.plugins.autoloader) {
+                                try {
+                                    // 読み込みリクエスト (非同期)
+                                    // 既に読み込み中の場合はPrismが適切に無視または待機してくれます
+                                    Prism.plugins.autoloader.loadLanguages(langName, () => {
+                                        // 【重要】読み込み完了後、画面を更新するために空の変更を通知する
+                                        // これにより update() が呼ばれ、ハイライトが適用されます
+                                        view.dispatch({});
+                                    });
+                                } catch (e) {
+                                    // 未知の言語などでエラーが出ても無視する
+                                }
+                            }
+                            return; // ロード待ちのため今回はハイライトなし
+                        }
+
+                        // コードブロックの中身の範囲を特定
+                        const startLine = doc.lineAt(node.from).number;
+                        const endLine = doc.lineAt(node.to).number;
+
+                        // 中身がない場合はスキップ
+                        if (startLine >= endLine - 1) return;
+
+                        const bodyStart = doc.line(startLine + 1).from;
+                        const bodyEnd = doc.line(endLine - 1).to;
+                        const code = doc.sliceString(bodyStart, bodyEnd);
+
+                        // Prismでトークン化（字句解析）
+                        const tokens = Prism.tokenize(code, grammar);
+
+                        // トークンをCodeMirrorのデコレーションに変換
+                        let pos = bodyStart;
+                        const addDeco = (token) => {
+                            if (typeof token === "string") {
+                                pos += token.length;
+                            } else {
+                                const type = token.type;
+                                const alias = token.alias || "";
+                                // CSSクラス名はPrism標準テーマに合わせる ("token keyword" 等)
+                                const className = `token ${type} ${alias}`;
+
+                                if (Array.isArray(token.content)) {
+                                    // ネストされたトークンがある場合は再帰的に処理
+                                    token.content.forEach(t => addDeco(t));
+                                } else {
+                                    // 実際のハイライト適用
+                                    builder.add(pos, pos + token.length, Decoration.mark({ class: className }));
+                                    pos += token.length;
+                                }
+                            }
+                        };
+
+                        if (Array.isArray(tokens)) {
+                            tokens.forEach(t => addDeco(t));
+                        }
+                    }
+                }
+            });
+        }
+        return builder.finish();
+    }
+}, {
+    decorations: v => v.decorations
+});
 
 function createEditorState(content, filePath) {
     const initialTheme = appSettings.theme === 'dark' ? oneDark : [];
@@ -3436,7 +3483,7 @@ function updateTerminalVisibility() {
         rightPane.classList.remove('hidden');
         if (resizerRight) resizerRight.classList.remove('hidden');
 
-        // ★修正: 排他制御に応じたヘッダー/コンテンツの表示・非表示
+        // 排他制御に応じたヘッダー/コンテンツの表示・非表示
         // まず全て隠す
         if (terminalHeader) terminalHeader.classList.add('hidden');
         if (terminalContainer) terminalContainer.classList.add('hidden');
@@ -4838,149 +4885,6 @@ function showCompactConfirmModal(message, onConfirm) {
     });
 }
 
-// コミット履歴用のコンテキストメニュー
-function showCommitContextMenu(x, y, commit) {
-    if (activeContextMenu) activeContextMenu.remove();
-
-    const menu = document.createElement('div');
-    menu.className = 'context-menu';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-
-    // チェックアウト項目
-    const checkoutOption = document.createElement('div');
-    checkoutOption.className = 'context-menu-item';
-    checkoutOption.textContent = 'このコミットをチェックアウト';
-    checkoutOption.addEventListener('click', async () => {
-        menu.remove();
-        activeContextMenu = null;
-
-        showNotification(`コミット ${commit.oid.substring(0, 7)} をチェックアウト中...`, 'info');
-
-        try {
-            // SHAを指定してチェックアウト (Detached HEAD状態になります)
-            const result = await window.electronAPI.gitCheckout(currentDirectoryPath, commit.oid);
-
-            if (result.success) {
-                showNotification(`チェックアウト完了: ${commit.oid.substring(0, 7)}`, 'success');
-                refreshGitStatus();
-                initializeFileTreeWithState();
-
-                // 現在開いているファイルがあればリロードして内容を反映
-                if (currentFilePath && openedFiles.has(currentFilePath)) {
-                    openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
-                }
-            } else {
-                showNotification(`チェックアウトエラー: ${result.error}`, 'error');
-            }
-        } catch (e) {
-            showNotification(`エラー: ${e.message}`, 'error');
-        }
-    });
-
-    // --- リセット項目 ---
-    const resetOption = document.createElement('div');
-    resetOption.className = 'context-menu-item';
-    resetOption.textContent = '現在のブランチをここにリセット (Hard)';
-    resetOption.title = '現在の変更をすべて破棄して、このコミットの状態に戻します';
-
-    // confirm() から showCompactConfirmModal に変更
-    resetOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-
-        const shortHash = commit.oid.substring(0, 7);
-        // メッセージを1行かつコンパクトに変更
-        const message = `コミット ${shortHash} へ強制的にリセットしますか？ (変更は破棄されます)`;
-
-        showCompactConfirmModal(message, async () => {
-            showNotification('リセット中...', 'info');
-            try {
-                // main.js で実装する gitResetHead を呼び出し
-                const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
-                if (result.success) {
-                    showNotification('リセット完了', 'success');
-                    refreshGitStatus();
-                    initializeFileTreeWithState();
-                    if (currentFilePath && openedFiles.has(currentFilePath)) {
-                        openFile(currentFilePath, openedFiles.get(currentFilePath).fileName);
-                    }
-                } else {
-                    showNotification(`リセットエラー: ${result.error}`, 'error');
-                }
-            } catch (e) {
-                showNotification(`エラー: ${e.message}`, 'error');
-            }
-        });
-    });
-
-    // --- リバート項目 ---
-    const revertOption = document.createElement('div');
-    revertOption.className = 'context-menu-item';
-    revertOption.textContent = 'このコミットを打ち消し (Revert)';
-    revertOption.title = 'このコミットの変更を打ち消す新しいコミットを作成します';
-
-    // confirm() から showCompactConfirmModal に変更
-    revertOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-
-        const shortHash = commit.oid.substring(0, 7);
-        // メッセージを1行かつコンパクトに変更
-        const message = `コミット ${shortHash} を打ち消すコミットを作成しますか？`;
-
-        showCompactConfirmModal(message, async () => {
-            showNotification('打ち消しコミットを作成中...', 'info');
-            try {
-                // main.js で実装する gitRevertCommit を呼び出し
-                const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
-                if (result.success) {
-                    showNotification('打ち消しコミットを作成しました', 'success');
-                    refreshGitStatus();
-                } else {
-                    showNotification(`Revertエラー: ${result.error}`, 'error');
-                }
-            } catch (e) {
-                showNotification(`エラー: ${e.message}`, 'error');
-            }
-        });
-    });
-
-    // ハッシュコピー項目
-    const copyHashOption = document.createElement('div');
-    copyHashOption.className = 'context-menu-item';
-    copyHashOption.textContent = 'コミットハッシュをコピー';
-    copyHashOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        navigator.clipboard.writeText(commit.oid);
-        showNotification('ハッシュをコピーしました', 'success');
-    });
-
-    menu.appendChild(checkoutOption);
-
-    // 区切り線
-    const sep1 = document.createElement('div');
-    sep1.style.height = '1px';
-    sep1.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
-    sep1.style.margin = '4px 0';
-    menu.appendChild(sep1);
-
-    menu.appendChild(resetOption);
-    menu.appendChild(revertOption);
-
-    const sep2 = document.createElement('div');
-    sep2.style.height = '1px';
-    sep2.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
-    sep2.style.margin = '4px 0';
-    menu.appendChild(sep2);
-
-    menu.appendChild(copyHashOption);
-
-    document.body.appendChild(menu);
-    activeContextMenu = menu;
-}
-
 // Git操作ボタン イベントリスナー
 // 既存の btnGitRefresh リスナーを修正 (Fetchも実行するようにする)
 if (btnGitRefresh) {
@@ -6045,12 +5949,10 @@ if (btnCloudSync) {
 /**
  * 左下のアカウントボタンのセットアップ
  */
-// renderer.js の setupAccountButton 関数をこれに置き換えてください
 function setupAccountButton() {
     const btnAccounts = document.getElementById('btn-accounts');
     if (!btnAccounts) return;
 
-    // 非同期関数にする
     btnAccounts.addEventListener('click', async (e) => {
         e.stopPropagation();
 
@@ -6060,7 +5962,6 @@ function setupAccountButton() {
             return;
         }
 
-        // 現在のログインユーザーを取得
         let user = null;
         try {
             user = await window.electronAPI.getGitHubUser();
@@ -6069,7 +5970,7 @@ function setupAccountButton() {
         }
 
         const menu = document.createElement('div');
-        menu.className = 'account-menu';
+        menu.className = 'account-menu'; // CSSでcontext-menuと同様のスタイルを適用済み
 
         // 共通ヘッダー
         const header = document.createElement('div');
@@ -6077,50 +5978,45 @@ function setupAccountButton() {
         header.style.pointerEvents = 'none';
         header.style.fontSize = '11px';
         header.style.opacity = '0.7';
-        header.style.borderBottom = '1px solid var(--sidebar-border)';
+        header.style.borderBottom = 'none'; // CSSで制御するためリセット
         header.textContent = 'ACCOUNTS';
         menu.appendChild(header);
 
-        if (user) {
-            // ▼▼▼ ログイン済みの場合 ▼▼▼
+        // ヘッダー下のセパレータ
+        const headerSep = document.createElement('div');
+        headerSep.className = 'account-menu-separator';
+        menu.appendChild(headerSep);
 
-            // ユーザー名表示 (VS Code風: ユーザー名 (GitHub))
+        if (user) {
+            // ログイン済み
             const userItem = document.createElement('div');
             userItem.className = 'account-menu-item';
-            // アイコンがあれば表示（オプション）
-            // userItem.innerHTML = `<img src="${user.avatar_url}" style="width:16px;height:16px;border-radius:50%;margin-right:5px;"> ${user.login} (GitHub)`;
             userItem.innerHTML = `<span>${user.login} (GitHub)</span>`;
             menu.appendChild(userItem);
 
-            // 区切り線
             const sep = document.createElement('div');
             sep.className = 'account-menu-separator';
             menu.appendChild(sep);
 
-            // ログアウトボタン
             const logoutItem = document.createElement('div');
             logoutItem.className = 'account-menu-item';
             logoutItem.textContent = 'ログアウト';
             logoutItem.addEventListener('click', async () => {
                 menu.remove();
                 activeContextMenu = null;
-
                 await window.electronAPI.logoutGitHub();
                 showNotification('ログアウトしました', 'success');
             });
             menu.appendChild(logoutItem);
 
         } else {
-            // ▼▼▼ 未ログインの場合 ▼▼▼
-
+            // 未ログイン
             const signInItem = document.createElement('div');
             signInItem.className = 'account-menu-item';
             signInItem.innerHTML = '<span>GitHub 連携 (Sign in)</span>';
-
             signInItem.addEventListener('click', async () => {
                 menu.remove();
                 activeContextMenu = null;
-
                 showNotification('GitHub認証を開始します...', 'info');
                 try {
                     const result = await window.electronAPI.authGitHub();
@@ -6140,6 +6036,8 @@ function setupAccountButton() {
         activeContextMenu = menu;
     });
 }
+
+
 
 window.addEventListener('load', async () => {
     console.log('Markdown IDE loaded');
@@ -6230,7 +6128,8 @@ window.addEventListener('load', async () => {
         editorContainer.addEventListener('contextmenu', (e) => {
             if (!globalEditorView) return;
             e.preventDefault();
-            window.electronAPI.showEditorContextMenu();
+            // ネイティブメニューではなく、HTML製のカスタムメニューを表示する
+            showEditorContextMenu(e.pageX, e.pageY);
         });
     }
 
@@ -6303,7 +6202,7 @@ function setupGitBranchSwitching() {
         if (!currentDirectoryPath) return;
         e.stopPropagation();
 
-        // ★修正点: awaitの前にクリックされた要素を変数に保存しておく
+        // awaitの前にクリックされた要素を変数に保存しておく
         const targetElement = e.currentTarget;
 
         if (activeContextMenu) {
@@ -6320,7 +6219,7 @@ function setupGitBranchSwitching() {
                 return;
             }
 
-            // ★修正点: 保存しておいた targetElement を使用する
+            // 保存しておいた targetElement を使用する
             if (targetElement) {
                 showBranchMenu(targetElement, result.branches, result.current);
             }
@@ -6354,7 +6253,7 @@ function showBranchMenu(targetElement, branches, currentBranch) {
     const menu = document.createElement('div');
     menu.className = 'branch-menu';
 
-    // ▼ 修正箇所: 表示位置の自動調整（ステータスバー対応）
+    // ▼表示位置の自動調整（ステータスバー対応）
     // ターゲットが画面の下半分にある場合は上に、そうでない場合は下に表示する
     if (rect.top > window.innerHeight / 2) {
         // 上に表示 (bottomプロパティを使用)
@@ -6719,9 +6618,9 @@ function switchToFile(filePath) {
             }
         }
 
-        // 仮想README.mdの場合のみタイトルバーを非表示
+        // 仮想README.mdの場合、または設定がOFFの場合はタイトルバーを非表示
         if (fileTitleBarEl) {
-            if (isVirtualReadme) {
+            if (isVirtualReadme || !appSettings.showFileTitleBar) {
                 fileTitleBarEl.classList.add('hidden');
             } else {
                 fileTitleBarEl.classList.remove('hidden');
@@ -7729,165 +7628,6 @@ async function confirmAndDelete(path) {
     }
 }
 
-let activeContextMenu = null;
-
-function showContextMenu(x, y, itemPath, name) {
-    if (activeContextMenu) activeContextMenu.remove();
-
-    const menu = document.createElement('div');
-    menu.className = 'context-menu';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-
-    const renameOption = document.createElement('div');
-    renameOption.className = 'context-menu-item';
-    renameOption.textContent = '名前の変更';
-    renameOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        // Fix: Use itemPath instead of path module
-        const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(itemPath)}"]`);
-        if (treeItem) {
-            startRenaming(treeItem);
-        }
-    });
-
-    const deleteOption = document.createElement('div');
-    deleteOption.className = 'context-menu-item';
-    deleteOption.textContent = '削除';
-    deleteOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        // 確認ポップアップを消して直接実行
-        confirmAndDelete(itemPath);
-    });
-
-    // --- 区切り線 ---
-    const separator = document.createElement('div');
-    separator.style.height = '1px';
-    separator.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
-    separator.style.margin = '4px 0';
-
-    // 相対パスをコピー
-    const copyRelPathOption = document.createElement('div');
-    copyRelPathOption.className = 'context-menu-item';
-    copyRelPathOption.textContent = '相対パスをコピー';
-    copyRelPathOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        const relPath = path.relative(currentDirectoryPath, itemPath);
-        navigator.clipboard.writeText(relPath);
-        showNotification('相対パスをコピーしました', 'success');
-    });
-
-    // 絶対パスをコピー
-    const copyAbsPathOption = document.createElement('div');
-    copyAbsPathOption.className = 'context-menu-item';
-    copyAbsPathOption.textContent = '絶対パスをコピー';
-    copyAbsPathOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        navigator.clipboard.writeText(itemPath);
-        showNotification('絶対パスをコピーしました', 'success');
-    });
-
-    // エクスプローラーで表示
-    const openExplorerOption = document.createElement('div');
-    openExplorerOption.className = 'context-menu-item';
-    openExplorerOption.textContent = 'エクスプローラーで表示';
-    openExplorerOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        window.electronAPI.showItemInFolder(itemPath);
-    });
-
-    menu.appendChild(renameOption);
-    menu.appendChild(deleteOption);
-    menu.appendChild(separator);
-    menu.appendChild(copyRelPathOption);
-    menu.appendChild(copyAbsPathOption);
-    menu.appendChild(openExplorerOption);
-
-    document.body.appendChild(menu);
-    activeContextMenu = menu;
-}
-
-// 空白部分用のコンテキストメニュー表示
-function showEmptySpaceContextMenu(x, y) {
-    if (activeContextMenu) activeContextMenu.remove();
-
-    const menu = document.createElement('div');
-    menu.className = 'context-menu';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-
-    const newFileOption = document.createElement('div');
-    newFileOption.className = 'context-menu-item';
-    newFileOption.textContent = '新規ファイル';
-    newFileOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        showCreationInput(false); // 新規ファイル作成
-    });
-
-    const newFolderOption = document.createElement('div');
-    newFolderOption.className = 'context-menu-item';
-    newFolderOption.textContent = '新規フォルダ';
-    newFolderOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        showCreationInput(true); // 新規フォルダ作成
-    });
-
-    // --- 区切り線(ルートディレクトリ用) ---
-    const separator = document.createElement('div');
-    separator.style.height = '1px';
-    separator.style.backgroundColor = 'rgba(128, 128, 128, 0.3)';
-    separator.style.margin = '4px 0';
-
-    // 相対パスをコピー (ルートなので "." )
-    const copyRelPathOption = document.createElement('div');
-    copyRelPathOption.className = 'context-menu-item';
-    copyRelPathOption.textContent = '相対パスをコピー';
-    copyRelPathOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        navigator.clipboard.writeText('.');
-        showNotification('相対パス(.)をコピーしました', 'success');
-    });
-
-    // 絶対パスをコピー
-    const copyAbsPathOption = document.createElement('div');
-    copyAbsPathOption.className = 'context-menu-item';
-    copyAbsPathOption.textContent = '絶対パスをコピー';
-    copyAbsPathOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        navigator.clipboard.writeText(currentDirectoryPath);
-        showNotification('絶対パスをコピーしました', 'success');
-    });
-
-    // エクスプローラーで開く
-    const openExplorerOption = document.createElement('div');
-    openExplorerOption.className = 'context-menu-item';
-    openExplorerOption.textContent = 'エクスプローラーで開く';
-    openExplorerOption.addEventListener('click', () => {
-        menu.remove();
-        activeContextMenu = null;
-        window.electronAPI.openPath(currentDirectoryPath);
-    });
-
-    menu.appendChild(newFileOption);
-    menu.appendChild(newFolderOption);
-    menu.appendChild(separator);
-    menu.appendChild(copyRelPathOption);
-    menu.appendChild(copyAbsPathOption);
-    menu.appendChild(openExplorerOption);
-
-    document.body.appendChild(menu);
-    activeContextMenu = menu;
-}
-
 // ========== CSS Snippets Logic ==========
 /**
  * 有効化されているCSSスニペットの内容をDOMから取得して結合する
@@ -8061,7 +7801,7 @@ function setupToolbarDropdownPositioning() {
         container.addEventListener('mouseenter', () => {
             const rect = container.getBoundingClientRect();
             const windowWidth = window.innerWidth;
-            
+
             // 親要素の overflow: hidden を突破するために fixed に設定
             menu.style.position = 'fixed';
             menu.style.top = `${rect.bottom + 2}px`; // ボタンの少し下
@@ -8090,9 +7830,295 @@ function setupToolbarDropdownPositioning() {
     });
 }
 
-document.addEventListener('click', () => {
-    if (activeContextMenu) {
-        activeContextMenu.remove();
-        activeContextMenu = null;
+// ========== 共通コンテキストメニュー・ヘルパー ==========
+const ContextMenu = {
+    // メニューを表示する汎用関数
+    show(x, y, items) {
+        // 既存のメニューがあれば閉じる（activeContextMenuはグローバル変数として想定）
+        if (activeContextMenu) activeContextMenu.remove();
+
+        const menu = document.createElement('div');
+        menu.className = 'context-menu'; // styles.css のスタイルを適用
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+
+        items.forEach(item => {
+            // セパレータの場合
+            if (item.type === 'separator') {
+                const sep = document.createElement('div');
+                sep.className = 'context-menu-separator';
+                menu.appendChild(sep);
+                return;
+            }
+
+            // 通常の項目の場合
+            const div = document.createElement('div');
+            div.className = 'context-menu-item';
+            
+            // ラベル
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = item.label;
+            div.appendChild(labelSpan);
+
+            // ショートカットキー（あれば）
+            if (item.shortcut) {
+                const scSpan = document.createElement('span');
+                scSpan.className = 'context-menu-shortcut';
+                scSpan.textContent = item.shortcut;
+                div.appendChild(scSpan);
+            }
+
+            // クリックイベント
+            div.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.close(); // 実行後に閉じる
+                if (item.click) item.click();
+            });
+
+            menu.appendChild(div);
+        });
+
+        document.body.appendChild(menu);
+        activeContextMenu = menu; // グローバル変数にセット
+    },
+
+    // メニューを閉じる関数
+    close() {
+        if (activeContextMenu) {
+            activeContextMenu.remove();
+            activeContextMenu = null;
+        }
     }
+};
+
+// ---------------------------------------------------------
+// 各機能ごとのメニュー定義（ContextMenu.show を呼び出すだけにする）
+// ---------------------------------------------------------
+
+// 1. ファイルツリーの項目メニュー
+function showContextMenu(x, y, itemPath, name) {
+    ContextMenu.show(x, y, [
+        { label: '名前の変更', click: () => {
+            const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(itemPath)}"]`);
+            if (treeItem) startRenaming(treeItem);
+        }},
+        { label: '削除', click: () => confirmAndDelete(itemPath) },
+        { type: 'separator' },
+        { label: '相対パスをコピー', click: () => {
+            const relPath = path.relative(currentDirectoryPath, itemPath);
+            navigator.clipboard.writeText(relPath);
+            showNotification('相対パスをコピーしました', 'success');
+        }},
+        { label: '絶対パスをコピー', click: () => {
+            navigator.clipboard.writeText(itemPath);
+            showNotification('絶対パスをコピーしました', 'success');
+        }},
+        { label: 'エクスプローラーで表示', click: () => window.electronAPI.showItemInFolder(itemPath) }
+    ]);
+}
+
+// 2. ファイルツリーの空白部分メニュー
+function showEmptySpaceContextMenu(x, y) {
+    ContextMenu.show(x, y, [
+        { label: '新規ファイル', click: () => showCreationInput(false) },
+        { label: '新規フォルダ', click: () => showCreationInput(true) },
+        { type: 'separator' },
+        { label: '相対パスをコピー', click: () => {
+            navigator.clipboard.writeText('.');
+            showNotification('相対パス(.)をコピーしました', 'success');
+        }},
+        { label: '絶対パスをコピー', click: () => {
+            navigator.clipboard.writeText(currentDirectoryPath);
+            showNotification('絶対パスをコピーしました', 'success');
+        }},
+        { label: 'エクスプローラーで開く', click: () => window.electronAPI.openPath(currentDirectoryPath) }
+    ]);
+}
+
+// 3. エディタ用カスタムコンテキストメニュー
+function showEditorContextMenu(x, y) {
+    if (activeContextMenu) activeContextMenu.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    // 通常アイテム作成ヘルパー
+    const createItem = (label, onClick, shortcut = "") => {
+        const item = document.createElement('div');
+        item.className = 'context-menu-item';
+        
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = label;
+        item.appendChild(labelSpan);
+
+        if (shortcut) {
+            const scSpan = document.createElement('span');
+            scSpan.className = 'context-menu-shortcut';
+            scSpan.textContent = shortcut;
+            item.appendChild(scSpan);
+        }
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.remove();
+            activeContextMenu = null;
+            onClick();
+            globalEditorView.focus();
+        });
+        return item;
+    };
+
+    // サブメニュー作成ヘルパー
+    const createSubmenu = (label, subItems) => {
+        const item = document.createElement('div');
+        item.className = 'context-menu-item';
+        item.innerHTML = `<span>${label}</span><span class="submenu-arrow">▶</span>`;
+        
+        const submenu = document.createElement('div');
+        submenu.className = 'context-submenu';
+        
+        subItems.forEach(sub => {
+            const subItem = document.createElement('div');
+            subItem.className = 'context-menu-item';
+            
+            // 色プレビューがあれば表示
+            let contentHtml = '';
+            if (sub.color) {
+                contentHtml += `<span class="color-preview-dot" style="background-color: ${sub.color};"></span>`;
+            }
+            contentHtml += `<span>${sub.label}</span>`;
+            
+            subItem.innerHTML = contentHtml;
+            subItem.style.display = 'flex';
+            subItem.style.alignItems = 'center';
+
+            subItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                menu.remove();
+                activeContextMenu = null;
+                sub.click();
+                globalEditorView.focus();
+            });
+            submenu.appendChild(subItem);
+        });
+        
+        item.appendChild(submenu);
+        return item;
+    };
+
+    const createSeparator = () => {
+        const sep = document.createElement('div');
+        sep.className = 'context-menu-separator';
+        return sep;
+    };
+
+    // --- メニュー構成 ---
+
+    // 編集操作
+    menu.appendChild(createItem('カット', async () => {
+        const sel = globalEditorView.state.selection.main;
+        if (!sel.empty) {
+            const text = globalEditorView.state.sliceDoc(sel.from, sel.to);
+            await navigator.clipboard.writeText(text);
+            globalEditorView.dispatch({ changes: { from: sel.from, to: sel.to, insert: "" } });
+        }
+    }, 'Ctrl+X'));
+
+    menu.appendChild(createItem('コピー', async () => {
+        const sel = globalEditorView.state.selection.main;
+        if (!sel.empty) {
+            const text = globalEditorView.state.sliceDoc(sel.from, sel.to);
+            await navigator.clipboard.writeText(text);
+        }
+    }, 'Ctrl+C'));
+
+    menu.appendChild(createItem('ペースト', async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text) globalEditorView.dispatch(globalEditorView.state.replaceSelection(text));
+        } catch(e) {}
+    }, 'Ctrl+V'));
+
+    menu.appendChild(createSeparator());
+
+    menu.appendChild(createItem('すべてを選択', () => {
+        const { selectAll } = require("@codemirror/commands");
+        selectAll(globalEditorView);
+    }, 'Ctrl+A'));
+
+    menu.appendChild(createSeparator());
+
+    // 挿入・装飾
+    menu.appendChild(createItem('太字', () => toggleMark(globalEditorView, '**'), 'Ctrl+B'));
+    menu.appendChild(createItem('表の挿入', () => insertTable(globalEditorView)));
+    menu.appendChild(createItem('コードブロック', () => insertCodeBlock(globalEditorView)));
+
+    menu.appendChild(createSeparator());
+
+    // ハイライト（サブメニュー化）
+    menu.appendChild(createSubmenu('ハイライト', [
+        { label: '黄色', color: '#fff700', click: () => toggleHighlightColor(globalEditorView, '#fff700') },
+        { label: '赤色', color: '#ffcccc', click: () => toggleHighlightColor(globalEditorView, '#ffcccc') },
+        { label: '青色', color: '#ccf0ff', click: () => toggleHighlightColor(globalEditorView, '#ccf0ff') },
+        { label: '緑色', color: '#ccffcc', click: () => toggleHighlightColor(globalEditorView, '#ccffcc') }
+    ]));
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+}
+
+// 4. Git履歴のメニュー
+function showCommitContextMenu(x, y, commit) {
+    ContextMenu.show(x, y, [
+        { label: 'このコミットをチェックアウト', click: async () => {
+            showNotification(`コミット ${commit.oid.substring(0, 7)} をチェックアウト中...`, 'info');
+            try {
+                const result = await window.electronAPI.gitCheckout(currentDirectoryPath, commit.oid);
+                if (result.success) {
+                    showNotification('チェックアウト完了', 'success');
+                    refreshGitStatus();
+                    initializeFileTreeWithState();
+                } else {
+                    showNotification(`エラー: ${result.error}`, 'error');
+                }
+            } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
+        }},
+        { type: 'separator' },
+        { label: '現在のブランチをここにリセット (Hard)', click: () => {
+            const message = `コミット ${commit.oid.substring(0, 7)} へ強制的にリセットしますか？ (変更は破棄されます)`;
+            showCompactConfirmModal(message, async () => {
+                try {
+                    const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
+                    if (result.success) {
+                        showNotification('リセット完了', 'success');
+                        refreshGitStatus();
+                        initializeFileTreeWithState();
+                    } else { showNotification(`エラー: ${result.error}`, 'error'); }
+                } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
+            });
+        }},
+        { label: 'このコミットを打ち消し (Revert)', click: () => {
+            const message = `コミット ${commit.oid.substring(0, 7)} を打ち消すコミットを作成しますか？`;
+            showCompactConfirmModal(message, async () => {
+                try {
+                    const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
+                    if (result.success) {
+                        showNotification('打ち消しコミットを作成しました', 'success');
+                        refreshGitStatus();
+                    } else { showNotification(`エラー: ${result.error}`, 'error'); }
+                } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
+            });
+        }},
+        { type: 'separator' },
+        { label: 'コミットハッシュをコピー', click: () => {
+            navigator.clipboard.writeText(commit.oid);
+            showNotification('ハッシュをコピーしました', 'success');
+        }}
+    ]);
+}
+
+document.addEventListener('click', () => {
+    ContextMenu.close();
 });

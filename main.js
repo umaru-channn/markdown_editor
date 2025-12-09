@@ -140,6 +140,7 @@ function loadAppSettings() {
     autoCloseBrackets: true,
     highlightActiveLine: true,
     showToolbar: true,
+    showFileTitleBar: true,
     showWhitespace: false,
     defaultImageLocation: '.',
     // デフォルトの除外設定
@@ -3318,6 +3319,8 @@ const getInstallHelp = (baseCommand) => {
   if (commandKey === 'kotlinc') commandKey = 'kotlin';
   if (commandKey === 'tsc') commandKey = 'typescript';
   if (commandKey === 'rscript') commandKey = 'r';
+  if (commandKey === 'sqlite3') commandKey = 'sql';
+  if (commandKey === 'scala-cli') commandKey = 'scala';
 
   // Windows用の共通パス追加手順テキスト
   const winPathHelp = "   【パスの追加方法】\n" +
@@ -3495,7 +3498,34 @@ const getInstallHelp = (baseCommand) => {
       win32: { type: 'simple', cmd: "winget install -e --id Rustlang.Rustup" },
       darwin: { type: 'simple', cmd: "brew install rust" },
       linux: { type: 'simple', cmd: "sudo apt install rustc" }
-    }
+    },
+    'sql': {
+      name: "SQLite",
+      win32: {
+        type: 'complex',
+        msg: "SQLiteが見つかりません。\n\n" +
+          "1. インストール:\n   > winget install -e --id SQLite.SQLite\n" +
+          "2. パス設定:\n   インストール先 (例: C:\\Program Files\\SQLite) を環境変数Pathに追加してください。\n\n" +
+          winPathHelp + "\n\n(設定後は再起動してください)"
+      },
+      darwin: { type: 'simple', cmd: "brew install sqlite" },
+      linux: { type: 'simple', cmd: "sudo apt install sqlite3" }
+    },
+    'scala': {
+      name: "Scala",
+      win32: {
+        type: 'complex',
+        msg: "Scala環境が見つかりません。以下のいずれかの方法でインストールしてください。\n\n" +
+          "【選択肢A】Scala CLI (推奨・高速):\n" +
+          "   > winget install virtuslab.scalacli\n\n" +
+          "【選択肢B】Coursier (標準):\n" +
+          "   > winget install -e --id Coursier.Coursier\n" +
+          "   (インストール後、ターミナルで `cs setup` を実行してください)\n\n" +
+          "※ インストール完了後は、PCを再起動してください。"
+      },
+      darwin: { type: 'simple', cmd: "brew install scala-cli" },
+      linux: { type: 'simple', cmd: "curl -sSLf https://virtuslab.github.io/scala-cli-packages/scala-setup.sh | sh" }
+    },
   };
 
   const info = INSTALL_DATA[commandKey];
@@ -3636,6 +3666,8 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
     let swiftExec = 'swift';
     let kotlinExec = 'kotlinc'; // バッチファイル等の可能性あり
     let tscExec = 'tsc';
+    let sqliteExec = 'sqlite3';
+    let scalaExec = 'scala';
 
     // --- コンパイラ・ランタイムの自動検出 (Windows) ---
     if (process.platform === 'win32') {
@@ -3715,10 +3747,206 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
         const npmPath = path.join(process.env.APPDATA || '', 'npm', 'tsc.cmd');
         if (fs.existsSync(npmPath)) tscExec = npmPath;
       }
+
+      // SQLite
+      if (langLower === 'sql') {
+        const paths = [
+          'C:\\sqlite\\sqlite3.exe',
+          'C:\\Program Files\\SQLite\\sqlite3.exe',
+          path.join(os.homedir(), 'sqlite\\sqlite3.exe')
+        ];
+        for (const p of paths) { if (fs.existsSync(p)) { sqliteExec = p; break; } }
+      }
+
+      // SQLite
+      if (langLower === 'sql') {
+        const paths = [
+          'C:\\sqlite\\sqlite3.exe',
+          'C:\\Program Files\\SQLite\\sqlite3.exe',
+          path.join(os.homedir(), 'sqlite\\sqlite3.exe')
+        ];
+        for (const p of paths) { if (fs.existsSync(p)) { sqliteExec = p; break; } }
+      }
+
+      // Scala (Scala CLI または 標準Scala を検出)
+      if (langLower === 'scala') {
+        // 探す実行ファイル名の候補 (scala-cli.exe を優先)
+        const scalaCandidates = ['scala-cli.exe', 'scala.bat', 'scala.exe'];
+
+        // 探すディレクトリの候補
+        const searchPaths = [
+          // ご報告いただいたパス (最優先)
+          'C:\\Program Files\\scala-cli-x86_64-pc-win32',
+          'C:\\Program Files\\scala-cli-x86_64-pc-win32\\bin',
+
+          // その他の可能性
+          path.join(process.env.LOCALAPPDATA || '', 'VirtusLab', 'ScalaCLI', 'bin'),
+          path.join(os.homedir(), 'AppData\\Local\\Coursier\\data\\bin'),
+          'C:\\Program Files\\scala\\bin',
+          'C:\\Program Files (x86)\\scala\\bin'
+        ];
+
+        // 1. 指定パス内を検索
+        outerLoop:
+        for (const basePath of searchPaths) {
+          for (const cmd of scalaCandidates) {
+            const fullPath = path.join(basePath, cmd);
+            if (fs.existsSync(fullPath)) {
+              scalaExec = fullPath;
+              break outerLoop;
+            }
+          }
+        }
+
+        // 2. パスが見つからなかった場合、コマンド名だけでフォールバック
+        if (scalaExec === 'scala') {
+          // PATHが通っている場合、scala-cli か scala_cli の可能性が高い
+          scalaExec = 'scala-cli';
+        }
+      }
     }
 
     const toWslPath = (winPath) => winPath.replace(/^([a-zA-Z]):/, (match, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, '/');
     const baseFileName = `code_${Date.now()}`;
+
+    // Brainfuckインタプリタのスクリプト（Node.js用）
+    const bfRunnerScript = `
+const fs = require('fs');
+const code = fs.readFileSync(process.argv[2], 'utf8');
+const tape = new Uint8Array(30000);
+let ptr = 0;
+let pc = 0;
+const loopStack = [];
+const loopMap = {};
+for (let i = 0; i < code.length; i++) {
+  if (code[i] === '[') loopStack.push(i);
+  else if (code[i] === ']') {
+    const start = loopStack.pop();
+    if (start !== undefined) { loopMap[start] = i; loopMap[i] = start; }
+  }
+}
+while (pc < code.length) {
+  const char = code[pc];
+  if (char === '>') { ptr++; }
+  else if (char === '<') { ptr--; }
+  else if (char === '+') { tape[ptr]++; }
+  else if (char === '-') { tape[ptr]--; }
+  else if (char === '.') { process.stdout.write(String.fromCharCode(tape[ptr])); }
+  else if (char === ',') { } 
+  else if (char === '[') { if (tape[ptr] === 0) pc = loopMap[pc]; }
+  else if (char === ']') { if (tape[ptr] !== 0) pc = loopMap[pc]; }
+  pc++;
+}
+`;
+
+    const wsRunnerScript = `
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[2], 'utf8');
+const code = source.replace(/[^ \\t\\n]/g, '');
+const stack = [], callStack = [], heap = {}, labels = {};
+const instructions = [];
+let pos = 0;
+function parseNum() {
+  if (pos >= code.length) return 0;
+  const sign = code[pos++] === '\\t' ? -1 : 1;
+  let val = 0;
+  while (pos < code.length) {
+    const char = code[pos++];
+    if (char === '\\n') break;
+    val = val * 2 + (char === '\\t' ? 1 : 0);
+  }
+  return sign * val;
+}
+function parseLabel() {
+  let label = '';
+  while (pos < code.length) {
+    const char = code[pos++];
+    if (char === '\\n') break;
+    label += (char === ' ' ? 'S' : 'T');
+  }
+  return label;
+}
+while (pos < code.length) {
+  const imp = code[pos++];
+  if (imp === ' ') {
+    const cmd = code[pos++];
+    if (cmd === ' ') { instructions.push({op: 'PUSH', val: parseNum()}); }
+    else if (cmd === '\\n') { 
+      const sub = code[pos++];
+      if (sub === ' ') instructions.push({op: 'DUP'});
+      else if (sub === '\\t') instructions.push({op: 'SWAP'});
+      else if (sub === '\\n') instructions.push({op: 'DISCARD'});
+    } else if (cmd === '\\t') {
+      const sub = code[pos++];
+      if (sub === ' ') instructions.push({op: 'COPY', val: parseNum()});
+      else if (sub === '\\n') instructions.push({op: 'SLIDE', val: parseNum()});
+    }
+  } else if (imp === '\\t') { 
+    const cmd = code[pos++];
+    if (cmd === ' ') {
+      const sub = code[pos++], sub2 = code[pos++];
+      const type = (sub===' ' && sub2===' ') ? 'ADD' : (sub===' ' && sub2==='\\t') ? 'SUB' : (sub===' ' && sub2==='\\n') ? 'MUL' : (sub==='\\t' && sub2===' ') ? 'DIV' : 'MOD';
+      instructions.push({op: 'ARITH', type});
+    } else if (cmd === '\\t') {
+      const sub = code[pos++];
+      instructions.push({op: sub === ' ' ? 'STORE' : 'RETRIEVE'});
+    } else if (cmd === '\\n') {
+      const sub = code[pos++], sub2 = code[pos++];
+      if (sub === ' ' && sub2 === ' ') instructions.push({op: 'OUT_CHAR'});
+      else if (sub === ' ' && sub2 === '\\t') instructions.push({op: 'OUT_NUM'});
+      else if (sub === '\\t') instructions.push({op: 'READ_CHAR'});
+      else if (sub === '\\t') instructions.push({op: 'READ_NUM'});
+    }
+  } else if (imp === '\\n') {
+    const cmd = code[pos++], sub = code[pos++];
+    if (cmd === ' ' && sub === ' ') {
+      const lbl = parseLabel();
+      instructions.push({op: 'LABEL', lbl});
+      labels[lbl] = instructions.length - 1;
+    } else if (cmd === ' ' && sub === '\\t') instructions.push({op: 'CALL', lbl: parseLabel()});
+    else if (cmd === ' ' && sub === '\\n') instructions.push({op: 'JUMP', lbl: parseLabel()});
+    else if (cmd === '\\t' && sub === ' ') instructions.push({op: 'JZ', lbl: parseLabel()});
+    else if (cmd === '\\t' && sub === '\\t') instructions.push({op: 'JN', lbl: parseLabel()});
+    else if (cmd === '\\t' && sub === '\\n') instructions.push({op: 'RET'});
+    else if (cmd === '\\n' && sub === '\\n') instructions.push({op: 'END'});
+  }
+}
+let ip = 0;
+while (ip < instructions.length) {
+  const inst = instructions[ip++];
+  try {
+    switch (inst.op) {
+      case 'PUSH': stack.push(inst.val); break;
+      case 'DUP': stack.push(stack[stack.length-1]); break;
+      case 'SWAP': { const a=stack.pop(), b=stack.pop(); stack.push(a); stack.push(b); break; }
+      case 'DISCARD': stack.pop(); break;
+      case 'COPY': stack.push(stack[stack.length - 1 - inst.val]); break;
+      case 'SLIDE': { const top = stack.pop(); stack.splice(stack.length - inst.val, inst.val); stack.push(top); break; }
+      case 'ARITH': {
+        const b = stack.pop(), a = stack.pop();
+        if (inst.type === 'ADD') stack.push(a+b);
+        else if (inst.type === 'SUB') stack.push(a-b);
+        else if (inst.type === 'MUL') stack.push(a*b);
+        else if (inst.type === 'DIV') stack.push(Math.floor(a/b));
+        else if (inst.type === 'MOD') stack.push(a - b * Math.floor(a/b));
+        break;
+      }
+      case 'STORE': { const v = stack.pop(), addr = stack.pop(); heap[addr] = v; break; }
+      case 'RETRIEVE': { const addr = stack.pop(); stack.push(heap[addr] || 0); break; }
+      case 'OUT_CHAR': process.stdout.write(String.fromCharCode(stack.pop())); break;
+      case 'OUT_NUM': process.stdout.write(String(stack.pop())); break;
+      case 'READ_CHAR': case 'READ_NUM': stack.push(0); break;
+      case 'LABEL': break;
+      case 'CALL': callStack.push(ip); ip = labels[inst.lbl]; break;
+      case 'JUMP': ip = labels[inst.lbl]; break;
+      case 'JZ': if (stack.pop() === 0) ip = labels[inst.lbl]; break;
+      case 'JN': if (stack.pop() < 0) ip = labels[inst.lbl]; break;
+      case 'RET': ip = callStack.pop(); break;
+      case 'END': ip = instructions.length; break;
+    }
+  } catch(e) { process.stderr.write('Runtime Error: ' + e.message); break; }
+}
+`;
 
     const langConfig = {
       'javascript': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
@@ -3804,6 +4032,55 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
       'cs': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
       'go': { ext: '.go', base: 'go', cmd: (f) => `go run "${f}"` },
       'rust': { ext: '.rs', base: 'rustc', cmd: (f) => `rustc "${f}" -o "${f.replace(/\.rs$/, '.exe')}" && "${f.replace(/\.rs$/, '.exe')}"` },
+      // SQL (SQLite): インメモリDB(:memory:)に対してファイル内容を入力(<)として実行
+      'sql': {
+        ext: '.sql',
+        base: sqliteExec,
+        cmd: (f) => `"${sqliteExec}" :memory: < "${f}"`
+      },
+      // Scala: スクリプトとして実行
+      'scala': {
+        ext: '.scala',
+        base: scalaExec,
+        cmd: (f) => `"${scalaExec}" "${f}"`
+      },
+
+      'brainfuck': {
+        ext: '.bf',
+        base: 'node',
+        cmd: (f) => {
+          const runnerPath = path.join(path.dirname(f), 'bf_runner.js');
+          fs.writeFileSync(runnerPath, bfRunnerScript);
+          return `node "${runnerPath}" "${f}"`;
+        }
+      },
+      'bf': {
+        ext: '.bf',
+        base: 'node',
+        cmd: (f) => {
+          const runnerPath = path.join(path.dirname(f), 'bf_runner.js');
+          fs.writeFileSync(runnerPath, bfRunnerScript);
+          return `node "${runnerPath}" "${f}"`;
+        }
+      },
+      'whitespace': {
+        ext: '.ws',
+        base: 'node',
+        cmd: (f) => {
+          const runnerPath = path.join(path.dirname(f), 'ws_runner.js');
+          fs.writeFileSync(runnerPath, wsRunnerScript);
+          return `node "${runnerPath}" "${f}"`;
+        }
+      },
+      'ws': {
+        ext: '.ws',
+        base: 'node',
+        cmd: (f) => {
+          const runnerPath = path.join(path.dirname(f), 'ws_runner.js');
+          fs.writeFileSync(runnerPath, wsRunnerScript);
+          return `node "${runnerPath}" "${f}"`;
+        }
+      },
     };
 
     // PHPの再設定 (targetExecがあればそれ、なければ自動検出ロジックの結果、なければ 'php')
@@ -3877,6 +4154,11 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
 
           const exePath = tempFilePath.replace(config.ext, '.exe');
           if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
+
+          if (['brainfuck', 'bf'].includes(langLower)) {
+            const runnerPath = path.join(path.dirname(tempFilePath), 'bf_runner.js');
+            if (fs.existsSync(runnerPath)) fs.unlinkSync(runnerPath);
+          }
         } catch (e) { }
 
         if (error) {

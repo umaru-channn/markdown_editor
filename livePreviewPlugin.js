@@ -7,7 +7,7 @@ const { RangeSetBuilder, StateField, StateEffect } = require("@codemirror/state"
 /* ========== Helper Functions & Widgets ========== */
 
 // 言語リスト
-const LANGUAGE_LIST = [
+const EXISTING_LANGUAGES = [
     { label: "Plain Text", value: "" },
     { label: "JavaScript", value: "javascript" },
     { label: "TypeScript", value: "typescript" },
@@ -37,7 +37,240 @@ const LANGUAGE_LIST = [
     { label: "Perl", value: "perl" },
     { label: "R", value: "r" },
     { label: "Dart", value: "dart" },
-    { label: "Scala", value: "scala" }
+    { label: "Scala", value: "scala" },
+    { label: "Whitespace", value: "whitespace" }
+];
+
+// --- 追加言語リスト (A-Z順) ---
+const ADDITIONAL_LANGUAGES = [
+    { label: "ABAP", value: "abap" },
+    { label: "ABNF", value: "abnf" },
+    { label: "ActionScript", value: "actionscript" },
+    { label: "Ada", value: "ada" },
+    { label: "Agda", value: "agda" },
+    { label: "AL", value: "al" },
+    { label: "ANTLR4", value: "antlr4" },
+    { label: "Apache Config", value: "apacheconf" },
+    { label: "Apex", value: "apex" },
+    { label: "APL", value: "apl" },
+    { label: "AppleScript", value: "applescript" },
+    { label: "AQL", value: "aql" },
+    { label: "Arduino", value: "arduino" },
+    { label: "ARFF", value: "arff" },
+    { label: "AsciiDoc", value: "asciidoc" },
+    { label: "6502 Assembly", value: "asm6502" },
+    { label: "ASP.NET (C#)", value: "aspnet" },
+    { label: "AutoHotkey", value: "autohotkey" },
+    { label: "AutoIt", value: "autoit" },
+    { label: "AviSynth", value: "avisynth" },
+    { label: "Avro IDL", value: "avro-idl" },
+    { label: "BASIC", value: "basic" },
+    { label: "Batch", value: "batch" },
+    { label: "BBcode", value: "bbcode" },
+    { label: "Bicep", value: "bicep" },
+    { label: "Bison", value: "bison" },
+    { label: "BNF", value: "bnf" },
+    { label: "Brainfuck", value: "brainfuck" },
+    { label: "BrightScript", value: "brightscript" },
+    { label: "Bro", value: "bro" },
+    { label: "BSL (1C)", value: "bsl" },
+    { label: "CFScript", value: "cfscript" },
+    { label: "ChaiScript", value: "chaiscript" },
+    { label: "CIL", value: "cil" },
+    { label: "Clojure", value: "clojure" },
+    { label: "CMake", value: "cmake" },
+    { label: "COBOL", value: "cobol" },
+    { label: "CoffeeScript", value: "coffeescript" },
+    { label: "Concurnas", value: "concurnas" },
+    { label: "CSP", value: "csp" },
+    { label: "Cooklang", value: "cooklang" },
+    { label: "Coq", value: "coq" },
+    { label: "Crystal", value: "crystal" },
+    { label: "CSV", value: "csv" },
+    { label: "CUE", value: "cue" },
+    { label: "Cypher", value: "cypher" },
+    { label: "D", value: "d" },
+    { label: "Dhall", value: "dhall" },
+    { label: "Django/Jinja2", value: "django" },
+    { label: "DNS Zone File", value: "dns-zone-file" },
+    { label: "Docker", value: "docker" },
+    { label: "DOT (Graphviz)", value: "dot" },
+    { label: "EBNF", value: "ebnf" },
+    { label: "EditorConfig", value: "editorconfig" },
+    { label: "Eiffel", value: "eiffel" },
+    { label: "EJS", value: "ejs" },
+    { label: "Elixir", value: "elixir" },
+    { label: "Elm", value: "elm" },
+    { label: "ERB", value: "erb" },
+    { label: "Erlang", value: "erlang" },
+    { label: "Excel Formula", value: "excel-formula" },
+    { label: "F#", value: "fsharp" },
+    { label: "Factor", value: "factor" },
+    { label: "Firestore Rules", value: "firestore-security-rules" },
+    { label: "Flow", value: "flow" },
+    { label: "Fortran", value: "fortran" },
+    { label: "FreeMarker", value: "ftl" },
+    { label: "G-code", value: "gcode" },
+    { label: "GDScript", value: "gdscript" },
+    { label: "GEDCOM", value: "gedcom" },
+    { label: "Gherkin", value: "gherkin" },
+    { label: "Git", value: "git" },
+    { label: "GLSL", value: "glsl" },
+    { label: "GameMaker", value: "gml" },
+    { label: "GN", value: "gn" },
+    { label: "Go module", value: "go-module" },
+    { label: "Gradle", value: "gradle" },
+    { label: "GraphQL", value: "graphql" },
+    { label: "Groovy", value: "groovy" },
+    { label: "Haml", value: "haml" },
+    { label: "Handlebars", value: "handlebars" },
+    { label: "Haskell", value: "haskell" },
+    { label: "Haxe", value: "haxe" },
+    { label: "HCL", value: "hcl" },
+    { label: "HLSL", value: "hlsl" },
+    { label: "HTTP", value: "http" },
+    { label: "IchigoJam", value: "ichigojam" },
+    { label: "Icon", value: "icon" },
+    { label: "Idris", value: "idris" },
+    { label: ".ignore", value: "ignore" },
+    { label: "Inform 7", value: "inform7" },
+    { label: "Ini", value: "ini" },
+    { label: "Io", value: "io" },
+    { label: "J", value: "j" },
+    { label: "JavaDoc", value: "javadoc" },
+    { label: "Jexl", value: "jexl" },
+    { label: "Jolie", value: "jolie" },
+    { label: "JQ", value: "jq" },
+    { label: "JSDoc", value: "jsdoc" },
+    { label: "JSON5", value: "json5" },
+    { label: "JSONP", value: "jsonp" },
+    { label: "JSX", value: "jsx" },
+    { label: "Julia", value: "julia" },
+    { label: "Keepalived", value: "keepalived" },
+    { label: "Keyman", value: "keyman" },
+    { label: "KuMir", value: "kumir" },
+    { label: "Kusto", value: "kusto" },
+    { label: "LaTeX", value: "latex" },
+    { label: "Latte", value: "latte" },
+    { label: "Less", value: "less" },
+    { label: "LilyPond", value: "lilypond" },
+    { label: "Liquid", value: "liquid" },
+    { label: "Lisp", value: "lisp" },
+    { label: "LiveScript", value: "livescript" },
+    { label: "LLVM IR", value: "llvm" },
+    { label: "Log file", value: "log" },
+    { label: "LOLCODE", value: "lolcode" },
+    { label: "Magma", value: "magma" },
+    { label: "Makefile", value: "makefile" },
+    { label: "MATLAB", value: "matlab" },
+    { label: "MAXScript", value: "maxscript" },
+    { label: "MEL", value: "mel" },
+    { label: "Mermaid", value: "mermaid" },
+    { label: "MongoDB", value: "mongodb" },
+    { label: "Monkey", value: "monkey" },
+    { label: "MoonScript", value: "moonscript" },
+    { label: "N1QL", value: "n1ql" },
+    { label: "NASM", value: "nasm" },
+    { label: "NEON", value: "neon" },
+    { label: "Nginx", value: "nginx" },
+    { label: "Nim", value: "nim" },
+    { label: "Nix", value: "nix" },
+    { label: "NSIS", value: "nsis" },
+    { label: "Objective-C", value: "objectivec" },
+    { label: "OCaml", value: "ocaml" },
+    { label: "Odin", value: "odin" },
+    { label: "OpenCL", value: "opencl" },
+    { label: "OpenQasm", value: "openqasm" },
+    { label: "Oz", value: "oz" },
+    { label: "PARI/GP", value: "parigp" },
+    { label: "Parser", value: "parser" },
+    { label: "Pascal", value: "pascal" },
+    { label: "Pascaligo", value: "pascaligo" },
+    { label: "PeopleCode", value: "peoplecode" },
+    { label: "PHPDoc", value: "phpdoc" },
+    { label: "PlantUML", value: "plant-uml" },
+    { label: "PL/SQL", value: "plsql" },
+    { label: "PowerQuery", value: "powerquery" },
+    { label: "Processing", value: "processing" },
+    { label: "Prolog", value: "prolog" },
+    { label: "PromQL", value: "promql" },
+    { label: ".properties", value: "properties" },
+    { label: "Protocol Buffers", value: "protobuf" },
+    { label: "Pug", value: "pug" },
+    { label: "Puppet", value: "puppet" },
+    { label: "Pure", value: "pure" },
+    { label: "PureBasic", value: "purebasic" },
+    { label: "PureScript", value: "purescript" },
+    { label: "Q (kdb+)", value: "q" },
+    { label: "QML", value: "qml" },
+    { label: "Qore", value: "qore" },
+    { label: "Q#", value: "qsharp" },
+    { label: "Racket", value: "racket" },
+    { label: "Reason", value: "reason" },
+    { label: "Regex", value: "regex" },
+    { label: "Rego", value: "rego" },
+    { label: "Ren'py", value: "renpy" },
+    { label: "ReScript", value: "rescript" },
+    { label: "reST", value: "rest" },
+    { label: "Rip", value: "rip" },
+    { label: "Roboconf", value: "roboconf" },
+    { label: "Robot Framework", value: "robotframework" },
+    { label: "SAS", value: "sas" },
+    { label: "Sass (Sass)", value: "sass" },
+    { label: "Sass (Scss)", value: "scss" },
+    { label: "Scheme", value: "scheme" },
+    { label: "Shell session", value: "shell-session" },
+    { label: "Smali", value: "smali" },
+    { label: "Smalltalk", value: "smalltalk" },
+    { label: "Smarty", value: "smarty" },
+    { label: "SML", value: "sml" },
+    { label: "Solidity", value: "solidity" },
+    { label: "Soy", value: "soy" },
+    { label: "SPARQL", value: "sparql" },
+    { label: "Splunk SPL", value: "splunk-spl" },
+    { label: "SQF", value: "sqf" },
+    { label: "Squirrel", value: "squirrel" },
+    { label: "Stan", value: "stan" },
+    { label: "Stylus", value: "stylus" },
+    { label: "Systemd", value: "systemd" },
+    { label: "T4 (C#)", value: "t4-cs" },
+    { label: "T4 (VB)", value: "t4-vb" },
+    { label: "TAP", value: "tap" },
+    { label: "Tcl", value: "tcl" },
+    { label: "Textile", value: "textile" },
+    { label: "TOML", value: "toml" },
+    { label: "Tremor", value: "tremor" },
+    { label: "TSX", value: "tsx" },
+    { label: "TT2", value: "tt2" },
+    { label: "Turtle", value: "turtle" },
+    { label: "Twig", value: "twig" },
+    { label: "TypoScript", value: "typoscript" },
+    { label: "UnrealScript", value: "unrealscript" },
+    { label: "URI", value: "uri" },
+    { label: "V", value: "v" },
+    { label: "Vala", value: "vala" },
+    { label: "VB.Net", value: "vbnet" },
+    { label: "Velocity", value: "velocity" },
+    { label: "Verilog", value: "verilog" },
+    { label: "VHDL", value: "vhdl" },
+    { label: "Vim", value: "vim" },
+    { label: "Visual Basic", value: "visual-basic" },
+    { label: "WarpScript", value: "warpscript" },
+    { label: "WebAssembly", value: "wasm" },
+    { label: "Web IDL", value: "web-idl" },
+    { label: "Wiki markup", value: "wiki" },
+    { label: "Wolfram", value: "wolfram" },
+    { label: "Wren", value: "wren" },
+    { label: "Xeora", value: "xeora" },
+    { label: "Xojo", value: "xojo" },
+    { label: "XQuery", value: "xquery" },
+    { label: "YANG", value: "yang" },
+    { label: "Zig", value: "zig" }
+];
+
+const LANGUAGE_LIST = [
+    ...EXISTING_LANGUAGES,
+    ...ADDITIONAL_LANGUAGES
 ];
 
 // 実行ボタンを表示する言語のリスト
@@ -45,8 +278,8 @@ const EXECUTABLE_LANGUAGES = new Set([
     "javascript", "js", "node",
     "typescript", "ts",
     "python", "py",
-    "bash", "sh", "zsh","shell",
-    "c","gcc",
+    "bash", "sh", "zsh", "shell",
+    "c", "gcc",
     "cpp", "c++",
     "java",
     "csharp", "cs",
@@ -54,13 +287,17 @@ const EXECUTABLE_LANGUAGES = new Set([
     "ruby", "rb",
     "perl", "pl",
     "lua",
-    "powershell", "ps1","pwsh",
+    "powershell", "ps1", "pwsh",
     "r",
     "go", "golang",
     "rust", "rs",
     "dart",
     "kotlin", "kt",
-    "swift"
+    "swift",
+    "sql",
+    "scala",
+    "brainfuck", "bf",
+    "whitespace", "ws"
 ]);
 
 // Altテキストからサイズを解析するヘルパー関数
@@ -129,10 +366,12 @@ function formatLanguageName(lang) {
         "yml": "YAML",
         "rb": "Ruby",
         "go": "Go",
-        "ps1": "PowerShell","pwsh": "PowerShell",
+        "ps1": "PowerShell", "pwsh": "PowerShell",
         "docker": "Dockerfile",
         "gcc": "C",
-        "kt": "Kotlin"
+        "kt": "Kotlin",
+        "bf": "Brainfuck",
+        "ws": "Whitespace"
     };
     return map[l] || (l.charAt(0).toUpperCase() + l.slice(1));
 }
@@ -321,7 +560,7 @@ class PdfWidget extends WidgetType {
         wrapper.style.backgroundColor = "#525659"; // PDFリーダー風の背景色
         wrapper.style.border = "1px solid #ccc";
 
-        // ★ここが重要: 高さを固定してスクロールバーを出す
+        // 高さを固定してスクロールバーを出す
         wrapper.style.height = "23.8em";
         wrapper.style.overflowY = "auto";
         wrapper.style.overflowX = "hidden";
@@ -526,19 +765,65 @@ class ExecutionResultWidget extends WidgetType {
     toDOM(view) {
         const div = document.createElement("div");
         div.className = `cm-execution-result ${this.isError ? "error" : ""}`;
+        div.style.position = "relative"; // ボタン配置の基準点
 
+        // --- コピーボタン ---
+        const copyBtn = document.createElement("button");
+        copyBtn.textContent = "Copy";
+        copyBtn.title = "結果をコピー";
+        // スタイル設定 (CSSファイルを触らずに済むよう直接指定)
+        copyBtn.style.position = "absolute";
+        copyBtn.style.top = "5px";
+        copyBtn.style.right = "30px"; // 閉じるボタンの左隣
+        copyBtn.style.background = "transparent";
+        copyBtn.style.border = "1px solid rgba(128,128,128,0.3)";
+        copyBtn.style.borderRadius = "3px";
+        copyBtn.style.cursor = "pointer";
+        copyBtn.style.fontSize = "10px";
+        copyBtn.style.padding = "2px 6px";
+        copyBtn.style.color = "inherit";
+        copyBtn.style.opacity = "0.7";
+
+        // クリック時のコピー処理
+        copyBtn.onclick = (e) => {
+            e.preventDefault();
+            navigator.clipboard.writeText(this.output).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = "Copied!";
+                copyBtn.style.color = "#28a745"; // 緑色でフィードバック
+                copyBtn.style.borderColor = "#28a745";
+
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.color = "inherit";
+                    copyBtn.style.borderColor = "rgba(128,128,128,0.3)";
+                }, 2000);
+            });
+        };
+
+        // --- 閉じるボタン ---
         const closeBtn = document.createElement("button");
         closeBtn.className = "cm-execution-close-btn";
         closeBtn.textContent = "×";
         closeBtn.title = "結果を閉じる";
+
+        // 既存CSSがあると思われますが、念のため右上の位置を固定
+        closeBtn.style.position = "absolute";
+        closeBtn.style.top = "5px";
+        closeBtn.style.right = "5px";
+
         closeBtn.onmousedown = (e) => {
             e.preventDefault();
             view.dispatch({ effects: clearExecutionResult.of(this.id) });
         };
 
+        // --- コンテンツ ---
         const content = document.createElement("div");
         content.textContent = this.output;
+        content.style.whiteSpace = "pre-wrap"; // 改行を維持
+        content.style.marginTop = "10px";      // ボタンと重ならないよう余白確保
 
+        div.appendChild(copyBtn);
         div.appendChild(closeBtn);
         div.appendChild(content);
         return div;
@@ -1015,9 +1300,19 @@ class BookmarkWidget extends WidgetType {
 
 /* ========== Decoration Logic ========== */
 
+/* livePreviewPlugin.js */
+
+// ... (他のコードは省略)
+
+/* ========== Decoration Logic ========== */
+
+/* ========== Decoration Logic ========== */
+
 function buildDecorations(view) {
     const { state } = view;
-    const cursor = state.selection.main.head;
+    // 【修正1】カーソル位置(head)だけでなく、選択範囲(selection)全体を取得
+    const selection = state.selection.main;
+    
     const processedLines = new Set();
     const collectedDecos = [];
 
@@ -1032,7 +1327,10 @@ function buildDecorations(view) {
                 continue;
             }
 
-            const isCursorOnLine = (cursor >= line.from && cursor <= line.to);
+            // 【修正2】カーソル判定を選択範囲との重複判定に変更
+            // 選択範囲がこの行と少しでも重なっていれば「編集中」とみなす
+            const isCursorOnLine = (selection.from <= line.to && selection.to >= line.from);
+            
             const lineText = line.text;
 
             // --- HTMLタグの処理 ---
@@ -1060,7 +1358,8 @@ function buildDecorations(view) {
                 const start = line.from + imgMatch.index;
                 const end = start + imgMatch[0].length;
 
-                if (cursor >= start && cursor <= end) continue;
+                // 【修正3】範囲重複チェック
+                if (selection.from <= end && selection.to >= start) continue;
 
                 const attrs = imgMatch[1];
                 const srcMatch = attrs.match(/src=["']([^"']+)["']/i);
@@ -1092,7 +1391,8 @@ function buildDecorations(view) {
                 const contentStart = start + fontMatch[0].indexOf(content);
                 const contentEnd = contentStart + content.length;
 
-                if (cursor >= start && cursor <= end) continue;
+                // 【修正3】範囲重複チェック
+                if (selection.from <= end && selection.to >= start) continue;
 
                 collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                 collectedDecos.push({ from: contentStart, to: contentEnd, side: 1, deco: Decoration.mark({ attributes: { style: `color: ${color}` } }) });
@@ -1110,14 +1410,15 @@ function buildDecorations(view) {
                 const contentStart = start + spanMatch[0].indexOf(content);
                 const contentEnd = contentStart + content.length;
 
-                if (cursor >= start && cursor <= end) continue;
+                // 【修正3】範囲重複チェック
+                if (selection.from <= end && selection.to >= start) continue;
 
                 collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                 collectedDecos.push({ from: contentStart, to: contentEnd, side: 1, deco: Decoration.mark({ attributes: { style: styleStr } }) });
                 collectedDecos.push({ from: contentEnd, to: end, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
             }
 
-            // 5. インライン装飾タグ (b, i, u, s, mark, etc)
+            // 5. インライン装飾タグ
             const styleTags = [
                 { tag: 'b', class: 'cm-live-bold' },
                 { tag: 'strong', class: 'cm-live-bold' },
@@ -1137,54 +1438,26 @@ function buildDecorations(view) {
                 { tag: 'code', style: 'background-color: rgba(0, 0, 0, 0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; color: #e01e5a;' }
             ];
 
-            // 6. <p align="..."> による配置
-            // 行の途中でもマッチするようにグローバル検索 (gフラグ)
+            // 6. <p align="...">
             const pAlignRegex = /<p\s+align=["'](left|center|right)["']>(.*?)<\/p>/gi;
             let pMatch;
             while ((pMatch = pAlignRegex.exec(lineText)) !== null) {
                 const start = line.from + pMatch.index;
                 const end = start + pMatch[0].length;
+                const align = pMatch[1]; 
+                const content = pMatch[2]; 
 
-                const align = pMatch[1]; // center, right, left
-                const content = pMatch[2]; // 中身のテキスト
+                // 【修正3】範囲重複チェック
+                const isCursorInTag = (selection.from <= end && selection.to >= start);
 
-                // カーソルが「このタグの範囲内」にあるかチェック
-                const isCursorInTag = (cursor >= start && cursor <= end);
-
-                // カーソルがない場合のみプレビュー（タグ隠し＋スタイル適用）
                 if (!isCursorInTag) {
                     const openTagLength = pMatch[0].indexOf(content);
                     const contentStart = start + openTagLength;
                     const contentEnd = contentStart + content.length;
 
-                    // 1. 開始タグ <p align="..."> を隠す
-                    collectedDecos.push({
-                        from: start,
-                        to: contentStart,
-                        side: 0,
-                        deco: Decoration.mark({ class: "cm-hide-marker" })
-                    });
-
-                    // 2. 中身に配置スタイルを適用
-                    // spanタグではなくブロックとして振る舞わせるため display: block を付与
-                    collectedDecos.push({
-                        from: contentStart,
-                        to: contentEnd,
-                        side: 0,
-                        deco: Decoration.mark({
-                            attributes: {
-                                style: `display: block; text-align: ${align}; width: 100%;`
-                            }
-                        })
-                    });
-
-                    // 3. 終了タグ </p> を隠す
-                    collectedDecos.push({
-                        from: contentEnd,
-                        to: end,
-                        side: 0,
-                        deco: Decoration.mark({ class: "cm-hide-marker" })
-                    });
+                    collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                    collectedDecos.push({ from: contentStart, to: contentEnd, side: 0, deco: Decoration.mark({ attributes: { style: `display: block; text-align: ${align}; width: 100%;` } }) });
+                    collectedDecos.push({ from: contentEnd, to: end, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                 }
             }
 
@@ -1197,7 +1470,8 @@ function buildDecorations(view) {
                     const contentStart = start + match[0].indexOf(match[1]);
                     const contentEnd = contentStart + match[1].length;
 
-                    if (cursor >= start && cursor <= end) continue;
+                    // 【修正3】範囲重複チェック
+                    if (selection.from <= end && selection.to >= start) continue;
 
                     collectedDecos.push({ from: start, to: contentStart, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     const attrs = {};
@@ -1247,7 +1521,8 @@ function buildDecorations(view) {
             while ((match = highlightRegex.exec(lineText)) !== null) {
                 const start = line.from + match.index;
                 const end = start + match[0].length;
-                const isCursorIn = (cursor >= start && cursor <= end);
+                // 【修正3】範囲重複チェック
+                const isCursorIn = (selection.from <= end && selection.to >= start);
                 if (!isCursorIn) {
                     collectedDecos.push({ from: start, to: start + 2, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
                     collectedDecos.push({ from: start + 2, to: end - 2, side: 1, deco: Decoration.mark({ class: "cm-live-highlight" }) });
@@ -1265,8 +1540,10 @@ function buildDecorations(view) {
             enter: (node) => {
                 const n = node.node || node;
                 const line = state.doc.lineAt(node.from);
-                const isCursorOnLine = (cursor >= line.from && cursor <= line.to);
-                const isCursorInNode = (cursor >= node.from && cursor <= node.to);
+                
+                // 【修正4】範囲重複チェック (行とノードそれぞれに対して)
+                const isCursorOnLine = (selection.from <= line.to && selection.to >= line.from);
+                const isCursorInNode = (selection.from <= node.to && selection.to >= node.from);
 
                 if (processedLines.has(line.from) &&
                     !["StrongEmphasis", "Emphasis", "Strikethrough", "InlineCode", "Link", "TaskMarker", "FencedCode"].includes(node.name)) {
@@ -1284,7 +1561,8 @@ function buildDecorations(view) {
                     for (let l = lineStart.number; l <= lineEnd.number; l++) {
                         const lineObj = state.doc.line(l);
                         if (processedLines.has(lineObj.from)) continue;
-                        if (cursor >= lineObj.from && cursor <= lineObj.to) {
+                        // 範囲重複チェック
+                        if (selection.from <= lineObj.to && selection.to >= lineObj.from) {
                             processedLines.add(lineObj.from);
                             continue;
                         }
@@ -1352,22 +1630,31 @@ function buildDecorations(view) {
                     const startLine = state.doc.lineAt(node.from);
                     const endLine = state.doc.lineAt(node.to);
                     let relativeLine = 1;
+                    
                     for (let l = startLine.number; l <= endLine.number; l++) {
                         const lineObj = state.doc.line(l);
                         if (processedLines.has(lineObj.from)) continue;
                         const isHeader = (l === startLine.number);
                         const isFooter = (l === endLine.number);
+                        
+                        // 【修正5】編集中は背景色を透明にして選択範囲を見えるようにする
                         let className = "cm-code-block";
                         let attrs = {};
+                        
                         if (!isHeader && !isFooter) {
                             attrs = { "data-code-line": String(relativeLine++) };
                             className += " cm-code-with-linenum";
                         }
+                        
                         if (isCursorInNode) {
+                            // 編集中: 背景を透明にするスタイルを強制適用
+                            attrs.style = "background-color: transparent !important;";
+                            
                             if (isHeader) className += " cm-code-block-first-active";
                             if (isFooter) className += " cm-code-block-last-active";
                             collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: className, attributes: attrs }) });
                         } else {
+                            // プレビューモード（通常表示）
                             if (isHeader) {
                                 collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: "cm-code-header" }) });
                                 collectedDecos.push({ from: lineObj.from, to: lineObj.to, side: 0, deco: Decoration.mark({ class: "cm-transparent-text" }) });

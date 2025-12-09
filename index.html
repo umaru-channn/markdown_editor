@@ -923,6 +923,16 @@
                                     </label>
                                 </div>
                                 <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-file-title-bar">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">ファイル名バーを表示</span>
+                                            <span class="label-desc">エディタ上部のファイル名入力欄を表示します。</span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="setting-item">
                                     <label for="theme">テーマ</label>
                                     <select id="theme">
                                         <option value="light">ライト (Light)</option>
@@ -1281,9 +1291,9 @@
     <div id="notification-container" class="notification-container"></div>
 
     <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>

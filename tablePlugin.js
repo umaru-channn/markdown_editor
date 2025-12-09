@@ -19,6 +19,7 @@ const { RangeSetBuilder } = require("@codemirror/state");
 const { h, render } = require("preact");
 const { useState, useEffect, useRef } = require("preact/hooks");
 const htm = require("htm");
+const { marked } = require("marked");
 
 // Initialize htm with Preact's h function
 const html = htm.bind(h);
@@ -261,6 +262,7 @@ const Cell = ({
 
     let content;
     if (isEditing) {
+        // 編集モード：生のMarkdownテキストを表示・編集
         content = html`
             <div
                 ref=${ref}
@@ -272,10 +274,27 @@ const Cell = ({
             />
         `;
     } else {
+        // 表示モード：MarkdownをパースしてHTMLとして表示
+        let htmlContent = '';
+        if (!value || value.trim() === '') {
+            htmlContent = '<br>'; // 空の場合は高さを維持するためbrを入れる
+        } else {
+            try {
+                // 1. ハイライト記法 (==text==) を <mark> タグに置換
+                // markedに通す前に処理することで、HTMLとして認識させる
+                let processed = value.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+
+                // 2. Markdown変換 (parseInlineで段落タグなし)
+                htmlContent = marked.parseInline(processed, { breaks: true, gfm: true });
+            } catch (e) {
+                htmlContent = value;
+            }
+        }
+        
         content = html`
-            <div class="cm-table-cell-content view-mode">
-                ${value || h('br')}
-            </div>
+            <div class="cm-table-cell-content view-mode"
+                dangerouslySetInnerHTML=${{ __html: htmlContent }}
+            ></div>
         `;
     }
 
@@ -317,7 +336,7 @@ const Cell = ({
     `;
 };
 
-// Context Menu Component
+// Context Menu Component (Updated to use shared CSS classes)
 const TableContextMenu = ({ x, y, rowIndex, colIndex, onAction, onClose }) => {
     useEffect(() => {
         const handleClickOutside = () => onClose();
@@ -334,15 +353,16 @@ const TableContextMenu = ({ x, y, rowIndex, colIndex, onAction, onClose }) => {
 
     const stopProp = (e) => e.stopPropagation();
 
+    // クラス名を renderer.js 側の共通スタイル (context-menu, context-menu-item) に統一
     return html`
-        <div class="cm-table-context-menu" style=${style} onClick=${stopProp}>
-            <div class="menu-item" onClick=${() => onAction('insertRowAbove', rowIndex, colIndex)}>上に行を挿入</div>
-            <div class="menu-item" onClick=${() => onAction('insertRowBelow', rowIndex, colIndex)}>下に行を挿入</div>
-            <div class="menu-item" onClick=${() => onAction('deleteRow', rowIndex, colIndex)}>行を削除</div>
-            <div class="menu-separator"></div>
-            <div class="menu-item" onClick=${() => onAction('insertColLeft', rowIndex, colIndex)}>左に列を挿入</div>
-            <div class="menu-item" onClick=${() => onAction('insertColRight', rowIndex, colIndex)}>右に列を挿入</div>
-            <div class="menu-item" onClick=${() => onAction('deleteCol', rowIndex, colIndex)}>列を削除</div>
+        <div class="context-menu" style=${style} onClick=${stopProp}>
+            <div class="context-menu-item" onClick=${() => onAction('insertRowAbove', rowIndex, colIndex)}>上に行を挿入</div>
+            <div class="context-menu-item" onClick=${() => onAction('insertRowBelow', rowIndex, colIndex)}>下に行を挿入</div>
+            <div class="context-menu-item" onClick=${() => onAction('deleteRow', rowIndex, colIndex)}>行を削除</div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" onClick=${() => onAction('insertColLeft', rowIndex, colIndex)}>左に列を挿入</div>
+            <div class="context-menu-item" onClick=${() => onAction('insertColRight', rowIndex, colIndex)}>右に列を挿入</div>
+            <div class="context-menu-item" onClick=${() => onAction('deleteCol', rowIndex, colIndex)}>列を削除</div>
         </div>
     `;
 };
@@ -361,8 +381,8 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
     const [dragState, setDragState] = useState({ type: null, fromIndex: null, toIndex: null });
 
     // Context Menu State
-    const [contextMenu, setContextMenu] = useState(null); 
-    
+    const [contextMenu, setContextMenu] = useState(null);
+
     // Resize State
     const [resizingColIndex, setResizingColIndex] = useState(-1);
     const [hoveredResizeColIndex, setHoveredResizeColIndex] = useState(-1);
@@ -435,7 +455,7 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
         // 現在のヘッダーセルの幅を取得
         const headerCells = tableRef.current.querySelectorAll('thead th');
         const currentPixelWidths = Array.from(headerCells).map(cell => cell.getBoundingClientRect().width);
-        
+
         // widthsステートとマージ（既に値がある場合はそれを優先、nullの場合はDOM幅を採用）
         return widths.map((w, i) => {
             return (w === null || w === undefined) ? currentPixelWidths[i] : w;
@@ -813,7 +833,7 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
     const handleResizeStart = (index, e) => {
         e.preventDefault();
         e.stopPropagation();
-        setResizingColIndex(index); 
+        setResizingColIndex(index);
 
         const startWidth = widths[index] || e.target.parentElement.offsetWidth;
 
@@ -865,7 +885,7 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
             if (dragState.fromIndex < i) dragClass = 'drag-target-right';
             else dragClass = 'drag-target-left';
         }
-        
+
         const isResizeActive = (i === resizingColIndex) || (i === hoveredResizeColIndex);
 
         return html`
@@ -908,7 +928,7 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
                             ${row.map((cell, cI) => {
         // Drag Target Logic for Body Cells (Row & Column)
         let dragClass = '';
-        
+
         // 1. Row Dragging Logic
         const isRowDragTarget = dragState.type === 'row' && dragState.toIndex === rI;
         if (isRowDragTarget && dragState.fromIndex !== rI) {
@@ -919,8 +939,8 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
         // 2. Column Dragging Logic
         const isColDragTarget = dragState.type === 'col' && dragState.toIndex === cI;
         if (isColDragTarget && dragState.fromIndex !== cI) {
-             if (dragState.fromIndex < cI) dragClass = 'drag-target-right';
-             else dragClass = 'drag-target-left';
+            if (dragState.fromIndex < cI) dragClass = 'drag-target-right';
+            else dragClass = 'drag-target-left';
         }
 
         const isResizeActive = (cI === resizingColIndex) || (cI === hoveredResizeColIndex);
@@ -1173,7 +1193,7 @@ const tableStyles = EditorView.baseTheme({
         borderCollapse: "collapse",
         width: "max-content",
         minWidth: "100px",
-        fontSize: "13px",
+        fontSize: "var(--editor-font-size)",
         tableLayout: "fixed",
         color: "inherit",
         userSelect: "none",
@@ -1287,22 +1307,12 @@ const tableStyles = EditorView.baseTheme({
         transition: "opacity 0.2s, background-color 0.2s", opacity: 0
     },
     ".cm-table-add-row-btn:hover": { opacity: 1, backgroundColor: "#e0e0e0", color: "#333" },
-    ".cm-table-context-menu": {
-        backgroundColor: "#fff", border: "1px solid #ddd", borderRadius: "4px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.15)", padding: "4px 0",
-        minWidth: "150px", color: "#333", fontSize: "13px"
-    },
-    ".cm-table-context-menu .menu-item": { padding: "6px 12px", cursor: "pointer" },
-    ".cm-table-context-menu .menu-item:hover": { backgroundColor: "#f0f0f0" },
-    ".cm-table-context-menu .menu-separator": { height: "1px", backgroundColor: "#eee", margin: "4px 0" },
     "&dark .cm-table-add-col-btn": { backgroundColor: "#161b22", borderColor: "#30363d", color: "#8b949e" },
     "&dark .cm-table-add-col-btn:hover": { backgroundColor: "#1f2428", color: "#c9d1d9" },
     "&dark .cm-table-add-row-btn": { backgroundColor: "#161b22", borderColor: "#30363d", color: "#8b949e" },
     "&dark .cm-table-add-row-btn:hover": { backgroundColor: "#1f2428", color: "#c9d1d9" },
     "&dark .col-drag-handle": { background: "#161b22", color: "#8b949e" },
-    "&dark .cm-table-context-menu": { backgroundColor: "#2d2d2d", border: "1px solid #444", color: "#ccc" },
-    "&dark .cm-table-context-menu .menu-item:hover": { backgroundColor: "#3e3e3e" },
-    "&dark .cm-table-context-menu .menu-separator": { backgroundColor: "#444" }
+    "&dark .cm-table-context-menu": { backgroundColor: "#2d2d2d", border: "1px solid #444", color: "#ccc" }
 });
 
 module.exports = {
