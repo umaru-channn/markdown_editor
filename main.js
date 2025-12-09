@@ -129,6 +129,7 @@ function loadAppSettings() {
     fontSize: '16px',
     fontFamily: '"Segoe UI", "Meiryo", sans-serif',
     theme: 'light',
+    lineHeight: 1.4,
     autoSave: true,
     autoSaveOnClose: false,
     wordWrap: true,
@@ -138,6 +139,8 @@ function loadAppSettings() {
     showLineNumbers: true,
     autoCloseBrackets: true,
     highlightActiveLine: true,
+    showToolbar: true,
+    showWhitespace: false,
     defaultImageLocation: '.',
     // デフォルトの除外設定
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
@@ -1354,18 +1357,26 @@ function createWindow() {
   // webContents IDを取得（ウィンドウ破棄前に保存）
   const webContentsId = mainWindow.webContents.id;
 
-  // 初期状態で開きたいフォルダ（保管庫）のパスを指定
-  const initialFolderPath = path.join(__dirname, 'markdown_vault');
+  // 【修正】初期フォルダを ASAR の外側 (UserDataフォルダ) に変更する
+  const initialFolderPath = path.join(app.getPath('userData'), 'markdown_vault');
 
+  // フォルダが存在しない場合は作成する
+  if (!fs.existsSync(initialFolderPath)) {
+    try {
+      fs.mkdirSync(initialFolderPath, { recursive: true });
+    } catch (e) {
+      console.error('Failed to create initial folder:', e);
+    }
+  }
+
+  // 作成した（または既存の）実在するフォルダパスを使用
   if (fs.existsSync(initialFolderPath)) {
     workingDirectories.set(webContentsId, initialFolderPath);
-    // 初期フォルダの監視開始
     startFileWatcher(webContentsId, initialFolderPath);
   } else {
-    // 指定したパスが無い場合はホームディレクトリにする（安全策）
+    // 作成失敗時はホームディレクトリをフォールバックとして使用
     const homeDir = os.homedir();
     workingDirectories.set(webContentsId, homeDir);
-    // ホームディレクトリの監視開始
     startFileWatcher(webContentsId, homeDir);
   }
 
@@ -2561,16 +2572,24 @@ function getPdfHtmlTemplate(htmlContent, options = {}) {
         <head>
           <meta charset="UTF-8">
           <style>
+          /* PDF用の変数定義 */
+            :root {
+                /* インデントを0にして、すべての見出しの位置を左端に均等に揃える */
+                --padding-text: 0px; 
+                --main-bg: #ffffff;
+                --text-color: #333;
+            }
             body {
               font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
               padding: ${bodyPadding};
-              line-height: 1.6;
+              line-height: 1.4;
               color: #333;
             }
             h1, h2, h3, h4, h5, h6 {
-              margin-top: 24px;
-              margin-bottom: 16px;
+              margin-top: 0.5em;
+              margin-bottom: 0.2em;
               font-weight: 600;
+              line-height: 1.3;
             }
             /* PDFタイトルのスタイル */
             .pdf-title {
@@ -2582,7 +2601,7 @@ function getPdfHtmlTemplate(htmlContent, options = {}) {
               border-bottom: 2px solid #eaecef;
             }
             p {
-              margin-bottom: 16px;
+              margin-bottom: 0.5em;
             }
             code {
               background-color: #f6f8fa;
@@ -2790,10 +2809,26 @@ function getPdfHtmlTemplate(htmlContent, options = {}) {
             .toc-level-4 { padding-left: 90px; font-size: 0.9em; }
             .toc-level-5 { padding-left: 110px; font-size: 0.9em; }
             .toc-level-6 { padding-left: 120px; font-size: 0.9em; }
+
+            /* カスタムCSSスニペット */
+            ${options.customCss || ''}
+
+            /* カスタムCSSより後に記述して、見出しのインデントを強制リセットする */
+            .markdown-rendered h1,
+            .markdown-rendered h2,
+            .markdown-rendered h3,
+            .markdown-rendered h4,
+            .markdown-rendered h5,
+            .markdown-rendered h6 {
+                margin-left: 0 !important;
+                padding-left: 25px !important;
+            }
           </style>
         </head>
         <body>
-          ${htmlContent}
+          <div class="markdown-rendered">
+            ${htmlContent}
+          </div>
         </body>
       </html>
     `;
@@ -3276,6 +3311,20 @@ const checkCommandExists = (command) => {
 // ヘルパー: インストール手順の生成
 const getInstallHelp = (baseCommand) => {
   const platform = process.platform;
+  let commandKey = baseCommand.toLowerCase();
+
+  // エイリアス正規化
+  if (commandKey === 'javac') commandKey = 'java';
+  if (commandKey === 'kotlinc') commandKey = 'kotlin';
+  if (commandKey === 'tsc') commandKey = 'typescript';
+  if (commandKey === 'rscript') commandKey = 'r';
+
+  // Windows用の共通パス追加手順テキスト
+  const winPathHelp = "   【パスの追加方法】\n" +
+    "   1. Winキーを押して「env」と入力し「システム環境変数の編集」を開く\n" +
+    "   2. 右下の[環境変数(N)...]をクリック\n" +
+    "   3. 下段の「システム環境変数」から「Path」を選んで[編集(I)...]をクリック\n" +
+    "   4. 右上の[新規(N)]を押し、上記のパスを貼り付けて[OK]で全画面を閉じる";
 
   // 手順データ
   const INSTALL_DATA = {
@@ -3291,6 +3340,104 @@ const getInstallHelp = (baseCommand) => {
       darwin: { type: 'simple', cmd: "brew install python" },
       linux: { type: 'simple', cmd: "sudo apt install python3" }
     },
+    'php': {
+      name: "PHP",
+      win32: {
+        type: 'complex',
+        msg: "PHPの自動検出に失敗しました。以下の手順で設定してください。\n\n" +
+          "1. 自動検出の再試行:\n" +
+          "   インストール済みの場合は、一度エディタを再起動してみてください。\n\n" +
+          "2. 手動セットアップ (確実):\n" +
+          "   ・公式サイト (windows.php.net) からZipをダウンロード\n" +
+          "   ・Cドライブ直下に「php」という名前でフォルダを作成し、そこに解凍 (配置: C:\\php )\n" +
+          "   ・「C:\\php」を環境変数Pathに追加してください。\n\n" +
+          winPathHelp
+      },
+      darwin: { type: 'simple', cmd: "brew install php" },
+      linux: { type: 'simple', cmd: "sudo apt install php" }
+    },
+    'ruby': {
+      name: "Ruby",
+      win32: { type: 'simple', cmd: "winget install -e --id RubyInstallerTeam.Ruby" },
+      darwin: { type: 'simple', cmd: "brew install ruby" },
+      linux: { type: 'simple', cmd: "sudo apt install ruby-full" }
+    },
+    'perl': {
+      name: "Perl",
+      win32: { type: 'simple', cmd: "winget install -e --id StrawberryPerl.StrawberryPerl" },
+      darwin: { type: 'simple', cmd: "brew install perl" },
+      linux: { type: 'simple', cmd: "sudo apt install perl" }
+    },
+    'lua': {
+      name: "Lua",
+      win32: {
+        type: 'complex',
+        msg: "Luaが見つかりません。手動での設定が必要です。\n\n" +
+          "1. ダウンロード:\n" +
+          "   LuaBinaries (luabinaries.sourceforge.net) からZipをDL\n" +
+          "2. 配置:\n" +
+          "   Cドライブ直下に「Lua」フォルダを作成し、そこに解凍 (配置: C:\\Lua )\n" +
+          "3. 実行ファイル名の確認:\n" +
+          "   解凍したフォルダ内に `lua54.exe` などバージョン付きのファイルがある場合は、それを `lua.exe` にリネームすると設定が簡単になります。\n" +
+          "4. パス設定:\n" +
+          "   「C:\\Lua」を環境変数Pathに追加してください。\n\n" +
+          winPathHelp + "\n\n" +
+          "※ 設定後はエディタを再起動してください。"
+      },
+      darwin: { type: 'simple', cmd: "brew install lua" },
+      linux: { type: 'simple', cmd: "sudo apt install lua5.3" }
+    },
+    'r': {
+      name: "R Language",
+      win32: {
+        type: 'complex',
+        msg: "R言語の自動検出に失敗しました。\n\n" +
+          "1. インストール:\n" +
+          "   > winget install -e --id RProject.R\n\n" +
+          "2. それでも動かない場合:\n" +
+          "   インストール先 (例: C:\\Program Files\\R\\R-4.x.x\\bin) を確認し、\n" +
+          "   そのパスを環境変数Pathに追加してください。\n\n" +
+          winPathHelp + "\n\n" +
+          "※ 設定後はエディタを再起動してください。"
+      },
+      darwin: { type: 'simple', cmd: "brew install r" },
+      linux: { type: 'simple', cmd: "sudo apt install r-base" }
+    },
+    'dart': {
+      name: "Dart SDK",
+      win32: { type: 'simple', cmd: "winget install -e --id Google.DartSDK" },
+      darwin: { type: 'simple', cmd: "brew tap dart-lang/dart && brew install dart" },
+      linux: { type: 'simple', cmd: "sudo apt-get install dart" }
+    },
+    'swift': {
+      name: "Swift",
+      win32: { type: 'simple', cmd: "winget install -e --id Swift.Toolchain" },
+      darwin: { type: 'simple', cmd: "xcode-select --install" },
+      linux: { type: 'simple', cmd: "sudo apt install swift" }
+    },
+    'kotlin': {
+      name: "Kotlin Compiler",
+      win32: {
+        type: 'complex',
+        msg: "Kotlinコンパイラ (kotlinc) が見つかりません。\n" +
+          "※ 実行にはJava (JDK) も必要です。\n\n" +
+          "1. ダウンロード:\n" +
+          "   GitHub (JetBrains/kotlin) から「kotlin-compiler-x.x.x.zip」をDL\n" +
+          "2. 配置:\n" +
+          "   Cドライブ直下に「Kotlin」フォルダを作成し解凍 (配置: C:\\Kotlin )\n" +
+          "3. パス設定:\n" +
+          "   「C:\\Kotlin\\kotlinc\\bin」を環境変数Pathに追加してください。\n\n" +
+          winPathHelp + "\n\n" +
+          "※ 設定後はエディタを再起動してください。"
+      },
+      darwin: { type: 'simple', cmd: "brew install kotlin" },
+      linux: { type: 'simple', cmd: "sudo apt install kotlin" }
+    },
+    'typescript': {
+      name: "TypeScript",
+      instructions: "TypeScript (tsc) が見つかりません。\n以下のコマンドでインストールしてください:\n\n> npm install -g typescript\n\n(インストール後は、一度エディタを再起動してください)"
+    },
+    // -------------------
     'java': {
       name: "Java (JDK)",
       win32: { type: 'simple', cmd: "winget install -e --id Oracle.JDK.21" },
@@ -3301,15 +3448,12 @@ const getInstallHelp = (baseCommand) => {
       name: "GCC (C Compiler)",
       win32: {
         type: 'complex',
-        msg: "WindowsでC言語を実行するには、以下の3ステップが必要です。\n\n" +
-          "1. MSYS2のインストール:\n" +
-          "   > winget install -e --id MSYS2.MSYS2\n\n" +
-          "2. コンパイラのインストール (重要):\n" +
-          "   スタートメニューから「MSYS2 UCRT64」を起動し、以下を実行してください:\n" +
-          "   pacman -S mingw-w64-ucrt-x86_64-gcc\n\n" +
-          "3. パスの設定:\n" +
-          "   Windowsの環境変数Pathに以下を追加して、PCを再起動してください:\n" +
-          "   C:\\msys64\\ucrt64\\bin"
+        msg: "WindowsでC言語を実行するにはMSYS2が必要です。\n\n" +
+          "1. MSYS2のインストール:\n   > winget install -e --id MSYS2.MSYS2\n" +
+          "2. コンパイラ導入:\n   MSYS2 UCRT64を起動し `pacman -S mingw-w64-ucrt-x86_64-gcc` を実行\n" +
+          "3. パス設定:\n   `C:\\msys64\\ucrt64\\bin` を環境変数Pathに追加してください。\n\n" +
+          winPathHelp + "\n\n" +
+          "※ 設定後はPCを再起動してください。"
       },
       darwin: { type: 'simple', cmd: "xcode-select --install" },
       linux: { type: 'simple', cmd: "sudo apt install build-essential" }
@@ -3318,26 +3462,25 @@ const getInstallHelp = (baseCommand) => {
       name: "G++ (C++ Compiler)",
       win32: {
         type: 'complex',
-        msg: "WindowsでC++を実行するには、以下の3ステップが必要です。\n\n" +
-          "1. MSYS2のインストール:\n" +
-          "   > winget install -e --id MSYS2.MSYS2\n\n" +
-          "2. コンパイラのインストール (重要):\n" +
-          "   スタートメニューから「MSYS2 UCRT64」を起動し、以下を実行してください:\n" +
-          "   pacman -S mingw-w64-ucrt-x86_64-gcc\n\n" +
-          "3. パスの設定:\n" +
-          "   1.Windowsキーを押して「環境変数」と検索し、「システム環境変数の編集」を開きます。\n" +
-          "   2.変数の編集:" +
-          "   右下の [環境変数(N)...] ボタンをクリック。\n" +
-          "   下の段（システム環境変数）のリストから 「Path」 を探して選択し、[編集(I)...] をクリック。\n" +
-          "   右上の [新規(N)] をクリックし、[C:\\msys64\\ucrt64\\bin] を貼り付けます。\n" +
-          "   [OK] を押して全ての画面を閉じます。 PCを再起動してください"
+        msg: "WindowsでC++を実行するにはMSYS2が必要です。\n(GCCの手順と同様に `pacman -S mingw-w64-ucrt-x86_64-gcc` でG++もインストールされます)\n\n" +
+          "※ パス設定 (`C:\\msys64\\ucrt64\\bin`) とPC再起動を忘れずに行ってください。"
       },
       darwin: { type: 'simple', cmd: "xcode-select --install" },
       linux: { type: 'simple', cmd: "sudo apt install build-essential" }
     },
     'csc': {
       name: "C# Compiler",
-      win32: { type: 'simple', cmd: "winget install -e --id Microsoft.DotNet.SDK.8" },
+      win32: {
+        type: 'complex',
+        msg: "C#コンパイラの自動検出に失敗しました。\n\n" +
+          "【方法1】 最新SDKをインストール (推奨)\n" +
+          "   > winget install -e --id Microsoft.DotNet.SDK.8\n\n" +
+          "【方法2】 標準コンパイラを手動で設定\n" +
+          "   以下のパスを環境変数Pathに追加してください:\n" +
+          "   C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\n\n" +
+          winPathHelp + "\n\n" +
+          "※ 設定後はエディタを再起動してください。"
+      },
       darwin: { type: 'simple', cmd: "brew install dotnet-sdk" },
       linux: { type: 'simple', cmd: "sudo apt install dotnet-sdk-8.0" }
     },
@@ -3355,8 +3498,10 @@ const getInstallHelp = (baseCommand) => {
     }
   };
 
-  const info = INSTALL_DATA[baseCommand];
+  const info = INSTALL_DATA[commandKey];
   if (!info) return null;
+
+  if (info.instructions) return info;
 
   const osInfo = info[platform];
   if (!osInfo) return { name: info.name, instructions: "公式サイトからインストールしてください。" };
@@ -3364,9 +3509,10 @@ const getInstallHelp = (baseCommand) => {
   if (osInfo.type === 'complex') {
     return { name: info.name, instructions: osInfo.msg };
   } else {
+    // シンプルなコマンドの場合も、動かないときのヒントを追記
     return {
       name: info.name,
-      instructions: `👇 ターミナルで以下を実行してください:\n> ${osInfo.cmd}\n\n(インストール後は再起動が必要です)`
+      instructions: `👇 ターミナルで以下を実行してください:\n> ${osInfo.cmd}\n\n(インストールしても動かない場合は、エディタまたはPCを再起動してください)`
     };
   }
 };
@@ -3439,85 +3585,232 @@ ipcMain.handle('get-lang-versions', async (event, lang) => {
 });
 
 // コード実行ハンドラ
-// 第四引数に workingDir (カレントディレクトリ) を追加
 ipcMain.handle('execute-code', async (event, code, language, execPath = null, workingDir = null) => {
   return new Promise(async (resolve) => {
     const tempDir = os.tmpdir();
 
-    // 設定読み込み
     const settings = loadAppSettings();
     const defaultPython = settings.pythonPath || 'python';
 
-    const langLower = language.toLowerCase();
+    // 言語名の正規化
+    let langLower = language.trim().toLowerCase();
 
-    // 実行パスの決定
-    let targetExec = execPath || (['python', 'py'].includes(langLower) ? defaultPython : null);
+    if (langLower === 'c++') langLower = 'cpp';
+    if (['shell', 'sh', 'zsh'].includes(langLower)) langLower = 'bash';
 
-    // WindowsかつShell系で、パスが未指定(Default)の場合、Git Bashを自動検出してセットする
-    if (!targetExec && ['bash', 'sh', 'shell', 'zsh'].includes(langLower) && process.platform === 'win32') {
-      const gitBashCandidates = [
-        'C:\\Program Files\\Git\\bin\\bash.exe',
-        'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-        path.join(os.homedir(), 'AppData\\Local\\Programs\\Git\\bin\\bash.exe')
-      ];
+    // 実行パスの決定 (手動指定があればそれを優先)
+    let targetExec = execPath;
+    if (['python', 'py'].includes(langLower)) {
+      targetExec = execPath || defaultPython;
+    }
 
-      for (const p of gitBashCandidates) {
-        if (fs.existsSync(p)) {
-          targetExec = p; // 見つかったパスをデフォルトとして採用
-          break;
-        }
+    // --- Windows環境向けの自動検出ロジック ---
+    if (process.platform === 'win32' && !targetExec) {
+
+      // 1. Bash (Git Bash)
+      if (langLower === 'bash') {
+        const candidates = [
+          'C:\\Program Files\\Git\\bin\\bash.exe',
+          'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+          path.join(os.homedir(), 'AppData\\Local\\Programs\\Git\\bin\\bash.exe')
+        ];
+        for (const p of candidates) { if (fs.existsSync(p)) { targetExec = p; break; } }
+      }
+
+      // 2. PHP
+      if (langLower === 'php') {
+        const candidates = [
+          'C:\\php\\php.exe', 'C:\\tools\\php\\php.exe', 'C:\\xampp\\php\\php.exe',
+          path.join(os.homedir(), 'php\\php.exe')
+        ];
+        for (const p of candidates) { if (fs.existsSync(p)) { targetExec = p; break; } }
       }
     }
 
-    // ヘルパー: WindowsパスをWSLパス(/mnt/c/...)に変換する
-    const toWslPath = (winPath) => {
-      return winPath.replace(/^([a-zA-Z]):/, (match, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, '/');
-    };
+    // 各言語のデフォルトコマンド (自動検出変数の準備)
+    let cscExec = 'csc';
+    let perlExec = 'perl';
+    let luaExec = 'lua';
+    let rExec = 'Rscript';
+    let dartExec = 'dart';
+    let swiftExec = 'swift';
+    let kotlinExec = 'kotlinc'; // バッチファイル等の可能性あり
+    let tscExec = 'tsc';
+
+    // --- コンパイラ・ランタイムの自動検出 (Windows) ---
+    if (process.platform === 'win32') {
+      // C# (csc)
+      if (['csharp', 'cs'].includes(langLower)) {
+        const paths = [
+          path.join(process.env.SystemRoot || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'),
+          path.join(process.env.SystemRoot || 'C:\\Windows', 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')
+        ];
+        for (const p of paths) { if (fs.existsSync(p)) { cscExec = p; break; } }
+      }
+
+      // Perl (Strawberry Perl)
+      if (['perl', 'pl'].includes(langLower)) {
+        const paths = ['C:\\Strawberry\\perl\\bin\\perl.exe', 'C:\\Perl64\\bin\\perl.exe'];
+        for (const p of paths) { if (fs.existsSync(p)) { perlExec = p; break; } }
+      }
+
+      // Lua
+      if (langLower === 'lua') {
+        const luaBasePaths = ['C:\\Lua', 'C:\\Program Files\\Lua'];
+        const luaExecutableNames = ['lua.exe', 'lua54.exe', 'lua53.exe', 'lua52.exe'];
+
+        // 優先度：ターゲットパス > よくあるパスにあるバージョン付き > デフォルト
+        for (const basePath of luaBasePaths) {
+          for (const execName of luaExecutableNames) {
+            const candidate = path.join(basePath, execName);
+            if (fs.existsSync(candidate)) {
+              luaExec = candidate;
+              break;
+            }
+          }
+          if (luaExec !== 'lua') break;
+        }
+      }
+
+      // R言語 (バージョンフォルダを動的に探索)
+      if (langLower === 'r') {
+        const rBase = 'C:\\Program Files\\R';
+        if (fs.existsSync(rBase)) {
+          try {
+            // R-4.x.x のようなフォルダを探し、新しい順にソート
+            const versions = fs.readdirSync(rBase).filter(n => n.startsWith('R-')).sort().reverse();
+            if (versions.length > 0) {
+              const candidate = path.join(rBase, versions[0], 'bin', 'Rscript.exe');
+              if (fs.existsSync(candidate)) rExec = candidate;
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
+
+      // Dart (Chocolatey / 標準)
+      if (langLower === 'dart') {
+        const paths = ['C:\\tools\\dart-sdk\\bin\\dart.exe', 'C:\\Program Files\\Dart\\dart-sdk\\bin\\dart.exe'];
+        for (const p of paths) { if (fs.existsSync(p)) { dartExec = p; break; } }
+      }
+
+      // Swift (公式インストーラ)
+      if (langLower === 'swift') {
+        // Swiftはパスが深いので代表的な場所をチェック
+        const swPath = 'C:\\Library\\Developer\\Toolchains\\unknown-Asserts-development.xctoolchain\\usr\\bin\\swift.exe';
+        if (fs.existsSync(swPath)) swiftExec = swPath;
+      }
+
+      // Kotlin (kotlinc)
+      if (['kotlin', 'kt'].includes(langLower)) {
+        const paths = [
+          'C:\\Program Files\\Kotlin\\kotlinc\\bin\\kotlinc.bat',
+          'C:\\Kotlin\\kotlinc\\bin\\kotlinc.bat',
+          path.join(os.homedir(), 'kotlin\\kotlinc\\bin\\kotlinc.bat')
+        ];
+        for (const p of paths) { if (fs.existsSync(p)) { kotlinExec = p; break; } }
+      }
+
+      // TypeScript (npm global)
+      if (['typescript', 'ts'].includes(langLower)) {
+        const npmPath = path.join(process.env.APPDATA || '', 'npm', 'tsc.cmd');
+        if (fs.existsSync(npmPath)) tscExec = npmPath;
+      }
+    }
+
+    const toWslPath = (winPath) => winPath.replace(/^([a-zA-Z]):/, (match, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, '/');
+    const baseFileName = `code_${Date.now()}`;
 
     const langConfig = {
       'javascript': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
       'js': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
-      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec}" "${f}"` },
-      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec}" "${f}"` },
+      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec || 'python'}" "${f}"` },
+      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec || 'python'}" "${f}"` },
+      // PHP (検出済み変数を優先、なければ 'php')
+      'php': { ext: '.php', base: (targetExec || 'php'), cmd: (f) => `"${targetExec || (process.platform === 'win32' && fs.existsSync('C:\\php\\php.exe') ? 'C:\\php\\php.exe' : 'php')}" "${f}"` },
+      // ※ 上記PHPロジックは少し重複しているので、targetExecが設定されていればそれを使う形に整理します
 
-      // --- Shell / Bash 系 ---
+      'ruby': { ext: '.rb', base: 'ruby', cmd: (f) => `"${targetExec || 'ruby'}" "${f}"` },
+      'rb': { ext: '.rb', base: 'ruby', cmd: (f) => `"${targetExec || 'ruby'}" "${f}"` },
+
+      // --- 自動検出対応言語 ---
+      'perl': { ext: '.pl', base: perlExec, cmd: (f) => `"${perlExec}" "${f}"` },
+      'pl': { ext: '.pl', base: perlExec, cmd: (f) => `"${perlExec}" "${f}"` },
+
+      'lua': { ext: '.lua', base: luaExec, cmd: (f) => `"${luaExec}" "${f}"` },
+
+      'r': { ext: '.R', base: rExec, cmd: (f) => `"${rExec}" "${f}"` },
+
+      'dart': { ext: '.dart', base: dartExec, cmd: (f) => `"${dartExec}" "${f}"` },
+
+      'swift': { ext: '.swift', base: swiftExec, cmd: (f) => `"${swiftExec}" "${f}"` },
+
+      // Kotlin (コンパイル -> 実行)
+      'kotlin': {
+        ext: '.kt', base: kotlinExec,
+        cmd: (f) => {
+          const jarPath = f.replace(/\.kt$/, '.jar');
+          // kotlinExec (kotlinc) でコンパイル
+          return `"${kotlinExec}" "${f}" -include-runtime -d "${jarPath}" && java -jar "${jarPath}"`;
+        }
+      },
+      'kt': {
+        ext: '.kt', base: kotlinExec,
+        cmd: (f) => {
+          const jarPath = f.replace(/\.kt$/, '.jar');
+          return `"${kotlinExec}" "${f}" -include-runtime -d "${jarPath}" && java -jar "${jarPath}"`;
+        }
+      },
+
+      // TypeScript (tsc -> node)
+      'typescript': {
+        ext: '.ts', base: tscExec,
+        cmd: (f) => {
+          const jsPath = f.replace(/\.ts$/, '.js');
+          return `"${tscExec}" "${f}" && node "${jsPath}"`;
+        }
+      },
+      'ts': {
+        ext: '.ts', base: tscExec,
+        cmd: (f) => {
+          const jsPath = f.replace(/\.ts$/, '.js');
+          return `"${tscExec}" "${f}" && node "${jsPath}"`;
+        }
+      },
+
       'bash': {
         ext: '.sh',
         base: targetExec === 'wsl' ? 'wsl' : (targetExec || 'bash'),
         cmd: (f) => {
-          // WSL実行時は、スクリプト実行パスをWSLパスに変換する
           if (targetExec === 'wsl') return `wsl bash "${toWslPath(f)}"`;
-          // Git Bash/その他
           if (targetExec) return `"${targetExec}" "${f}"`;
           return `bash "${f}"`;
         }
       },
-
-      // PowerShell
       'powershell': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
       'ps1': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
       'pwsh': { ext: '.ps1', base: 'pwsh', cmd: (f) => `pwsh -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
-
       'c': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"` },
+      'gcc': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"` },
       'cpp': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
-      'c++': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
-      'java': { ext: '.java', base: 'java', cmd: (f) => `java "${f}"` },
-      'csharp': { ext: '.cs', base: 'csc', cmd: (f) => `csc /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
-      'cs': { ext: '.cs', base: 'csc', cmd: (f) => `csc /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
+      'java': {
+        ext: '.java', base: 'javac',
+        cmd: (f) => {
+          const compileCmd = `javac "${f}" -d "${tempDir}"`;
+          const runCmd = `java -cp "${tempDir}" ${baseFileName}`;
+          return `${compileCmd} && ${runCmd}`;
+        }
+      },
+      'csharp': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
+      'cs': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
       'go': { ext: '.go', base: 'go', cmd: (f) => `go run "${f}"` },
       'rust': { ext: '.rs', base: 'rustc', cmd: (f) => `rustc "${f}" -o "${f.replace(/\.rs$/, '.exe')}" && "${f.replace(/\.rs$/, '.exe')}"` },
     };
 
-    // Shell系エイリアス対応
-    if (['sh', 'shell', 'zsh'].includes(langLower)) {
-      langConfig[langLower] = { ...langConfig['bash'] };
-      if (langLower === 'zsh') {
-        langConfig[langLower].cmd = (f) => {
-          if (targetExec === 'wsl') return `wsl zsh "${toWslPath(f)}"`;
-          if (targetExec) return `"${targetExec}" "${f}"`;
-          return `zsh "${f}"`;
-        };
-      }
+    // PHPの再設定 (targetExecがあればそれ、なければ自動検出ロジックの結果、なければ 'php')
+    // 上の定義で少し複雑になったのでここで整理
+    if (langLower === 'php') {
+      const finalPhp = targetExec || (process.platform === 'win32' && fs.existsSync('C:\\php\\php.exe') ? 'C:\\php\\php.exe' : 'php');
+      langConfig['php'] = { ext: '.php', base: finalPhp, cmd: (f) => `"${finalPhp}" "${f}"` };
     }
 
     const config = langConfig[langLower];
@@ -3527,7 +3820,6 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
       return;
     }
 
-    // 存在チェック (baseコマンド)
     if (config.base) {
       let exists = false;
       if (path.isAbsolute(config.base)) {
@@ -3549,8 +3841,12 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
       }
     }
 
-    const fileName = `code_${Date.now()}`;
-    const tempFilePath = path.join(tempDir, `${fileName}${config.ext}`);
+    const tempFilePath = path.join(tempDir, `${baseFileName}${config.ext}`);
+
+    if (langLower === 'java') {
+      const publicClassRegex = /(public\s+class\s+)\w+/g;
+      if (publicClassRegex.test(code)) code = code.replace(publicClassRegex, `$1${baseFileName}`);
+    }
 
     fs.writeFile(tempFilePath, code, (err) => {
       if (err) {
@@ -3559,22 +3855,26 @@ ipcMain.handle('execute-code', async (event, code, language, execPath = null, wo
       }
       const command = config.cmd(tempFilePath);
 
-      // 実行オプションに cwd を設定する
       let cwdPath = tempDir;
-      // workingDir があり、かつディレクトリとして存在する場合のみカレントディレクトリとして使用
       if (workingDir && fs.existsSync(workingDir)) {
         cwdPath = workingDir;
       }
 
-      const execOptions = {
-        timeout: 15000,
-        cwd: cwdPath // ここでカレントディレクトリを指定
-      };
-
-      // 実行
-      exec(command, execOptions, (error, stdout, stderr) => {
+      exec(command, { timeout: 15000, cwd: cwdPath }, (error, stdout, stderr) => {
         try {
           if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+
+          if (langLower === 'java') {
+            const classFilePath = path.join(tempDir, `${baseFileName}.class`);
+            if (fs.existsSync(classFilePath)) fs.unlinkSync(classFilePath);
+          }
+
+          const jarPath = tempFilePath.replace(config.ext, '.jar');
+          if (fs.existsSync(jarPath)) fs.unlinkSync(jarPath);
+
+          const jsPath = tempFilePath.replace(config.ext, '.js');
+          if (fs.existsSync(jsPath)) fs.unlinkSync(jsPath);
+
           const exePath = tempFilePath.replace(config.ext, '.exe');
           if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
         } catch (e) { }

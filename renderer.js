@@ -12,7 +12,7 @@
 const path = require('path');
 const { webFrame } = require('electron');
 const { EditorState, Prec, Compartment, Annotation } = require("@codemirror/state");
-const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor } = require("@codemirror/view");
+const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit, StreamLanguage, LanguageSupport } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
@@ -61,6 +61,25 @@ const {
     closeSearchPanel
 } = require("@codemirror/search");
 const { get } = require('http');
+
+// スペース可視化用のカスタムプラグイン（スタイルはCSSで定義するためクラス付与のみ行う）
+const spaceMatcher = new MatchDecorator({
+    regexp: / +/g,
+    decoration: (match) => Decoration.mark({
+        class: "cm-highlightSpace"
+    })
+});
+
+const customHighlightWhitespace = ViewPlugin.fromClass(class {
+    constructor(view) {
+        this.decorations = spaceMatcher.createDeco(view);
+    }
+    update(update) {
+        this.decorations = spaceMatcher.updateDeco(update, this.decorations);
+    }
+}, {
+    decorations: v => v.decorations
+});
 
 // プログラムによる変更を識別するためのアノテーション
 const ExternalChange = Annotation.define();
@@ -175,6 +194,8 @@ let appSettings = {
     defaultImageLocation: '.',
     excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
     showStatusBar: true,
+    showToolbar: true,
+    showWhitespace: false,
     enabledSnippets: [],
     // PDF設定のデフォルト値
     pdfOptions: {
@@ -266,20 +287,6 @@ const COMMANDS_REGISTRY = [
 ];
 
 /**
- * 現在の設定（appSettings.keybindings）とデフォルトをマージして
- * キー割り当てを取得するヘルパー
- */
-function getKeybinding(commandId) {
-    // 設定に値があればそれを返す（null含む）
-    if (appSettings.keybindings && appSettings.keybindings[commandId] !== undefined) {
-        return appSettings.keybindings[commandId];
-    }
-    // 設定がなければデフォルトを返す
-    const cmd = COMMANDS_REGISTRY.find(c => c.id === commandId);
-    return cmd ? cmd.defaultKey : null;
-}
-
-/**
  * キー文字列 (Mod-Shift-s) を表示用 (Ctrl+Shift+S) に変換
  */
 function formatKeyDisplay(keyStr) {
@@ -301,6 +308,7 @@ const tabSizeCompartment = new Compartment();
 const lineNumbersCompartment = new Compartment();
 const activeLineCompartment = new Compartment();
 const autoCloseBracketsCompartment = new Compartment();
+const whitespaceCompartment = new Compartment();
 
 // ========== PDF Preview State ==========
 let isPdfPreviewVisible = false;
@@ -507,8 +515,14 @@ function switchMainView(targetId) {
     const toolbar = document.querySelector('.toolbar');
 
     if (targetId === 'content-readme') {
-        // エディタ画面: ツールバーを表示
-        if (toolbar) toolbar.classList.remove('hidden');
+        // エディタ画面: 設定がONの場合のみツールバーを表示
+        if (toolbar) {
+            if (appSettings.showToolbar) {
+                toolbar.classList.remove('hidden');
+            } else {
+                toolbar.classList.add('hidden');
+            }
+        }
 
         // タイトルバーはREADME以外で表示
         if (currentFilePath !== 'README.md') {
@@ -599,6 +613,9 @@ function applySettingsToUI() {
     const highlightActiveLineInput = document.getElementById('highlight-active-line');
     const defaultImageLocationInput = document.getElementById('default-image-location');
     const excludePatternsInput = document.getElementById('exclude-patterns');
+    const showToolbarInput = document.getElementById('show-toolbar');
+    const showWhitespaceInput = document.getElementById('show-whitespace');
+    const lineHeightInput = document.getElementById('line-height');
 
     if (wordWrapInput) wordWrapInput.checked = appSettings.wordWrap;
     if (fontSizeInput) fontSizeInput.value = appSettings.fontSize;
@@ -614,6 +631,37 @@ function applySettingsToUI() {
     if (highlightActiveLineInput) highlightActiveLineInput.checked = appSettings.highlightActiveLine;
     if (defaultImageLocationInput) defaultImageLocationInput.value = appSettings.defaultImageLocation || '.';
     if (excludePatternsInput) excludePatternsInput.value = appSettings.excludePatterns || '';
+    if (showToolbarInput) showToolbarInput.checked = appSettings.showToolbar;
+    if (showWhitespaceInput) showWhitespaceInput.checked = appSettings.showWhitespace;
+
+    // 行間設定の反映とCSS変数の更新
+    if (lineHeightInput) {
+        let val = appSettings.lineHeight || "1.4";
+        // もし数値の 1 や 2 だった場合、"1.0", "2.0" に変換してHTMLのoptionと合わせる
+        if (val === 1) val = "1.0";
+        if (val === 2) val = "2.0";
+
+        lineHeightInput.value = val;
+    }
+    document.documentElement.style.setProperty('--line-height', (appSettings.lineHeight || 1.4) + 'em');
+
+    // ツールバーの表示/非表示制御 (設定画面では表示しないように条件を追加)
+    const toolbar = document.querySelector('.toolbar');
+    const readmeContent = document.getElementById('content-readme');
+
+    if (toolbar && readmeContent) {
+        // 現在エディタ画面(content-readme)が表示されているかチェック
+        const isEditorViewActive = !readmeContent.classList.contains('content-hidden');
+        // 現在テキストモード(エディタ)かチェック(メディア表示でないか)
+        const isTextMode = document.getElementById('editor').style.display !== 'none';
+
+        // 「設定がON」かつ「エディタ画面が表示中」かつ「テキストモード」の場合のみ表示
+        if (appSettings.showToolbar && isEditorViewActive && isTextMode) {
+            toolbar.classList.remove('hidden');
+        } else {
+            toolbar.classList.add('hidden');
+        }
+    }
 
     // 透明度スライダーへの反映
     const opacityInput = document.getElementById('window-opacity');
@@ -759,6 +807,27 @@ function setupSettingsListeners() {
         applySettingsToUI();
     });
 
+    // ツールバー表示設定のリスナー
+    document.getElementById('show-toolbar')?.addEventListener('change', (e) => {
+        appSettings.showToolbar = e.target.checked;
+        saveSettings();
+        applySettingsToUI();
+    });
+
+    // スペース可視化設定のリスナー
+    document.getElementById('show-whitespace')?.addEventListener('change', (e) => {
+        appSettings.showWhitespace = e.target.checked;
+        saveSettings();
+        // エディタに即時反映
+        if (globalEditorView) {
+            globalEditorView.dispatch({
+                effects: whitespaceCompartment.reconfigure(
+                    appSettings.showWhitespace ? customHighlightWhitespace : []
+                )
+            });
+        }
+    });
+
     // 透明度スライダーのリスナー
     const opacityInput = document.getElementById('window-opacity');
     if (opacityInput) {
@@ -827,6 +896,13 @@ function setupSettingsListeners() {
         appSettings.tabSize = parseInt(e.target.value, 10);
         saveSettings();
         updateIndentSettings();
+    });
+
+    // 行間変更
+    document.getElementById('line-height')?.addEventListener('change', (e) => {
+        appSettings.lineHeight = e.target.value;
+        saveSettings();
+        applySettingsToUI(); // ここでCSS変数を更新
     });
 
     // スペース挿入切り替え
@@ -2086,6 +2162,7 @@ function createEditorState(content, filePath) {
             activeLineCompartment.of(appSettings.highlightActiveLine ? highlightActiveLine() : []),
             autoCloseBracketsCompartment.of(appSettings.autoCloseBrackets ? closeBrackets() : []),
             lineNumbersCompartment.of(appSettings.showLineNumbers ? lineNumbers() : []),
+            whitespaceCompartment.of(appSettings.showWhitespace ? customHighlightWhitespace : []),
 
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
@@ -2675,6 +2752,68 @@ function insertCodeBlock(view) {
     view.focus();
 }
 
+// テキストの配置を変更する関数
+function setTextAlignment(view, alignment) {
+    if (!view) return;
+    const { state, dispatch } = view;
+    const selection = state.selection.main;
+
+    let from, to;
+    let text;
+    let insertText;
+
+    // A. 範囲選択されている場合: その部分だけを囲む
+    if (!selection.empty) {
+        from = selection.from;
+        to = selection.to;
+        text = state.sliceDoc(from, to);
+
+        // 既に同じタグで囲まれているかチェック (解除用)
+        // 例: <p align="center">text</p>
+        const fullTagRegex = new RegExp(`^<p\\s+align=["']${alignment}["']>(.*)<\\/p>$`, 'i');
+        const match = text.match(fullTagRegex);
+
+        if (match) {
+            // 解除 (中身だけにする)
+            insertText = match[1];
+        } else {
+            // 左揃え(標準)以外ならタグで囲む
+            if (alignment === 'left') {
+                // <p>タグの除去を試みる（異なる配置のリセット）
+                insertText = text.replace(/^<p\s+align=["'](?:center|right)["']>(.*)<\/p>$/i, '$1');
+            } else {
+                // 選択範囲をタグで囲む
+                insertText = `<p align="${alignment}">${text}</p>`;
+            }
+        }
+    }
+    // B. カーソルのみの場合: 行全体を対象にする (以前のロジック)
+    else {
+        const line = state.doc.lineAt(from = selection.from);
+        to = line.to;
+        from = line.from;
+        text = line.text;
+
+        const alignRegex = /^<p\s+align=["'](?:left|center|right)["']>(.*)<\/p>$/i;
+        const match = text.match(alignRegex);
+
+        let innerText = match ? match[1] : text;
+
+        if (alignment === 'left') {
+            insertText = innerText;
+        } else {
+            insertText = `<p align="${alignment}">${innerText}</p>`;
+        }
+    }
+
+    dispatch({
+        changes: { from, to, insert: insertText },
+        // 処理後は挿入部分を選択状態にする
+        selection: { anchor: from, head: from + insertText.length }
+    });
+    view.focus();
+}
+
 // ==========ツールバー ボタン イベントリスナー ==========
 document.getElementById('btn-save')?.addEventListener('click', () => saveCurrentFile(false));
 document.getElementById('toolbar-undo')?.addEventListener('click', () => { if (globalEditorView) { undo(globalEditorView); globalEditorView.focus(); } });
@@ -2749,46 +2888,59 @@ if (btnBulletList) btnBulletList.addEventListener('click', () => toggleList(glob
 if (btnNumberList) btnNumberList.addEventListener('click', () => toggleList(globalEditorView, 'ol'));
 if (btnCheckList) btnCheckList.addEventListener('click', () => toggleList(globalEditorView, 'task'));
 
+// 配置ボタンのリスナー
+document.getElementById('btn-align-left')?.addEventListener('click', () => setTextAlignment(globalEditorView, 'left'));
+document.getElementById('btn-align-center')?.addEventListener('click', () => setTextAlignment(globalEditorView, 'center'));
+document.getElementById('btn-align-right')?.addEventListener('click', () => setTextAlignment(globalEditorView, 'right'));
+
+// PDFエクスポート処理を共通関数として定義
+async function executePdfExport() {
+    if (!globalEditorView) return;
+    const markdownContent = globalEditorView.state.doc.toString();
+
+    if (!markdownContent.trim()) {
+        showNotification('エクスポートするコンテンツがありません。', 'error');
+        return;
+    }
+
+    try {
+        // オプション取得
+        const options = appSettings.pdfOptions || {
+            pageSize: 'A4', marginsType: 0, printBackground: true,
+            displayHeaderFooter: false, landscape: false, enableToc: false, includeTitle: false
+        };
+
+        // タイトルの取得
+        const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
+
+        // 共通関数でHTML生成
+        const htmlContent = await convertMarkdownToHtml(markdownContent, options, currentTitle);
+
+        if (typeof window.electronAPI?.exportPdf === 'function') {
+            const result = await window.electronAPI.exportPdf(htmlContent, options);
+
+            if (result.success) {
+                showNotification(`PDFの保存が完了しました: ${result.path}`, 'success');
+            } else if (!result.canceled) {
+                showNotification(`PDFの保存に失敗しました: ${result.error}`, 'error');
+            }
+        } else {
+            showNotification('PDFエクスポート機能は利用できません。', 'error');
+        }
+    } catch (e) {
+        console.error('PDF Export Error:', e);
+        showNotification('予期せぬエラーが発生しました: ' + e.message, 'error');
+    }
+}
+// ツールバーのPDFエクスポートボタン
 const btnExportPdf = document.getElementById('btn-export-pdf');
 if (btnExportPdf) {
-    btnExportPdf.addEventListener('click', async () => {
-        if (!globalEditorView) return;
-        const markdownContent = globalEditorView.state.doc.toString();
-
-        if (!markdownContent.trim()) {
-            showNotification('エクスポートするコンテンツがありません。', 'error');
-            return;
-        }
-
-        try {
-            // オプション取得
-            const options = appSettings.pdfOptions || {
-                pageSize: 'A4', marginsType: 0, printBackground: true,
-                displayHeaderFooter: false, landscape: false, enableToc: false, includeTitle: false
-            };
-
-            // タイトルの取得
-            const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
-
-            // ★修正: 共通関数でHTML生成
-            const htmlContent = await convertMarkdownToHtml(markdownContent, options, currentTitle);
-
-            if (typeof window.electronAPI?.exportPdf === 'function') {
-                const result = await window.electronAPI.exportPdf(htmlContent, options);
-
-                if (result.success) {
-                    showNotification(`PDFの保存が完了しました: ${result.path}`, 'success');
-                } else if (!result.canceled) {
-                    showNotification(`PDFの保存に失敗しました: ${result.error}`, 'error');
-                }
-            } else {
-                showNotification('PDFエクスポート機能は利用できません。', 'error');
-            }
-        } catch (e) {
-            console.error('PDF Export Error:', e);
-            showNotification('予期せぬエラーが発生しました: ' + e.message, 'error');
-        }
-    });
+    btnExportPdf.addEventListener('click', executePdfExport);
+}
+// サイドバーのPDFエクスポートボタン (新規追加)
+const btnSidebarExportPdf = document.getElementById('btn-sidebar-export-pdf');
+if (btnSidebarExportPdf) {
+    btnSidebarExportPdf.addEventListener('click', executePdfExport);
 }
 
 // 1. ボタンをクリックしたら、隠しカラーピッカーを開く
@@ -3569,17 +3721,6 @@ if (btnCalendar) {
     });
 }
 
-function togglePdfPreview() {
-    if (isPdfPreviewVisible) {
-        isPdfPreviewVisible = false;
-    } else {
-        isPdfPreviewVisible = true;
-        isTerminalVisible = false;
-        generatePdfPreview();
-    }
-    updateTerminalVisibility();
-}
-
 async function generatePdfPreview() {
     try {
         if (!globalEditorView) return;
@@ -3599,6 +3740,13 @@ async function generatePdfPreview() {
             pageSize: 'A4', marginsType: 0, printBackground: true,
             displayHeaderFooter: false, landscape: false, enableToc: false, includeTitle: false
         };
+
+        // カスタムCSSを取得してオプションに追加
+        if (typeof getActiveCssContent === 'function') {
+            options.customCss = getActiveCssContent();
+        } else {
+            console.warn('getActiveCssContent function not found');
+        }
 
         // タイトルの取得 (入力欄の値を使用)
         const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
@@ -6039,6 +6187,7 @@ window.addEventListener('load', async () => {
     updateOutline();
     updateLeftPaneWidthVariable();
     initToolbarOverflow();
+    setupToolbarDropdownPositioning();
 
     // カレンダー機能の初期化
     if (window.calendarAPI) {
@@ -6533,7 +6682,6 @@ function switchToFile(filePath) {
 
     // 既にアクティブなメディアファイルが再度クリックされた場合は、重い処理をスキップ
     if (filePath === previouslyActivePath && fileTypeForCheck !== 'text') {
-        // メディアファイル（画像/PDF）で、既に表示中の場合は再描画を避けるため処理を終了
         return;
     }
 
@@ -6542,7 +6690,7 @@ function switchToFile(filePath) {
     const fileData = openedFiles.get(filePath);
     const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
 
-    // ★修正: 仮想的なREADME.mdかどうかを判定する
+    // 仮想的なREADME.mdかどうかを判定する
     const isVirtualReadme = fileData && fileData.isVirtual === true;
 
     // DOM要素取得
@@ -6562,8 +6710,14 @@ function switchToFile(filePath) {
         if (editorEl) editorEl.style.display = 'block';
         if (mediaViewEl) mediaViewEl.classList.add('hidden');
 
-        // ツールバーは常にテキストモードで表示
-        if (toolbar) toolbar.classList.remove('hidden');
+        // ツールバーは設定がONの場合のみ表示
+        if (toolbar) {
+            if (appSettings.showToolbar) {
+                toolbar.classList.remove('hidden');
+            } else {
+                toolbar.classList.add('hidden');
+            }
+        }
 
         // 仮想README.mdの場合のみタイトルバーを非表示
         if (fileTitleBarEl) {
@@ -6623,8 +6777,6 @@ function switchToFile(filePath) {
 
     updateFileStats();
 
-    // switchToFileの最後にonEditorInputを呼び出し、新しいファイルの状態に合わせて自動保存のタイマーを再設定する
-    // onEditorInput 内で自動保存の有効・無効を判定するロジックが走ります
     onEditorInput(false);
 }
 
@@ -7738,6 +7890,22 @@ function showEmptySpaceContextMenu(x, y) {
 
 // ========== CSS Snippets Logic ==========
 /**
+ * 有効化されているCSSスニペットの内容をDOMから取得して結合する
+ */
+function getActiveCssContent() {
+    if (!appSettings || !appSettings.enabledSnippets) return '';
+
+    let cssContent = '';
+    appSettings.enabledSnippets.forEach(filename => {
+        const styleId = `snippet-style-${filename}`;
+        const styleTag = document.getElementById(styleId);
+        if (styleTag) {
+            cssContent += styleTag.textContent + '\n';
+        }
+    });
+    return cssContent;
+}
+/**
  * スニペットリストを描画し、現在の設定に基づいてトグル状態を反映する
  */
 async function renderCssSnippetsList() {
@@ -7759,7 +7927,7 @@ async function renderCssSnippetsList() {
 
             const item = document.createElement('div');
             item.className = 'snippet-item';
-            
+
             item.innerHTML = `
                 <div class="snippet-info">
                     <span class="snippet-name">${filename}</span>
@@ -7776,7 +7944,7 @@ async function renderCssSnippetsList() {
             });
 
             listContainer.appendChild(item);
-            
+
             // 起動時やリロード時に、有効なものはCSSを適用する
             if (isEnabled) {
                 applyCssSnippet(filename);
@@ -7812,22 +7980,22 @@ async function toggleSnippet(filename, enabled) {
  */
 async function applyCssSnippet(filename) {
     const styleId = `snippet-style-${filename}`;
-    
+
     // 既に適用済みなら中身を更新する（再読み込み対応）
     let styleTag = document.getElementById(styleId);
-    
+
     try {
         const cssContent = await window.electronAPI.readCssSnippet(filename);
-        
+
         if (!styleTag) {
             styleTag = document.createElement('style');
             styleTag.id = styleId;
             document.head.appendChild(styleTag);
         }
-        
+
         styleTag.textContent = cssContent;
         console.log(`Applied snippet: ${filename}`);
-        
+
     } catch (e) {
         console.error(`Failed to apply snippet ${filename}:`, e);
     }
@@ -7871,7 +8039,7 @@ function setupSnippetEvents() {
             window.electronAPI.openSnippetsFolder();
         });
     }
-    
+
     // 設定画面のナビゲーションで「外観」が選ばれたときにリストを更新するようにする
     const appearanceNav = document.querySelector('.settings-nav-item[data-section="appearance"]');
     if (appearanceNav) {
@@ -7879,6 +8047,47 @@ function setupSnippetEvents() {
             renderCssSnippetsList();
         });
     }
+}
+
+// ドロップダウンメニューの位置調整関数
+function setupToolbarDropdownPositioning() {
+    const containers = document.querySelectorAll('.toolbar-dropdown-container');
+
+    containers.forEach(container => {
+        const menu = container.querySelector('.toolbar-icon-menu');
+        if (!menu) return;
+
+        // マウスが入った時：強制的に最前面(fixed)に配置し直す
+        container.addEventListener('mouseenter', () => {
+            const rect = container.getBoundingClientRect();
+            const windowWidth = window.innerWidth;
+            
+            // 親要素の overflow: hidden を突破するために fixed に設定
+            menu.style.position = 'fixed';
+            menu.style.top = `${rect.bottom + 2}px`; // ボタンの少し下
+            menu.style.zIndex = '9999'; // 最前面に表示
+            menu.style.marginTop = '0'; // 既存の余白をリセット
+
+            // 画面の右半分にある場合は「右揃え」にする
+            if (rect.left > windowWidth / 2) {
+                menu.style.left = 'auto';
+                menu.style.right = `${windowWidth - rect.right}px`;
+            } else {
+                menu.style.left = `${rect.left}px`;
+                menu.style.right = 'auto';
+            }
+        });
+
+        // マウスが出た時：スタイルをリセットして元の状態に戻す
+        container.addEventListener('mouseleave', () => {
+            menu.style.position = '';
+            menu.style.top = '';
+            menu.style.left = '';
+            menu.style.right = '';
+            menu.style.zIndex = '';
+            menu.style.marginTop = '';
+        });
+    });
 }
 
 document.addEventListener('click', () => {

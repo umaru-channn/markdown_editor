@@ -1230,15 +1230,6 @@ body:not([data-theme="dark"]) .toolbar-overflow-menu button:hover {
     font-size: 1.0em;
 }
 
-.cm-live-h1,
-.cm-live-h2,
-.cm-live-h3,
-.cm-live-h4,
-.cm-live-h5,
-.cm-live-h6 {
-    display: flex !important;
-}
-
 .cm-live-quote {
     background: var(--cb-body-bg);
     border-left: 4px solid var(--cb-border-color);
@@ -3931,4 +3922,32 @@ body[data-theme="dark"] .snippet-item {
 }
 body[data-theme="dark"] .snippet-slider {
     background-color: #555;
+}
+
+.cm-live-h1 .cm-hide-marker,
+.cm-live-h2 .cm-hide-marker,
+.cm-live-h3 .cm-hide-marker,
+.cm-live-h4 .cm-hide-marker,
+.cm-live-h5 .cm-hide-marker,
+.cm-live-h6 .cm-hide-marker {
+    vertical-align: baseline;
+    line-height: 0;
+}
+
+.cm-content .cm-highlightSpace {
+    background-image: radial-gradient(circle at 50% 55%, #aaa 15%, transparent 5%);
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+    /* 必要に応じて透明度などを調整 */
+    opacity: 0.5;
+}
+
+/* ダークモード時の調整 */
+body[data-theme="dark"] .cm-content .cm-highlightSpace {
+    background-image: radial-gradient(circle at 50% 55%, #666 15%, transparent 5%);
+}
+
+.cm-hide-marker {
+    display: none;
 }

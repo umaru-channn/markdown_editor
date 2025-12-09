@@ -29,7 +29,7 @@ const LANGUAGE_LIST = [
     { label: "XML", value: "xml" },
     { label: "YAML", value: "yaml" },
     { label: "Markdown", value: "markdown" },
-    { label: "Bash / Shell", value: "bash" },
+    { label: "Bash", value: "bash" },
     { label: "PowerShell", value: "powershell" },
     { label: "Dockerfile", value: "dockerfile" },
     { label: "Diff", value: "diff" },
@@ -45,8 +45,8 @@ const EXECUTABLE_LANGUAGES = new Set([
     "javascript", "js", "node",
     "typescript", "ts",
     "python", "py",
-    "bash", "sh", "zsh",
-    "c",
+    "bash", "sh", "zsh","shell",
+    "c","gcc",
     "cpp", "c++",
     "java",
     "csharp", "cs",
@@ -54,11 +54,13 @@ const EXECUTABLE_LANGUAGES = new Set([
     "ruby", "rb",
     "perl", "pl",
     "lua",
-    "powershell", "ps1",
+    "powershell", "ps1","pwsh",
     "r",
     "go", "golang",
     "rust", "rs",
-    "dart"
+    "dart",
+    "kotlin", "kt",
+    "swift"
 ]);
 
 // Altテキストからサイズを解析するヘルパー関数
@@ -123,12 +125,14 @@ function formatLanguageName(lang) {
         "htm": "HTML",
         "cs": "C#",
         "rs": "Rust",
-        "sh": "Bash / Shell", "zsh": "Bash / Shell",
+        "sh": "Bash", "zsh": "Bash", "shell": "Bash",
         "yml": "YAML",
         "rb": "Ruby",
         "go": "Go",
-        "ps1": "PowerShell",
-        "docker": "Dockerfile"
+        "ps1": "PowerShell","pwsh": "PowerShell",
+        "docker": "Dockerfile",
+        "gcc": "C",
+        "kt": "Kotlin"
     };
     return map[l] || (l.charAt(0).toUpperCase() + l.slice(1));
 }
@@ -1132,6 +1136,57 @@ function buildDecorations(view) {
                 { tag: 'cite', style: 'font-style: italic; color: #666;' },
                 { tag: 'code', style: 'background-color: rgba(0, 0, 0, 0.05); padding: 2px 4px; border-radius: 3px; font-family: monospace; color: #e01e5a;' }
             ];
+
+            // 6. <p align="..."> による配置
+            // 行の途中でもマッチするようにグローバル検索 (gフラグ)
+            const pAlignRegex = /<p\s+align=["'](left|center|right)["']>(.*?)<\/p>/gi;
+            let pMatch;
+            while ((pMatch = pAlignRegex.exec(lineText)) !== null) {
+                const start = line.from + pMatch.index;
+                const end = start + pMatch[0].length;
+
+                const align = pMatch[1]; // center, right, left
+                const content = pMatch[2]; // 中身のテキスト
+
+                // カーソルが「このタグの範囲内」にあるかチェック
+                const isCursorInTag = (cursor >= start && cursor <= end);
+
+                // カーソルがない場合のみプレビュー（タグ隠し＋スタイル適用）
+                if (!isCursorInTag) {
+                    const openTagLength = pMatch[0].indexOf(content);
+                    const contentStart = start + openTagLength;
+                    const contentEnd = contentStart + content.length;
+
+                    // 1. 開始タグ <p align="..."> を隠す
+                    collectedDecos.push({
+                        from: start,
+                        to: contentStart,
+                        side: 0,
+                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                    });
+
+                    // 2. 中身に配置スタイルを適用
+                    // spanタグではなくブロックとして振る舞わせるため display: block を付与
+                    collectedDecos.push({
+                        from: contentStart,
+                        to: contentEnd,
+                        side: 0,
+                        deco: Decoration.mark({
+                            attributes: {
+                                style: `display: block; text-align: ${align}; width: 100%;`
+                            }
+                        })
+                    });
+
+                    // 3. 終了タグ </p> を隠す
+                    collectedDecos.push({
+                        from: contentEnd,
+                        to: end,
+                        side: 0,
+                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                    });
+                }
+            }
 
             styleTags.forEach(({ tag, class: className, style }) => {
                 const regex = new RegExp(`<${tag}>(.*?)<\\/${tag}>`, 'gi');

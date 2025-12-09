@@ -121,7 +121,7 @@
                     </svg>
                 </div>
 
-                <div class="icon" id="btn-export-pdf" title="PDFとしてエクスポート">
+                <div class="icon" id="btn-sidebar-export-pdf" title="PDFとしてエクスポート">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                         stroke-linecap="round" stroke-linejoin="round">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -643,6 +643,48 @@
                             </div>
                         </div>
 
+                        <div class="toolbar-dropdown-container">
+                            <button id="btn-align" title="文字揃え">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="21" y1="10" x2="3" y2="10"></line>
+                                    <line x1="21" y1="6" x2="3" y2="6"></line>
+                                    <line x1="21" y1="14" x2="3" y2="14"></line>
+                                    <line x1="21" y1="18" x2="3" y2="18"></line>
+                                </svg>
+                                <span style="font-size: 10px; margin-left: 2px;">▼</span>
+                            </button>
+                            <div class="toolbar-icon-menu">
+                                <button id="btn-align-left" title="左揃え">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="17" y1="10" x2="3" y2="10"></line>
+                                        <line x1="21" y1="6" x2="3" y2="6"></line>
+                                        <line x1="21" y1="14" x2="3" y2="14"></line>
+                                        <line x1="17" y1="18" x2="3" y2="18"></line>
+                                    </svg>
+                                </button>
+                                <button id="btn-align-center" title="中央揃え">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="18" y1="10" x2="6" y2="10"></line>
+                                        <line x1="21" y1="6" x2="3" y2="6"></line>
+                                        <line x1="21" y1="14" x2="3" y2="14"></line>
+                                        <line x1="18" y1="18" x2="6" y2="18"></line>
+                                    </svg>
+                                </button>
+                                <button id="btn-align-right" title="右揃え">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="21" y1="10" x2="7" y2="10"></line>
+                                        <line x1="21" y1="6" x2="3" y2="6"></line>
+                                        <line x1="21" y1="14" x2="3" y2="14"></line>
+                                        <line x1="21" y1="18" x2="7" y2="18"></line>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
                         <button id="btn-toolbar-more" class="hidden" title="さらに表示" style="font-weight: bold;">»</button>
                     </div>
 
@@ -796,6 +838,17 @@
                                     </select>
                                 </div>
                                 <div class="setting-item">
+                                    <label for="line-height">行の高さ (Line Height)</label>
+                                    <select id="line-height">
+                                        <option value="1.0">1.0 (Compact)</option>
+                                        <option value="1.2">1.2</option>
+                                        <option value="1.4">1.4 (Default)</option>
+                                        <option value="1.6">1.6</option>
+                                        <option value="1.8">1.8</option>
+                                        <option value="2.0">2.0 (Spacious)</option>
+                                    </select>
+                                </div>
+                                <div class="setting-item">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="insert-spaces" checked>
                                         <span class="checkbox-custom"></span>
@@ -845,10 +898,30 @@
                                         </div>
                                     </label>
                                 </div>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-whitespace">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">スペースを表示 (Render Whitespace)</span>
+                                            <span class="label-desc">半角スペースやタブ文字を可視化します。</span>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
 
                             <div class="settings-section" id="settings-section-appearance">
                                 <h2>外観 (Appearance)</h2>
+                                <div class="setting-item">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="show-toolbar">
+                                        <span class="checkbox-custom"></span>
+                                        <div class="label-text">
+                                            <span class="label-title">ツールバーを表示</span>
+                                            <span class="label-desc">エディタ上部の操作ボタンを表示します。</span>
+                                        </div>
+                                    </label>
+                                </div>
                                 <div class="setting-item">
                                     <label for="theme">テーマ</label>
                                     <select id="theme">
