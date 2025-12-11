@@ -6,7 +6,12 @@
   "scripts": {
     "start": "electron .",
     "rebuild": "electron-rebuild",
-    "postinstall": "electron-rebuild"
+    "postinstall": "electron-rebuild",
+    "build": "electron-builder"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/umaru-channn/markdown_editor.git"
   },
   "keywords": [
     "Electron",
@@ -17,9 +22,40 @@
   ],
   "author": "GitHub",
   "license": "CC0-1.0",
+  "build": {
+    "appId": "com.example.markdown-ide",
+    "productName": "MarkdownIDE",
+    "win": {
+      "target": [
+        "nsis" 
+      ],
+      "icon": "icon.ico",
+      "publish": [
+        "github"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "umaru-channn",
+        "repo": "markdown_editor"
+      }
+    ],
+    "files": [
+      "**/*",
+      "!**/.env",
+      "!git_memo.md",
+      "!**/*.ts"
+    ]
+  },
   "devDependencies": {
     "electron": "^30.0.0",
-    "electron-rebuild": "^3.2.9"
+    "electron-builder": "^26.0.12"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.0.0",
@@ -52,6 +88,8 @@
     "codemirror": "^6.0.1",
     "dotenv": "^17.2.3",
     "dropbox": "^10.34.0",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2",
     "googleapis": "^140.0.0",
     "got": "^11.8.6",
     "htm": "^3.1.1",

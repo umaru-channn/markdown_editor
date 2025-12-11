@@ -1299,12 +1299,28 @@
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
     <script src="node_modules/katex/dist/katex.min.js"></script>
     <script src="node_modules/katex/dist/contrib/auto-render.min.js"></script>
-    <script src="node_modules/mermaid/dist/mermaid.min.js"></script>
+    <script type="module">
+        import mermaid from './node_modules/mermaid/dist/mermaid.esm.min.mjs';
+        // 初期化設定（必要に応じてテーマなどを設定可能）
+        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+        // グローバル変数として公開し、livePreviewPlugin.jsからアクセス可能にする
+        window.mermaid = mermaid;
+    </script>
     <script src="node_modules/marked/lib/marked.umd.js"></script>
     <script type="module">
-        import * as pdfjsLib from './node_modules/pdfjs-dist/build/pdf.min.mjs';
-        pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
-        window.pdfjsLib = pdfjsLib;
+        import mermaid from './node_modules/mermaid/dist/mermaid.esm.min.mjs';
+        // 初期化設定
+        // ★修正: htmlLabels: false を追加して、Canvas書き出し時の汚染エラーを防ぐ
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'default',
+            securityLevel: 'loose',
+            flowchart: { htmlLabels: false },
+            sequence: { showSequenceNumbers: true },
+            gantt: { flatParam: true }
+        });
+        // グローバル変数として公開し、livePreviewPlugin.jsからアクセス可能にする
+        window.mermaid = mermaid;
     </script>
     <script src="./node_modules/pdfjs-dist/build/pdf.min.mjs" type="module"></script>
     <script src="./node_modules/pdfjs-dist/build/pdf.worker.min.mjs" type="module"></script>

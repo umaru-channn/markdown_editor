@@ -1,5 +1,5 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, ipcMain, dialog, session, shell, Menu, MenuItem } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, session, shell, Menu } = require('electron')
 const path = require('node:path')
 const fs = require('fs')
 const { exec } = require('child_process')
@@ -12,23 +12,84 @@ const http = require('isomorphic-git/http/node')
 const { terminalService } = require('./terminalService');
 const got = require('got');
 const crypto = require('crypto');
+const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
 
 // Cloud Sync Dependencies
 const { Dropbox } = require('dropbox');
 const { google } = require('googleapis');
 const httpModule = require('http'); // 認証用ローカルサーバー
 const urlModule = require('url');
-const { highlightActiveLine } = require('@codemirror/view');
 require('dotenv').config(); // 環境変数読み込み
 
+// ログ設定
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'info';
+log.info('App starting...');
+
 // ========== 【重要】APIキー設定エリア ==========
-// Dropbox用
-const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY;
-const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET;
-// Google Drive用
-const GDRIVE_CLIENT_ID = process.env.GDRIVE_CLIENT_ID;
-const GDRIVE_CLIENT_SECRET = process.env.GDRIVE_CLIENT_SECRET;
+let secrets = {
+  DROPBOX_APP_KEY: process.env.DROPBOX_APP_KEY,
+  DROPBOX_APP_SECRET: process.env.DROPBOX_APP_SECRET,
+  GDRIVE_CLIENT_ID: process.env.GDRIVE_CLIENT_ID,
+  GDRIVE_CLIENT_SECRET: process.env.GDRIVE_CLIENT_SECRET,
+  GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+  GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET
+};
+// secrets.js がある場合はそれを読み込んで上書き
+const secretsPath = path.join(__dirname, 'secrets.js');
+if (fs.existsSync(secretsPath)) {
+  const localSecrets = require('./secrets');
+  secrets = { ...secrets, ...localSecrets };
+} else {
+  // secrets.js がない場合は .env を試す (開発環境用)
+  require('dotenv').config();
+  secrets = {
+    DROPBOX_APP_KEY: process.env.DROPBOX_APP_KEY,
+    DROPBOX_APP_SECRET: process.env.DROPBOX_APP_SECRET,
+    GDRIVE_CLIENT_ID: process.env.GDRIVE_CLIENT_ID,
+    GDRIVE_CLIENT_SECRET: process.env.GDRIVE_CLIENT_SECRET,
+    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET
+  };
+}
+const DROPBOX_APP_KEY = secrets.DROPBOX_APP_KEY;
+const DROPBOX_APP_SECRET = secrets.DROPBOX_APP_SECRET;
+const GDRIVE_CLIENT_ID = secrets.GDRIVE_CLIENT_ID;
+const GDRIVE_CLIENT_SECRET = secrets.GDRIVE_CLIENT_SECRET;
+const GITHUB_CLIENT_ID = secrets.GITHUB_CLIENT_ID;
+const GITHUB_CLIENT_SECRET = secrets.GITHUB_CLIENT_SECRET;
 // ===========================================
+
+// 自動更新のイベント処理
+function setupAutoUpdater() {
+  // アップデートが見つかったら通知
+  autoUpdater.on('update-available', () => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'アップデートあり',
+      message: '新しいバージョンが見つかりました。バックグラウンドでダウンロードしています...',
+    });
+  });
+
+  // ダウンロード完了後にインストールを促す
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox({
+      type: 'question',
+      title: 'アップデートの準備完了',
+      message: '新しいバージョンがダウンロードされました。今すぐ再起動してインストールしますか？',
+      buttons: ['はい', '後で']
+    }).then((result) => {
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+  
+  autoUpdater.on('error', (err) => {
+    log.error('Update Error:', err);
+  });
+}
 
 // 各ウィンドウごとのカレントディレクトリを保持
 const workingDirectories = new Map();
@@ -1019,7 +1080,7 @@ function createWindow() {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; img-src 'self' https: data: file:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https://calendar.google.com/ https://www.google.com/;"
+            "default-src 'self'; img-src 'self' https: data: file: blob:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https://calendar.google.com/ https://www.google.com/;"
           ]
         }
       })
@@ -1410,9 +1471,26 @@ function createWindow() {
 // 名前を付けて保存ダイアログ
 ipcMain.handle('show-save-dialog', async (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
+
+  let defaultPath = options?.defaultPath || 'Untitled.md';
+
+  // ★修正: パスが絶対パスでない（ファイル名のみの）場合、markdown_vault フォルダを強制付与
+  if (!path.isAbsolute(defaultPath)) {
+    const vaultDir = path.join(app.getPath('userData'), 'markdown_vault');
+    // フォルダが存在しない場合は作成
+    if (!fs.existsSync(vaultDir)) {
+      try {
+        fs.mkdirSync(vaultDir, { recursive: true });
+      } catch (e) {
+        console.error('Failed to create vault dir:', e);
+      }
+    }
+    defaultPath = path.join(vaultDir, defaultPath);
+  }
+
   const result = await dialog.showSaveDialog(win, {
     title: '名前を付けて保存',
-    defaultPath: options?.defaultPath || 'Untitled.md',
+    defaultPath: defaultPath, // 修正後のパスを使用
     filters: [
       { name: 'Markdown', extensions: ['md', 'markdown'] },
       { name: 'All Files', extensions: ['*'] }
@@ -2443,6 +2521,11 @@ ipcMain.handle('select-file', async (event) => {
 
 // PDF生成 (プレビュー用 - Base64返し) のIPC ハンドラー
 ipcMain.handle('generate-pdf', async (event, htmlContent, options = {}) => {
+
+  let pdfWindow = null;
+  // 一時ファイルのパスを生成
+  const tempHtmlPath = path.join(app.getPath('temp'), `temp_preview_${Date.now()}.html`);
+
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
     if (!mainWindow) {
@@ -2454,13 +2537,18 @@ ipcMain.handle('generate-pdf', async (event, htmlContent, options = {}) => {
       show: false,
       webPreferences: {
         nodeIntegration: false,
-        contextIsolation: true
+        contextIsolation: true,
+        webSecurity: false
       }
     });
 
     // Load HTML content
     const htmlTemplate = getPdfHtmlTemplate(htmlContent, options);
-    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
+    // ★変更: HTMLを一時ファイルとして書き出す
+    fs.writeFileSync(tempHtmlPath, htmlTemplate);
+
+    // ★変更: ファイルとしてロードする (これで file:// 画像が表示可能になる)
+    await pdfWindow.loadFile(tempHtmlPath);
 
     // Generate PDF with options
     const pdfData = await pdfWindow.webContents.printToPDF({
@@ -2475,26 +2563,29 @@ ipcMain.handle('generate-pdf', async (event, htmlContent, options = {}) => {
       pageRanges: options.pageRanges ? options.pageRanges : undefined
     });
 
-    // Close the temporary window
-    pdfWindow.close();
-
     // Return PDF as base64
     return pdfData.toString('base64');
   } catch (error) {
     console.error('Failed to generate PDF:', error);
     throw error;
+  } finally {
+    if (pdfWindow) pdfWindow.close();
+    // 後始末: 一時ファイルを削除
+    try {
+      if (fs.existsSync(tempHtmlPath)) fs.unlinkSync(tempHtmlPath);
+    } catch (e) { /* 無視 */ }
   }
 });
 
 // PDFエクスポート（ファイル保存）のIPCハンドラー
 ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
+  let pdfWindow = null;
+  const tempHtmlPath = path.join(app.getPath('temp'), `temp_export_${Date.now()}.html`);
+
   try {
     const mainWindow = BrowserWindow.fromWebContents(event.sender);
-    if (!mainWindow) {
-      throw new Error('Main window not found');
-    }
+    if (!mainWindow) throw new Error('Main window not found');
 
-    // 保存先ダイアログを開く
     const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
       title: 'PDFとしてエクスポート',
       defaultPath: 'document.pdf',
@@ -2504,23 +2595,23 @@ ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
       ]
     });
 
-    if (canceled || !filePath) {
-      return { success: false, canceled: true };
-    }
+    if (canceled || !filePath) return { success: false, canceled: true };
 
-    // 一時ウィンドウでレンダリング
-    const pdfWindow = new BrowserWindow({
+    pdfWindow = new BrowserWindow({
       show: false,
       webPreferences: {
         nodeIntegration: false,
-        contextIsolation: true
+        contextIsolation: true,
+        webSecurity: false // ★重要
       }
     });
 
     const htmlTemplate = getPdfHtmlTemplate(htmlContent, options);
-    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlTemplate)}`);
 
-    // PDF生成 with options
+    // ★変更: 一時ファイル経由でロード
+    fs.writeFileSync(tempHtmlPath, htmlTemplate);
+    await pdfWindow.loadFile(tempHtmlPath);
+
     const pdfData = await pdfWindow.webContents.printToPDF({
       marginsType: options.marginsType !== undefined ? parseInt(options.marginsType) : 0,
       pageSize: options.pageSize || 'A4',
@@ -2533,9 +2624,6 @@ ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
       pageRanges: options.pageRanges ? options.pageRanges : undefined
     });
 
-    pdfWindow.close();
-
-    // ファイルに保存
     fs.writeFileSync(filePath, pdfData);
 
     return { success: true, path: filePath };
@@ -2543,16 +2631,27 @@ ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
   } catch (error) {
     console.error('Failed to export PDF:', error);
     return { success: false, error: error.message };
+  } finally {
+    if (pdfWindow) pdfWindow.close();
+    try {
+      if (fs.existsSync(tempHtmlPath)) fs.unlinkSync(tempHtmlPath);
+    } catch (e) { /* 無視 */ }
   }
 });
 
 // HTMLテンプレートを生成するヘルパー関数
 function getPdfHtmlTemplate(htmlContent, options = {}) {
 
-  // marginsType: 
-  // 0: Default (標準) - Electronのデフォルト余白 + CSSの40px
-  // 1: None (なし) - 余白0 + CSSの0
-  // 2: Minimum (最小) - Electronの最小余白 + CSSの微調整(例: 5mm)
+  let katexCss = '';
+  try {
+    // node_modules内のCSSファイルのパス
+    const katexPath = path.join(__dirname, 'node_modules', 'katex', 'dist', 'katex.min.css');
+    if (fs.existsSync(katexPath)) {
+      katexCss = fs.readFileSync(katexPath, 'utf8');
+    }
+  } catch (e) {
+    console.error("Failed to load KaTeX CSS for PDF:", e);
+  }
 
   let bodyPadding = '40px'; // デフォルト (Type 0)
 
@@ -2573,6 +2672,8 @@ function getPdfHtmlTemplate(htmlContent, options = {}) {
         <head>
           <meta charset="UTF-8">
           <style>
+          /* Katexスタイル定義 */
+          ${katexCss}
           /* PDF用の変数定義 */
             :root {
                 /* インデントを0にして、すべての見出しの位置を左端に均等に揃える */
@@ -2885,10 +2986,8 @@ ipcMain.on('show-editor-context-menu', (event) => {
 
 // GitHub OAuth認証ハンドラ
 ipcMain.handle('auth-github', async () => {
-  const CLIENT_ID = process.env.GITHUB_CLIENT_ID;
-  const CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
 
-  if (!CLIENT_ID || !CLIENT_SECRET) {
+  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
     return { success: false, error: '.envファイルにGITHUB_CLIENT_IDとGITHUB_CLIENT_SECRETを設定してください。' };
   }
 
@@ -2912,8 +3011,8 @@ ipcMain.handle('auth-github', async () => {
             try {
               const tokenResponse = await got.post('https://github.com/login/oauth/access_token', {
                 json: {
-                  client_id: CLIENT_ID,
-                  client_secret: CLIENT_SECRET,
+                  client_id: GITHUB_CLIENT_ID,
+                  client_secret: GITHUB_CLIENT_SECRET,
                   code: code
                 },
                 headers: {
@@ -4179,6 +4278,12 @@ while (ip < instructions.length) {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   createWindow()
+
+  // 本番環境（exe化されている）ならアップデート確認を開始
+  if (app.isPackaged) {
+    setupAutoUpdater();
+    autoUpdater.checkForUpdatesAndNotify();
+  }
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

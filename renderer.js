@@ -11,7 +11,7 @@
 
 const path = require('path');
 const { webFrame } = require('electron');
-const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder } = require("@codemirror/state");
+const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder, StateField } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess, selectAll } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit, StreamLanguage, LanguageSupport } = require("@codemirror/language");
@@ -152,6 +152,33 @@ let isRightActivityBarVisible = true;
 let isMaximized = false;
 let savedRightActivityBarState = true;
 let activeContextMenu = null;
+
+// 言語状態を管理するフィールド
+const currentLanguageField = StateField.define({
+    create() { return 'markdown'; },
+    update(value, tr) { return value; }
+});
+
+// ファイルパスからPrism言語IDを取得するヘルパー
+function getPrismLanguageFromPath(filePath) {
+    if (!filePath) return 'markdown';
+    const ext = path.extname(filePath).toLowerCase().replace('.', '');
+
+    const langMap = {
+        'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+        'sh': 'bash', 'zsh': 'bash', 'shell': 'bash',
+        'rb': 'ruby', 'cs': 'csharp', 'kt': 'kotlin',
+        'rs': 'rust', 'go': 'go', 'md': 'markdown', 'markdown': 'markdown',
+        'html': 'markup', 'xml': 'markup', 'svg': 'markup',
+        'c': 'c', 'cpp': 'cpp', 'h': 'cpp',
+        'css': 'css', 'json': 'json', 'yaml': 'yaml', 'yml': 'yaml',
+        'java': 'java', 'php': 'php', 'sql': 'sql', 'pl': 'perl',
+        'lua': 'lua', 'r': 'r', 'dart': 'dart', 'swift': 'swift',
+        'scala': 'scala', 'bf': 'brainfuck', 'ws': 'whitespace'
+    };
+
+    return langMap[ext] || 'markdown';
+}
 
 // 設定管理
 let appSettings = {
@@ -676,7 +703,7 @@ function applySettingsToUI() {
 
             // 下ペインが隠れている状態でも、centerPane のマージンを適切に設定する
             if (bottomPane.classList.contains('hidden') || !isTerminalVisible) {
-                centerPane.style.marginBottom = bottomOffset;
+                centerPane.style.marginBottom = '0px';
             }
         }
 
@@ -1089,15 +1116,14 @@ function createNewTab() {
  * @param {string} title - 文書タイトル（ファイル名）を受け取る
  */
 async function convertMarkdownToHtml(markdown, pdfOptions, title) {
-    // 1. 特殊記法の事前処理
+    // 1. 特殊記法の事前処理（LaTeXレンダリング含む）
     const processed = await processMarkdownForExport(markdown);
 
-    // markedのレンダラーと目次配列を初期化
+    // markedのレンダラー初期化
     const renderer = new marked.Renderer();
     const toc = [];
 
-    // 目次生成が有効な場合のみ、見出しの収集ロジックを設定する
-    // (以前はここで早期リターンしていましたが、タイトル処理のために削除しました)
+    // --- 目次収集ロジック ---
     if (pdfOptions && pdfOptions.enableToc) {
         renderer.heading = (text, level, raw) => {
             const anchor = raw.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-');
@@ -1106,7 +1132,57 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
         };
     }
 
-    // 本文のHTML変換 (rendererを渡すことで、上記の設定があれば反映される)
+    // --- ★追加: 画像のカスタムレンダラー (サイズ指定とパス解決) ---
+    renderer.image = (href, title, text) => {
+        // 1. サイズ指定の解析 ![alt|100](src) -> width="100"
+        let width = null;
+        let alt = text;
+        if (text && text.includes('|')) {
+            const parts = text.split('|');
+            alt = parts[0]; // パイプより前をaltとする
+            const sizePart = parts[1];
+            // 数字のみ、または 数字x数字 の場合
+            if (/^\d+$/.test(sizePart)) {
+                width = sizePart;
+            } else if (/^\d+x\d+$/.test(sizePart)) {
+                width = sizePart.split('x')[0]; // 幅だけ使用
+            }
+        }
+
+        // 2. パスの絶対パス化 (file://プロトコル)
+        let src = href;
+        // httpやdataスキーム以外（ローカルパス）の場合
+        if (!/^https?:\/\//i.test(src) && !/^data:/i.test(src)) {
+            try {
+                // 基準となるディレクトリを決定
+                // 開いているファイルがある場合はそのディレクトリ、なければルートディレクトリ
+                let baseDir = currentDirectoryPath;
+                if (currentFilePath && typeof path !== 'undefined') {
+                    baseDir = path.dirname(currentFilePath);
+                }
+
+                if (baseDir) {
+                    // 相対パスを絶対パスに変換
+                    if (!path.isAbsolute(src)) {
+                        src = path.join(baseDir, src);
+                    }
+                    // バックスラッシュをスラッシュに置換し、file:// を付与
+                    src = 'file://' + src.replace(/\\/g, '/');
+                }
+            } catch (e) {
+                console.warn('Image path resolution failed:', e);
+            }
+        }
+
+        // HTML生成
+        let out = `<img src="${src}" alt="${alt}"`;
+        if (title) out += ` title="${title}"`;
+        if (width) out += ` width="${width}"`;
+        out += '>';
+        return out;
+    };
+
+    // 本文のHTML変換
     const bodyHtml = marked.parse(processed, {
         breaks: true,
         gfm: true,
@@ -1129,13 +1205,11 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
                 </li>
             `;
         });
-        tocHtml += `</ul></div>`; // 閉じタグの修正を含む
-
-        // 目次を本文の前に追加
+        tocHtml += `</ul></div>`;
         resultHtml = tocHtml + resultHtml;
     }
 
-    // タイトルを含める設定がONの場合、先頭に追加する
+    // タイトルを含める設定
     if (pdfOptions && pdfOptions.includeTitle && title) {
         const titleHtml = `<h1 class="pdf-title">${title}</h1>`;
         resultHtml = titleHtml + resultHtml;
@@ -1150,14 +1224,26 @@ const codeLanguages = (info) => {
     return null;
 };
 
-// 変更後（常にMarkdownモード + Prismプラグインを返すように単純化）
+// 変更後：拡張子に応じて言語設定とプラグインを切り替え
 function getLanguageExtensions(filePath) {
-    return [
-        markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
-        livePreviewPlugin,
-        tablePlugin,
-        prismHighlightPlugin // ★ここで自作プラグインを追加
+    const lang = getPrismLanguageFromPath(filePath);
+
+    // 基本拡張機能（言語フィールドとPrismハイライト）
+    const extensions = [
+        currentLanguageField.init(() => lang),
+        prismHighlightPlugin
     ];
+
+    if (lang === 'markdown') {
+        // Markdownの場合のみ、Markdown関連の拡張を追加
+        extensions.push(
+            markdown({ base: markdownLanguage, codeLanguages: codeLanguages }),
+            livePreviewPlugin,
+            tablePlugin
+        );
+    }
+
+    return extensions;
 }
 
 const startDoc = `# Markdown Editor マニュアル
@@ -1258,19 +1344,192 @@ const handleListNewline = (view) => {
     }
 
     let nextMarker = marker;
+    const changes = []; // 複数の変更（改行挿入＋番号更新）をまとめる配列
 
     const orderedMatch = text.match(ORDERED_RE);
     if (orderedMatch) {
         const currentNum = orderedMatch[2];
-        nextMarker = incrementOrderedNumber(currentNum) + ".";
+        // 挿入する行の番号を計算
+        let nextNumStr = incrementOrderedNumber(currentNum);
+        nextMarker = nextNumStr + ".";
+
+        // --- 追加: 後続行の自動リナンバリング処理 ---
+        let lineNum = line.number + 1;
+        while (lineNum <= state.doc.lines) {
+            const nextLine = state.doc.line(lineNum);
+            const nextLineText = nextLine.text;
+            const nextMatch = nextLineText.match(ORDERED_RE);
+
+            // 同じインデントレベルの番号付きリストが続いているか確認
+            if (nextMatch && nextMatch[1] === indent) {
+                // 現在の番号部分の範囲を特定
+                const numStart = nextLine.from + nextMatch[1].length;
+                const numEnd = numStart + nextMatch[2].length; // "."の前まで
+
+                // 次の番号を計算して更新 (1つずつずらす)
+                nextNumStr = incrementOrderedNumber(nextNumStr);
+
+                changes.push({
+                    from: numStart,
+                    to: numEnd,
+                    insert: nextNumStr
+                });
+            } else {
+                break; // リストが途切れたら終了
+            }
+            lineNum++;
+        }
+        // -------------------------------------------
+
     } else if (marker.startsWith("- [")) {
         nextMarker = "- [ ]";
     }
 
     const insertText = `\n${indent}${nextMarker} `;
-    dispatch({ changes: { from: to, insert: insertText }, selection: { anchor: to + insertText.length } });
+
+    // 改行挿入自体もchangesに追加
+    changes.push({ from: to, insert: insertText });
+
+    dispatch({
+        changes: changes,
+        selection: { anchor: to + insertText.length }
+    });
     return true;
 };
+
+/**
+ * ドキュメント変更時にリスト番号の不整合を検知して自動修正する関数
+ * (完全な階層構造スタック管理・Loose List対応版)
+ */
+function handleListRenumbering(view, changes) {
+    const { state, dispatch } = view;
+    const doc = state.doc;
+    const changesSpec = [];
+
+    // 1. 変更範囲の最小行（最も上の行）を特定
+    let minChangedLine = doc.lines;
+    changes.iterChangedRanges((fromA, toA, fromB) => {
+        const line = doc.lineAt(fromB);
+        if (line.number < minChangedLine) minChangedLine = line.number;
+    });
+
+    if (minChangedLine > doc.lines) return;
+
+    // 2. リストブロックの「真の開始地点」を探すために上に遡る
+    // 空行はスキップし、リストでない行が見つかるか、ファイル先頭に達するまで戻る
+    let startLine = minChangedLine;
+    for (let i = minChangedLine - 1; i >= 1; i--) {
+        const line = doc.line(i);
+        const text = line.text;
+        
+        // リスト行なら開始地点の候補として更新
+        if (text.match(ORDERED_RE)) {
+            startLine = i;
+        } 
+        // 空行（Loose Listの合間）なら、まだリストブロック内の可能性があるので遡行継続
+        else if (text.trim() === '') {
+            continue;
+        } 
+        // リストでも空行でもないなら、そこがリストブロックの境界
+        else {
+            break;
+        }
+    }
+
+    // 3. 階層構造を管理するスタック
+    // 各レベルの { indent: インデント文字数, count: 現在の番号 } を保持
+    // 例: 1-2-1 ならスタックは3要素
+    let stack = [];
+
+    // 4. 開始地点から下に向かって順番にスキャン・修正
+    for (let i = startLine; i <= doc.lines; i++) {
+        const line = doc.line(i);
+        const text = line.text;
+        const match = text.match(ORDERED_RE);
+
+        // --- リスト行でない場合 ---
+        if (!match) {
+            // 空行ならリスト継続とみなしてスキップ（スタックは維持）
+            if (text.trim() === '') {
+                continue;
+            }
+            // 変更範囲より下で、リスト以外の行が出たら終了
+            if (i > minChangedLine) {
+                break;
+            }
+            // まだ変更範囲前なら、スタックをリセットして次へ
+            stack = [];
+            continue;
+        }
+
+        // --- リスト行の場合 ---
+        const indentStr = match[1];
+        const currentNumStr = match[2];
+        const indentLen = indentStr.length;
+
+        // A. スタックとの比較・調整
+        if (stack.length === 0) {
+            // 初回: スタックに積む
+            stack.push({ indentLen: indentLen, count: 1 });
+        } else {
+            const lastLevel = stack[stack.length - 1];
+
+            if (indentLen > lastLevel.indentLen) {
+                // インデントが深い -> 子階層へ (1. -> 1-1.)
+                stack.push({ indentLen: indentLen, count: 1 });
+            } else if (indentLen === lastLevel.indentLen) {
+                // インデントが同じ -> 同階層の次の番号 (1-1. -> 1-2.)
+                lastLevel.count++;
+            } else {
+                // インデントが浅い -> 親階層へ戻る (1-2-1. -> 1-3. or 2.)
+                // スタックの後ろから見ていき、現在のインデント以下のレベルを探す
+                while (stack.length > 0) {
+                    const top = stack[stack.length - 1];
+                    if (top.indentLen > indentLen) {
+                        // 深すぎる階層を捨てる
+                        stack.pop();
+                    } else if (top.indentLen === indentLen) {
+                        // 該当する階層が見つかったらインクリメントして終了
+                        top.count++;
+                        break;
+                    } else {
+                        // スタックにあるどの階層よりも浅い（または中途半端な）インデントの場合
+                        // 新しい階層としてみなすか、最も近い親の下につけるか等の判断が必要だが
+                        // ここでは「親が見つからなかったので新しい兄弟」として扱う
+                         stack.push({ indentLen: indentLen, count: 1 });
+                        break;
+                    }
+                }
+                // もし全てpopしてしまった場合（ルートより浅い？ありえないが安全策）
+                if (stack.length === 0) {
+                    stack.push({ indentLen: indentLen, count: 1 });
+                }
+            }
+        }
+
+        // B. 正しい番号文字列の生成 (例: [1, 2, 1] -> "1-2-1")
+        const expectedNumStr = stack.map(s => s.count).join('-');
+
+        // C. 不整合があれば修正リストに追加
+        if (currentNumStr !== expectedNumStr) {
+            const numStart = line.from + indentStr.length;
+            const numEnd = numStart + currentNumStr.length;
+            changesSpec.push({
+                from: numStart,
+                to: numEnd,
+                insert: expectedNumStr
+            });
+        }
+    }
+
+    // 5. 修正を実行
+    if (changesSpec.length > 0) {
+        dispatch({ 
+            changes: changesSpec, 
+            annotations: ExternalChange.of(true) 
+        });
+    }
+}
 
 const handleListIndent = (view) => {
     const { state, dispatch } = view;
@@ -1380,7 +1639,7 @@ const handleListNavigationLeft = (view) => {
 
     // 現在の行がリスト形式かどうか判定 (既存の定数 LIST_RE を使用)
     const match = text.match(LIST_RE);
-    
+
     if (match) {
         // マーカー部分の長さ（インデント + 記号 + スペース）
         const markerLength = match[0].length;
@@ -1412,21 +1671,21 @@ const handleListNavigationRight = (view) => {
 
     const head = selection.head;
     const line = state.doc.lineAt(head);
-    
+
     // カーソルが行末にある場合
     if (head === line.to) {
         // 最終行でなければ
         if (line.number < state.doc.lines) {
             const nextLine = state.doc.line(line.number + 1);
             const nextText = nextLine.text;
-            
+
             // 次の行がリストかどうか判定
             const match = nextText.match(LIST_RE);
             if (match) {
                 // 次の行の「文章の開始位置」へジャンプ
                 const markerLength = match[0].length;
                 const targetPos = nextLine.from + markerLength;
-                
+
                 dispatch({
                     selection: { anchor: targetPos, head: targetPos },
                     scrollIntoView: true
@@ -2000,18 +2259,18 @@ function getKeybindingsForCommand(commandId) {
 
 // キーマップを動的に入れ替えるためのコンパートメント
 const keybindingsCompartment = new Compartment();
-// 現在の設定に基づいてキーマップ配列を生成するヘルパー関数 (配列対応版)
-function getCombinedKeymap() {
+// ファイルパスを受け取り、Markdownの場合のみリスト操作キーマップを含める
+function getCombinedKeymap(filePath = null) {
+    // 引数がなければ現在開いているパスを使用、それもなければデフォルト(Markdown扱い)
+    const targetPath = filePath || currentFilePath || 'default.md';
+    const isMarkdown = getPrismLanguageFromPath(targetPath) === 'markdown';
+
     const dynamicKeymap = [];
 
     // ユーザー設定のコマンド (COMMANDS_REGISTRY)
     COMMANDS_REGISTRY.filter(c => c.context === 'editor').forEach(cmd => {
-        // キー設定を配列で取得 (ヘルパーを使用)
         const keys = getKeybindingsForCommand(cmd.id);
-
-        // 配列内のすべてのキーを登録
         keys.forEach(key => {
-            // キーが有効な文字列である場合のみ登録
             if (key && typeof key === 'string') {
                 dynamicKeymap.push({
                     key: key,
@@ -2038,14 +2297,18 @@ function getCombinedKeymap() {
         }
     });
 
-    // リスト操作(Enter/Tab等)と結合
-    return [
-        ...dynamicKeymap,
-        ...obsidianLikeListKeymap
-    ];
+    // Markdownの場合のみ、リスト操作(Enter/Tab等)のキーマップを結合
+    if (isMarkdown) {
+        return [
+            ...dynamicKeymap,
+            ...obsidianLikeListKeymap
+        ];
+    } else {
+        return dynamicKeymap;
+    }
 }
 
-// Prism.jsを使ってコードブロックをハイライトするカスタムプラグイン
+// Prism.jsを使ってコードブロックまたはファイル全体をハイライトするカスタムプラグイン
 const prismHighlightPlugin = ViewPlugin.fromClass(class {
     constructor(view) {
         this.decorations = this.getPrismDecorations(view);
@@ -2061,75 +2324,111 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
     getPrismDecorations(view) {
         const builder = new RangeSetBuilder();
         const doc = view.state.doc;
-
-        // 構文解析ツリーを利用
-        const { syntaxTree } = require("@codemirror/language");
+        const currentLang = view.state.field(currentLanguageField);
 
         // Prism本体が読み込まれているかチェック
         if (typeof Prism === 'undefined') return builder.finish();
+
+        // 構文解析ツリーを利用 (Markdown用)
+        const { syntaxTree } = require("@codemirror/language");
+
+        // ★ ケース1: Markdown以外の場合（ファイル全体をハイライト）
+        if (currentLang !== 'markdown') {
+            const grammar = Prism.languages[currentLang];
+            if (!grammar) {
+                // 言語定義がない場合はAutoloaderで読み込みを試みる
+                if (currentLang && Prism.plugins && Prism.plugins.autoloader) {
+                    try {
+                        Prism.plugins.autoloader.loadLanguages(currentLang, () => {
+                            view.dispatch({}); // 再描画トリガー
+                        });
+                    } catch (e) { }
+                }
+                return builder.finish();
+            }
+
+            const text = doc.toString();
+            // 全体をトークン化
+            const tokens = Prism.tokenize(text, grammar);
+
+            let pos = 0;
+            const processToken = (token) => {
+                if (typeof token === "string") {
+                    pos += token.length;
+                } else {
+                    const content = token.content;
+                    if (Array.isArray(content)) {
+                        content.forEach(processToken);
+                    } else {
+                        const type = token.type;
+                        const alias = token.alias || "";
+                        const className = `token ${type} ${alias}`;
+                        const len = token.length;
+                        builder.add(pos, pos + len, Decoration.mark({ class: className }));
+                        pos += len;
+                    }
+                }
+            };
+
+            if (Array.isArray(tokens)) {
+                tokens.forEach(processToken);
+            }
+
+            return builder.finish();
+        }
+
+        // ★ ケース2: Markdownの場合（コードブロックのみハイライト）
+        const processed = new Set();
 
         for (const { from, to } of view.visibleRanges) {
             syntaxTree(view.state).iterate({
                 from,
                 to,
                 enter: (node) => {
-                    // コードブロック(FencedCode)を見つけた場合
                     if (node.name === "FencedCode") {
+                        if (processed.has(node.from)) return;
+                        processed.add(node.from);
+
                         const line = doc.lineAt(node.from);
-                        // 言語名を取得 (例: ```javascript の "javascript" 部分)
                         const match = line.text.match(/^(\s*`{3,})([\w-]*)/);
                         if (!match) return;
 
                         let langName = match[2].toLowerCase();
 
-                        // Prism用に言語名のエイリアス対応 (代表的なもの)
+                        // 言語名の正規化 (Prism用)
                         const langMap = {
                             'js': 'javascript', 'ts': 'typescript', 'py': 'python',
                             'sh': 'bash', 'zsh': 'bash', 'shell': 'bash',
                             'rb': 'ruby', 'cs': 'csharp', 'kt': 'kotlin',
                             'rs': 'rust', 'go': 'go', 'md': 'markdown',
                             'html': 'markup', 'xml': 'markup', 'svg': 'markup',
-                            'c++': 'cpp',
-                            'bf': 'brainfuck'
+                            'c': 'c', 'cpp': 'cpp', 'bf': 'brainfuck'
                         };
                         if (langMap[langName]) langName = langMap[langName];
 
-                        // その言語の文法定義がロードされているか確認
-                        const grammar = Prism.languages[langName];
+                        if (['whitespace', 'ws'].includes(langName)) return;
 
-                        // 文法が未ロードの場合、Autoloaderを使って読み込む
+                        const grammar = Prism.languages[langName];
                         if (!grammar) {
                             if (langName && Prism.plugins && Prism.plugins.autoloader) {
                                 try {
-                                    // 読み込みリクエスト (非同期)
-                                    // 既に読み込み中の場合はPrismが適切に無視または待機してくれます
                                     Prism.plugins.autoloader.loadLanguages(langName, () => {
-                                        // 【重要】読み込み完了後、画面を更新するために空の変更を通知する
-                                        // これにより update() が呼ばれ、ハイライトが適用されます
                                         view.dispatch({});
                                     });
-                                } catch (e) {
-                                    // 未知の言語などでエラーが出ても無視する
-                                }
+                                } catch (e) { }
                             }
-                            return; // ロード待ちのため今回はハイライトなし
+                            return;
                         }
 
-                        // コードブロックの中身の範囲を特定
                         const startLine = doc.lineAt(node.from).number;
                         const endLine = doc.lineAt(node.to).number;
-
-                        // 中身がない場合はスキップ
                         if (startLine >= endLine - 1) return;
 
                         const bodyStart = doc.line(startLine + 1).from;
                         const bodyEnd = doc.line(endLine - 1).to;
                         const code = doc.sliceString(bodyStart, bodyEnd);
-
-                        // Prismでトークン化（字句解析）
                         const tokens = Prism.tokenize(code, grammar);
 
-                        // トークンをCodeMirrorのデコレーションに変換
                         let pos = bodyStart;
                         const addDeco = (token) => {
                             if (typeof token === "string") {
@@ -2137,14 +2436,10 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
                             } else {
                                 const type = token.type;
                                 const alias = token.alias || "";
-                                // CSSクラス名はPrism標準テーマに合わせる ("token keyword" 等)
                                 const className = `token ${type} ${alias}`;
-
                                 if (Array.isArray(token.content)) {
-                                    // ネストされたトークンがある場合は再帰的に処理
                                     token.content.forEach(t => addDeco(t));
                                 } else {
-                                    // 実際のハイライト適用
                                     builder.add(pos, pos + token.length, Decoration.mark({ class: className }));
                                     pos += token.length;
                                 }
@@ -2164,6 +2459,7 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
     decorations: v => v.decorations
 });
 
+// getCombinedKeymapにfilePathを渡すように修正
 function createEditorState(content, filePath) {
     const initialTheme = appSettings.theme === 'dark' ? oneDark : [];
     const initialStyle = EditorView.theme({
@@ -2190,9 +2486,8 @@ function createEditorState(content, filePath) {
             tabSizeCompartment.of(EditorState.tabSize.of(appSettings.tabSize)),
             lineWrappingCompartment.of(appSettings.wordWrap ? EditorView.lineWrapping : []),
 
-            // コンパートメントを使って動的キーマップを適用
-            // これにより、後から reconfigure でキー設定だけを即座に入れ替え可能になります
-            keybindingsCompartment.of(Prec.highest(keymap.of(getCombinedKeymap()))),
+            // filePathを渡して、ファイルタイプに応じたキーマップを生成
+            keybindingsCompartment.of(Prec.highest(keymap.of(getCombinedKeymap(filePath)))),
 
             pasteHandler,
             dropHandler,
@@ -2213,8 +2508,16 @@ function createEditorState(content, filePath) {
 
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
+                    // プログラムによる変更かどうかをチェック
                     const isExternal = update.transactions.some(tr => tr.annotation(ExternalChange));
+
+                    // 外部変更でなければ、入力イベントとして処理（保存フラグなど）
                     onEditorInput(!isExternal);
+
+                    // ユーザー操作による変更なら、リスト番号の自動修正を実行
+                    if (!isExternal) {
+                        handleListRenumbering(update.view, update.changes);
+                    }
                 }
             })
         ]
@@ -3534,15 +3837,13 @@ function updateTerminalVisibility() {
         const currentHeight = bottomPane.style.height || '200px';
         const heightVal = parseInt(currentHeight);
 
-        centerPane.style.marginBottom = (heightVal + statusBarHeight) + 'px';
+        centerPane.style.marginBottom = heightVal + 'px';
 
     } else {
         bottomPane.classList.add('hidden');
         if (resizerBottom) resizerBottom.classList.add('hidden');
 
-        // 非表示の場合、ステータスバーが表示されていればステータスバーの高さだけマージンを確保
-        const statusBarHeight = appSettings.showStatusBar ? 24 : 0;
-        centerPane.style.marginBottom = `${statusBarHeight}px`;
+        centerPane.style.marginBottom = '0px';
     }
 
     const tabsContainer = document.getElementById('terminal-tabs-container');
@@ -3815,66 +4116,99 @@ async function generatePdfPreview() {
 }
 
 async function processMarkdownForExport(markdown) {
-    let processed = markdown.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+    let processed = markdown;
 
+    // 1. LaTeX Block ($$...$$) のレンダリング
+    // KaTeXを使ってHTML文字列に変換します
+    processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (match, tex) => {
+        try {
+            if (window.katex) {
+                return window.katex.renderToString(tex, {
+                    displayMode: true,
+                    throwOnError: false
+                });
+            }
+            return match;
+        } catch (e) {
+            console.error(e);
+            return match;
+        }
+    });
+
+    // 2. LaTeX Inline ($...$) のレンダリング
+    processed = processed.replace(/(?<!\$)\$(?!\$)([^$\n]+?)(?<!\$)\$(?!\$)/g, (match, tex) => {
+        try {
+            if (window.katex) {
+                return window.katex.renderToString(tex, {
+                    displayMode: false,
+                    throwOnError: false
+                });
+            }
+            return match;
+        } catch (e) {
+            return match;
+        }
+    });
+
+    // 3. ハイライト (==text==)
+    processed = processed.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+
+    // 4. リストのネスト用インデント調整
     processed = processed.replace(/^(\s+)(\d+(?:-\d+)+\.)/gm, (match, indent, marker) => {
         return '&nbsp;'.repeat(indent.length) + marker;
     });
 
+    // 5. ブックマーク (@card URL) のHTML化
     const bookmarkRegex = /^@card\s+(https?:\/\/[^\s]+)$/gm;
     const matches = [...processed.matchAll(bookmarkRegex)];
 
-    if (matches.length === 0) return processed;
+    if (matches.length > 0) {
+        const replacements = await Promise.all(matches.map(async (match) => {
+            const url = match[1];
+            let data = null;
 
-    const replacements = await Promise.all(matches.map(async (match) => {
-        const url = match[1];
-        let data = null;
+            if (!window.pdfMetadataCache) window.pdfMetadataCache = new Map();
 
-        if (!window.pdfMetadataCache) window.pdfMetadataCache = new Map();
-
-        if (window.pdfMetadataCache.has(url)) {
-            data = window.pdfMetadataCache.get(url);
-        } else {
-            try {
-                const result = await window.electronAPI.fetchUrlMetadata(url);
-                if (result.success) {
-                    data = result.data;
-                    window.pdfMetadataCache.set(url, data);
+            if (window.pdfMetadataCache.has(url)) {
+                data = window.pdfMetadataCache.get(url);
+            } else {
+                try {
+                    const result = await window.electronAPI.fetchUrlMetadata(url);
+                    if (result.success) {
+                        data = result.data;
+                        window.pdfMetadataCache.set(url, data);
+                    }
+                } catch (e) {
+                    console.error(e);
                 }
-            } catch (e) {
-                console.error(e);
             }
+
+            if (!data) {
+                return {
+                    original: match[0],
+                    replacement: `<div class="cm-bookmark-widget"><div class="cm-bookmark-content"><div class="cm-bookmark-title"><a href="${url}">${url}</a></div></div></div>`
+                };
+            }
+
+            const faviconUrl = `https://www.google.com/s2/favicons?domain=${data.domain}&sz=32`;
+            const html = `<div class="cm-bookmark-widget">
+                <div class="cm-bookmark-content">
+                    <div class="cm-bookmark-title">${data.title}</div>
+                    <div class="cm-bookmark-desc">${data.description}</div>
+                    <div class="cm-bookmark-meta">
+                        <img src="${faviconUrl}" class="cm-bookmark-favicon">
+                        <span class="cm-bookmark-domain">${data.domain}</span>
+                    </div>
+                </div>
+                ${data.image ? `<div class="cm-bookmark-cover"><img src="${data.image}" class="cm-bookmark-image"></div>` : ''}
+            </div>`;
+
+            return { original: match[0], replacement: html };
+        }));
+
+        for (const item of replacements) {
+            processed = processed.replaceAll(item.original, item.replacement);
         }
-
-        if (!data) {
-            return {
-                original: match[0],
-                replacement: `<div class="cm-bookmark-widget"><div class="cm-bookmark-content"><div class="cm-bookmark-title"><a href="${url}">${url}</a></div></div></div>`
-            };
-        }
-
-        const faviconUrl = `https://www.google.com/s2/favicons?domain=${data.domain}&sz=32`;
-
-        const html = `<a href="${data.url}" class="cm-bookmark-widget" target="_blank" rel="noopener noreferrer">
-    <div class="cm-bookmark-content">
-        <div class="cm-bookmark-title">${data.title}</div>
-        <div class="cm-bookmark-desc">${data.description}</div>
-        <div class="cm-bookmark-meta">
-            <img src="${faviconUrl}" class="cm-bookmark-favicon">
-            <span class="cm-bookmark-domain">${data.domain}</span>
-        </div>
-    </div>
-    ${data.image ? `<div class="cm-bookmark-cover"><img src="${data.image}" class="cm-bookmark-image"></div>` : ''}
-</a>`;
-
-        return {
-            original: match[0],
-            replacement: html
-        };
-    }));
-
-    for (const item of replacements) {
-        processed = processed.replaceAll(item.original, item.replacement);
     }
 
     return processed;
@@ -6847,8 +7181,24 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
 
         // ▼ 仮想ファイル（新規作成）または「名前を付けて保存」の場合
         if ((fileData && fileData.isVirtual) || isSaveAs) {
+
+            // ★修正: 保存場所の自動判別ロジック
+            let defaultSavePath = fileData ? fileData.fileName : 'Untitled.md';
+
+            // 左側のツリーでフォルダを開いている場合は、そのフォルダ直下をデフォルトにする
+            if (currentDirectoryPath && currentDirectoryPath !== '.') {
+                try {
+                    // ディレクトリパスとファイル名を結合して絶対パスにする
+                    defaultSavePath = path.join(currentDirectoryPath, defaultSavePath);
+                } catch (e) {
+                    console.warn("Path join failed, using filename only:", e);
+                }
+            }
+            // フォルダを開いていない場合（currentDirectoryPath が null または '.'）は
+            // ファイル名のみのままにしておく -> main.js 側で markdown_vault が付与される
+
             const result = await window.electronAPI.showSaveDialog({
-                defaultPath: fileData ? fileData.fileName : 'Untitled.md'
+                defaultPath: defaultSavePath
             });
 
             if (result.canceled || !result.filePath) return;
@@ -7854,7 +8204,7 @@ const ContextMenu = {
             // 通常の項目の場合
             const div = document.createElement('div');
             div.className = 'context-menu-item';
-            
+
             // ラベル
             const labelSpan = document.createElement('span');
             labelSpan.textContent = item.label;
@@ -7898,21 +8248,27 @@ const ContextMenu = {
 // 1. ファイルツリーの項目メニュー
 function showContextMenu(x, y, itemPath, name) {
     ContextMenu.show(x, y, [
-        { label: '名前の変更', click: () => {
-            const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(itemPath)}"]`);
-            if (treeItem) startRenaming(treeItem);
-        }},
+        {
+            label: '名前の変更', click: () => {
+                const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(itemPath)}"]`);
+                if (treeItem) startRenaming(treeItem);
+            }
+        },
         { label: '削除', click: () => confirmAndDelete(itemPath) },
         { type: 'separator' },
-        { label: '相対パスをコピー', click: () => {
-            const relPath = path.relative(currentDirectoryPath, itemPath);
-            navigator.clipboard.writeText(relPath);
-            showNotification('相対パスをコピーしました', 'success');
-        }},
-        { label: '絶対パスをコピー', click: () => {
-            navigator.clipboard.writeText(itemPath);
-            showNotification('絶対パスをコピーしました', 'success');
-        }},
+        {
+            label: '相対パスをコピー', click: () => {
+                const relPath = path.relative(currentDirectoryPath, itemPath);
+                navigator.clipboard.writeText(relPath);
+                showNotification('相対パスをコピーしました', 'success');
+            }
+        },
+        {
+            label: '絶対パスをコピー', click: () => {
+                navigator.clipboard.writeText(itemPath);
+                showNotification('絶対パスをコピーしました', 'success');
+            }
+        },
         { label: 'エクスプローラーで表示', click: () => window.electronAPI.showItemInFolder(itemPath) }
     ]);
 }
@@ -7923,14 +8279,18 @@ function showEmptySpaceContextMenu(x, y) {
         { label: '新規ファイル', click: () => showCreationInput(false) },
         { label: '新規フォルダ', click: () => showCreationInput(true) },
         { type: 'separator' },
-        { label: '相対パスをコピー', click: () => {
-            navigator.clipboard.writeText('.');
-            showNotification('相対パス(.)をコピーしました', 'success');
-        }},
-        { label: '絶対パスをコピー', click: () => {
-            navigator.clipboard.writeText(currentDirectoryPath);
-            showNotification('絶対パスをコピーしました', 'success');
-        }},
+        {
+            label: '相対パスをコピー', click: () => {
+                navigator.clipboard.writeText('.');
+                showNotification('相対パス(.)をコピーしました', 'success');
+            }
+        },
+        {
+            label: '絶対パスをコピー', click: () => {
+                navigator.clipboard.writeText(currentDirectoryPath);
+                showNotification('絶対パスをコピーしました', 'success');
+            }
+        },
         { label: 'エクスプローラーで開く', click: () => window.electronAPI.openPath(currentDirectoryPath) }
     ]);
 }
@@ -7948,7 +8308,7 @@ function showEditorContextMenu(x, y) {
     const createItem = (label, onClick, shortcut = "") => {
         const item = document.createElement('div');
         item.className = 'context-menu-item';
-        
+
         const labelSpan = document.createElement('span');
         labelSpan.textContent = label;
         item.appendChild(labelSpan);
@@ -7975,21 +8335,21 @@ function showEditorContextMenu(x, y) {
         const item = document.createElement('div');
         item.className = 'context-menu-item';
         item.innerHTML = `<span>${label}</span><span class="submenu-arrow">▶</span>`;
-        
+
         const submenu = document.createElement('div');
         submenu.className = 'context-submenu';
-        
+
         subItems.forEach(sub => {
             const subItem = document.createElement('div');
             subItem.className = 'context-menu-item';
-            
+
             // 色プレビューがあれば表示
             let contentHtml = '';
             if (sub.color) {
                 contentHtml += `<span class="color-preview-dot" style="background-color: ${sub.color};"></span>`;
             }
             contentHtml += `<span>${sub.label}</span>`;
-            
+
             subItem.innerHTML = contentHtml;
             subItem.style.display = 'flex';
             subItem.style.alignItems = 'center';
@@ -8003,7 +8363,7 @@ function showEditorContextMenu(x, y) {
             });
             submenu.appendChild(subItem);
         });
-        
+
         item.appendChild(submenu);
         return item;
     };
@@ -8038,7 +8398,7 @@ function showEditorContextMenu(x, y) {
         try {
             const text = await navigator.clipboard.readText();
             if (text) globalEditorView.dispatch(globalEditorView.state.replaceSelection(text));
-        } catch(e) {}
+        } catch (e) { }
     }, 'Ctrl+V'));
 
     menu.appendChild(createSeparator());
@@ -8072,50 +8432,58 @@ function showEditorContextMenu(x, y) {
 // 4. Git履歴のメニュー
 function showCommitContextMenu(x, y, commit) {
     ContextMenu.show(x, y, [
-        { label: 'このコミットをチェックアウト', click: async () => {
-            showNotification(`コミット ${commit.oid.substring(0, 7)} をチェックアウト中...`, 'info');
-            try {
-                const result = await window.electronAPI.gitCheckout(currentDirectoryPath, commit.oid);
-                if (result.success) {
-                    showNotification('チェックアウト完了', 'success');
-                    refreshGitStatus();
-                    initializeFileTreeWithState();
-                } else {
-                    showNotification(`エラー: ${result.error}`, 'error');
-                }
-            } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
-        }},
-        { type: 'separator' },
-        { label: '現在のブランチをここにリセット (Hard)', click: () => {
-            const message = `コミット ${commit.oid.substring(0, 7)} へ強制的にリセットしますか？ (変更は破棄されます)`;
-            showCompactConfirmModal(message, async () => {
+        {
+            label: 'このコミットをチェックアウト', click: async () => {
+                showNotification(`コミット ${commit.oid.substring(0, 7)} をチェックアウト中...`, 'info');
                 try {
-                    const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
+                    const result = await window.electronAPI.gitCheckout(currentDirectoryPath, commit.oid);
                     if (result.success) {
-                        showNotification('リセット完了', 'success');
+                        showNotification('チェックアウト完了', 'success');
                         refreshGitStatus();
                         initializeFileTreeWithState();
-                    } else { showNotification(`エラー: ${result.error}`, 'error'); }
+                    } else {
+                        showNotification(`エラー: ${result.error}`, 'error');
+                    }
                 } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
-            });
-        }},
-        { label: 'このコミットを打ち消し (Revert)', click: () => {
-            const message = `コミット ${commit.oid.substring(0, 7)} を打ち消すコミットを作成しますか？`;
-            showCompactConfirmModal(message, async () => {
-                try {
-                    const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
-                    if (result.success) {
-                        showNotification('打ち消しコミットを作成しました', 'success');
-                        refreshGitStatus();
-                    } else { showNotification(`エラー: ${result.error}`, 'error'); }
-                } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
-            });
-        }},
+            }
+        },
         { type: 'separator' },
-        { label: 'コミットハッシュをコピー', click: () => {
-            navigator.clipboard.writeText(commit.oid);
-            showNotification('ハッシュをコピーしました', 'success');
-        }}
+        {
+            label: '現在のブランチをここにリセット (Hard)', click: () => {
+                const message = `コミット ${commit.oid.substring(0, 7)} へ強制的にリセットしますか？ (変更は破棄されます)`;
+                showCompactConfirmModal(message, async () => {
+                    try {
+                        const result = await window.electronAPI.gitResetHead(currentDirectoryPath, commit.oid);
+                        if (result.success) {
+                            showNotification('リセット完了', 'success');
+                            refreshGitStatus();
+                            initializeFileTreeWithState();
+                        } else { showNotification(`エラー: ${result.error}`, 'error'); }
+                    } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
+                });
+            }
+        },
+        {
+            label: 'このコミットを打ち消し (Revert)', click: () => {
+                const message = `コミット ${commit.oid.substring(0, 7)} を打ち消すコミットを作成しますか？`;
+                showCompactConfirmModal(message, async () => {
+                    try {
+                        const result = await window.electronAPI.gitRevertCommit(currentDirectoryPath, commit.oid);
+                        if (result.success) {
+                            showNotification('打ち消しコミットを作成しました', 'success');
+                            refreshGitStatus();
+                        } else { showNotification(`エラー: ${result.error}`, 'error'); }
+                    } catch (e) { showNotification(`エラー: ${e.message}`, 'error'); }
+                });
+            }
+        },
+        { type: 'separator' },
+        {
+            label: 'コミットハッシュをコピー', click: () => {
+                navigator.clipboard.writeText(commit.oid);
+                showNotification('ハッシュをコピーしました', 'success');
+            }
+        }
     ]);
 }
 

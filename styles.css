@@ -4119,3 +4119,110 @@ body[data-theme="dark"] .cm-table-cell-content code {
 .ͼ11 {
     color: white;
 }
+
+/* ========== Mermaid Mode Buttons ========== */
+.cm-mermaid-mode-group {
+    display: flex;
+    background-color: rgba(0, 0, 0, 0.05);
+    border-radius: 3px;
+    padding: 2px;
+    margin-left: 8px;
+    gap: 2px;
+}
+
+body[data-theme="dark"] .cm-mermaid-mode-group {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.cm-mermaid-mode-btn {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 2px;
+    line-height: 1.2;
+    transition: all 0.1s;
+    font-family: var(--editor-font-family);
+    user-select: none;
+}
+
+.cm-mermaid-mode-btn:hover {
+    color: var(--text-color);
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* アクティブなボタンのスタイル */
+.cm-mermaid-mode-btn.active {
+    background-color: var(--main-bg);
+    color: #007acc;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    font-weight: 600;
+}
+
+body[data-theme="dark"] .cm-mermaid-mode-btn {
+    color: #888;
+}
+
+body[data-theme="dark"] .cm-mermaid-mode-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ccc;
+}
+
+body[data-theme="dark"] .cm-mermaid-mode-btn.active {
+    background-color: #333;
+    color: #4daafc;
+}
+
+.cm-mermaid-preview {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    clear: both;
+}
+
+/* styles.css */
+.cm-mermaid-preview {
+    display: block;
+    width: 100%;
+    margin-top: 0;
+    clear: both;
+    padding: 10px;
+    background-color: var(--main-bg);
+    border: 1px solid var(--cb-border-color);
+    border-top: none; /* 上のヘッダーと繋げる */
+    border-bottom-left-radius: var(--cb-radius);
+    border-bottom-right-radius: var(--cb-radius);
+    box-sizing: border-box; /* パディングを含めたサイズ計算にする */
+}
+
+/* ダークモード時の調整（必要であれば） */
+body[data-theme="dark"] .cm-mermaid-preview {
+    border-color: var(--cb-border-color);
+}
+
+/* LaTeX Widget Styles */
+.cm-latex-widget {
+    display: inline-block;
+    vertical-align: middle;
+    cursor: pointer;
+}
+
+.cm-latex-block {
+    display: block;
+    text-align: center;
+    width: 100%;
+    min-height: 1em;
+    
+    margin: 0;       /* ★重要: 外側の余白をなくす（ズレの原因） */
+    padding: 10px 0; /* 代わりに内側に余白をつける */
+    
+    cursor: pointer; /* クリックできることを示すカーソル */
+    background-color: var(--main-bg); /* 背景色を明示（線が透けるのを防ぐ） */
+}
+
+/* ダークモード時の数式の色調整（必要に応じて） */
+body[data-theme="dark"] .katex {
+    color: #d4d4d4; 
+}
