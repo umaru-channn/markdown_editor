@@ -2996,7 +2996,7 @@ ipcMain.handle('auth-github', async () => {
     const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/auth/github`;
 
     // 1. ブラウザを開いてユーザーに許可を求める
-    const authUrl = `https://github.com/login/oauth/authorize?client_id=${CLIENT_ID}&scope=repo&redirect_uri=${REDIRECT_URI}`;
+    const authUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&scope=repo&redirect_uri=${REDIRECT_URI}`;
     shell.openExternal(authUrl);
 
     // 2. ローカルサーバーを立ててコールバックを待つ
