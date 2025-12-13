@@ -27,7 +27,7 @@
     "productName": "MarkdownIDE",
     "win": {
       "target": [
-        "nsis" 
+        "nsis"
       ],
       "icon": "icon.ico",
       "publish": [
@@ -78,6 +78,7 @@
     "@codemirror/language": "^6.0.0",
     "@codemirror/legacy-modes": "^6.4.0",
     "@codemirror/lint": "^6.0.0",
+    "@codemirror/merge": "^6.11.2",
     "@codemirror/search": "^6.0.0",
     "@codemirror/state": "^6.0.0",
     "@codemirror/theme-one-dark": "^6.0.0",

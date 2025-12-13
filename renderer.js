@@ -13,12 +13,13 @@ const path = require('path');
 const { webFrame } = require('electron');
 const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder, StateField } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration } = require("@codemirror/view");
-const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess, selectAll } = require("@codemirror/commands");
-const { syntaxHighlighting, defaultHighlightStyle, LanguageDescription, indentUnit, StreamLanguage, LanguageSupport } = require("@codemirror/language");
+const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
+const { syntaxHighlighting, defaultHighlightStyle, indentUnit } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
 const { closeBrackets } = require("@codemirror/autocomplete");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
 const { tablePlugin } = require("./tablePlugin.js");
+const { MergeView } = require("@codemirror/merge");
 
 // 言語パッケージのインポート（Modern）
 const { markdown, markdownLanguage } = require("@codemirror/lang-markdown");
@@ -152,6 +153,8 @@ let isRightActivityBarVisible = true;
 let isMaximized = false;
 let savedRightActivityBarState = true;
 let activeContextMenu = null;
+let globalDiffView = null; // Diffビューのインスタンス保持用
+let isDiffMode = false;    // 現在Diffモードかどうか
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -1132,7 +1135,7 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
         };
     }
 
-    // --- ★追加: 画像のカスタムレンダラー (サイズ指定とパス解決) ---
+    // --- 画像のカスタムレンダラー (サイズ指定とパス解決) ---
     renderer.image = (href, title, text) => {
         // 1. サイズ指定の解析 ![alt|100](src) -> width="100"
         let width = null;
@@ -2332,7 +2335,7 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
         // 構文解析ツリーを利用 (Markdown用)
         const { syntaxTree } = require("@codemirror/language");
 
-        // ★ ケース1: Markdown以外の場合（ファイル全体をハイライト）
+        // ケース1: Markdown以外の場合（ファイル全体をハイライト）
         if (currentLang !== 'markdown') {
             const grammar = Prism.languages[currentLang];
             if (!grammar) {
@@ -2377,7 +2380,7 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
             return builder.finish();
         }
 
-        // ★ ケース2: Markdownの場合（コードブロックのみハイライト）
+        // ケース2: Markdownの場合（コードブロックのみハイライト）
         const processed = new Set();
 
         for (const { from, to } of view.visibleRanges) {
@@ -4844,9 +4847,20 @@ function renderGitList(container, files, type) {
         // ファイルクリックで開く
         item.addEventListener('click', (e) => {
             if (e.target.closest('.git-action-btn-small')) return;
-            const separator = currentDirectoryPath.includes('\\') ? '\\' : '/';
-            const fullPath = currentDirectoryPath + (currentDirectoryPath.endsWith(separator) ? '' : separator) + file.filepath;
-            openFile(fullPath, fileName);
+
+            // Unstaged（変更）の場合はDiffビューを開く
+            if (type === 'unstaged' && file.status === 'modified') {
+                openDiffView(file.filepath);
+            } else {
+                // 新規ファイル(new)や削除(deleted)、Stagedの場合は通常通り開く（または何もしない）
+                const separator = currentDirectoryPath.includes('\\') ? '\\' : '/';
+                const fullPath = currentDirectoryPath + (currentDirectoryPath.endsWith(separator) ? '' : separator) + file.filepath;
+
+                // 削除されたファイルでなければ開く
+                if (file.status !== 'deleted') {
+                    openFile(fullPath, fileName);
+                }
+            }
         });
 
         // アクションボタンクリック
@@ -6641,22 +6655,45 @@ window.addEventListener('load', async () => {
     // アプリ起動時にステータスバーのGit情報を更新
     updateStatusBarGitInfo();
 
+    // ファイルシステムの変更を監視
     if (typeof window.electronAPI?.onFileSystemChanged === 'function') {
         window.electronAPI.onFileSystemChanged((payload) => {
-            console.log('File system change detected:', payload);
+            // 1. ファイルツリーの更新 (既存ロジック)
             if (window.fileTreeUpdateTimeout) clearTimeout(window.fileTreeUpdateTimeout);
             window.fileTreeUpdateTimeout = setTimeout(() => {
                 initializeFileTreeWithState();
-
-                // Gitパネルが表示されている場合はGitステータスも更新
-                // const gitContent = document.getElementById('content-git');
-                // if (gitContent && !gitContent.classList.contains('content-hidden')) {
-                //     if (typeof refreshGitStatus === 'function') refreshGitStatus();
-                // }
                 if (typeof refreshGitStatus === 'function') {
                     refreshGitStatus();
                 }
             }, 500);
+
+            // 2. ★追加: 現在開いているファイルの自動再読み込み判定
+            // (renameイベントはファイル消失の可能性があるため、changeイベントのみ対象とするのが安全ですが、
+            //  エディタによっては保存時に rename -> change の順で走ることもあるため、
+            //  ここではファイルが存在するか確認してから処理します)
+            if (currentFilePath && payload.filename) {
+                // パスの正規化と判定
+                // fs.watchのfilenameは、監視ルートからの相対パスの場合が多い
+                let changedFullPath = payload.filename;
+
+                // 絶対パスでない場合、カレントディレクトリと結合して絶対パス化を試みる
+                if (!path.isAbsolute(payload.filename) && currentDirectoryPath) {
+                    changedFullPath = path.join(currentDirectoryPath, payload.filename);
+                }
+
+                // パス区切り文字の正規化 (Windows対策)
+                const normalizedCurrent = currentFilePath.replace(/\\/g, '/');
+                const normalizedChanged = changedFullPath.replace(/\\/g, '/');
+
+                // 現在開いているファイルと一致する場合
+                if (normalizedCurrent === normalizedChanged) {
+                    // デバウンス処理 (短時間の連続発火を防ぐ)
+                    if (window.activeFileReloadTimeout) clearTimeout(window.activeFileReloadTimeout);
+                    window.activeFileReloadTimeout = setTimeout(() => {
+                        checkExternalFileChange(currentFilePath);
+                    }, 600); // ツリー更新より少し遅らせて実行
+                }
+            }
         });
     }
 
@@ -6997,6 +7034,67 @@ async function renderMediaContent(filePath, type) {
     }
 }
 
+/**
+ * Git Diffビューを新しいタブで開く関数
+ * @param {string} filePath - リポジトリルートからの相対パス
+ */
+async function openDiffView(filePath) {
+    if (!currentDirectoryPath) return;
+
+    // 1. Diff用の仮想パスを作成
+    const diffPath = `DIFF://${filePath}`;
+
+    // 2. 既に開いている場合はそのタブに切り替え
+    if (openedFiles.has(diffPath)) {
+        switchToFile(diffPath);
+        return;
+    }
+
+    try {
+        // 3. データ取得 (HEAD vs Local)
+        // A: HEADの内容 (Original / Left)
+        const headResult = await window.electronAPI.gitShow(currentDirectoryPath, 'HEAD', filePath);
+        const headContent = headResult.success ? headResult.content : "";
+
+        // B: ワーキングツリーの内容 (Modified / Right)
+        const absolutePath = path.join(currentDirectoryPath, filePath);
+        let localContent = "";
+        try {
+            localContent = await window.electronAPI.loadFile(absolutePath);
+        } catch (e) {
+            localContent = "";
+        }
+
+        const fileName = path.basename(filePath);
+        const tabName = `Diff: ${fileName}`;
+
+        // 4. 仮想ファイルとして登録
+        openedFiles.set(diffPath, {
+            type: 'diff', // 新しいタイプ
+            fileName: tabName,
+            content: localContent, // 保存用に現在の内容を保持
+            headContent: headContent, // 比較用
+            originalPath: absolutePath, // 上書き保存先
+            isVirtual: true
+        });
+
+        // 5. タブを作成
+        const tab = document.createElement('div');
+        tab.className = 'tab';
+        tab.dataset.filepath = diffPath;
+        // 閉じるボタン付きのタブHTML
+        tab.innerHTML = `<span class="tab-filename">${tabName}</span> <span class="close-tab" data-filepath="${diffPath}">×</span>`;
+        editorTabsContainer.appendChild(tab);
+
+        // 6. そのタブを開く
+        switchToFile(diffPath);
+
+    } catch (e) {
+        console.error('Failed to open diff view:', e);
+        showNotification(`Diff表示エラー: ${e.message}`, 'error');
+    }
+}
+
 async function openFile(filePath, fileName) {
     // パスを正規化して統一
     const normalizedPath = path.resolve(filePath);
@@ -7096,6 +7194,27 @@ function switchToFile(filePath) {
     // 古いパスを保存
     const previouslyActivePath = currentFilePath;
 
+    // --- 【追加】Diffビューからの切り替え時のクリーンアップ ---
+    if (globalDiffView) {
+        // Diffビューを破棄してエディタをクリア
+        const editorEl = document.getElementById('editor');
+        if (editorEl) {
+            editorEl.innerHTML = '';
+            // Flex設定を解除してブロック要素に戻す（重要）
+            editorEl.style.display = 'block';
+            editorEl.style.flexDirection = '';
+            editorEl.style.overflow = '';
+        }
+
+        globalDiffView = null;
+        isDiffMode = false;
+
+        // 通常のエディタ(globalEditorView)も再作成が必要になるため破棄
+        globalEditorView = null;
+        initEditor(); // 再初期化
+    }
+    // -------------------------------------------------------
+
     // ファイル切り替え時に古いファイルの自動保存タイマーをクリア
     if (autoSaveTimer) {
         clearTimeout(autoSaveTimer);
@@ -7105,28 +7224,18 @@ function switchToFile(filePath) {
     // 1. 現在開いているファイルの状態を保存する (テキストファイルの場合のみ)
     if (previouslyActivePath && globalEditorView && openedFiles.has(previouslyActivePath)) {
         const currentFileData = openedFiles.get(previouslyActivePath);
-        // typeが'text'または未定義の場合のみ保存
         if (!currentFileData.type || currentFileData.type === 'text') {
             currentFileData.editorState = globalEditorView.state;
             currentFileData.content = globalEditorView.state.doc.toString();
         }
     }
 
-    // 2. 新しいファイル情報取得
-    const fileDataForCheck = openedFiles.get(filePath);
-    const fileTypeForCheck = fileDataForCheck ? (fileDataForCheck.type || 'text') : getFileType(filePath);
-
-    // 既にアクティブなメディアファイルが再度クリックされた場合は、重い処理をスキップ
-    if (filePath === previouslyActivePath && fileTypeForCheck !== 'text') {
-        return;
-    }
-
-    // 3. パスを更新し、処理を継続
+    // 2. パスを更新
     currentFilePath = filePath;
     const fileData = openedFiles.get(filePath);
-    const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
 
-    // 仮想的なREADME.mdかどうかを判定する
+    // タイプ判定 (diffタイプを追加)
+    const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
     const isVirtualReadme = fileData && fileData.isVirtual === true;
 
     // DOM要素取得
@@ -7139,29 +7248,104 @@ function switchToFile(filePath) {
     // 親コンテナを表示
     switchMainView('content-readme');
 
-    // --- ビューの切り替え ---
-    if (fileType === 'text') {
-        // テキストモード
+    // Diffモードの処理
+    if (fileType === 'diff') {
+        if (editorEl) {
+            editorEl.style.display = 'flex'; // Flexboxにして高さを確保
+            editorEl.style.flexDirection = 'column';
+            editorEl.style.overflow = 'hidden';
+        }
+        if (mediaViewEl) mediaViewEl.classList.add('hidden');
+        if (toolbar) toolbar.classList.add('hidden'); // Diff時はツールバーを隠す
+        if (fileTitleBarEl) fileTitleBarEl.classList.add('hidden');
 
+        // コンテナクリア
+        editorEl.innerHTML = '';
+        isDiffMode = true;
+
+        // CodeMirrorの拡張機能セット (カーソル・行番号・キー操作を有効化)
+        const extensions = [
+            EditorView.lineWrapping,
+            syntaxHighlighting(defaultHighlightStyle),
+            appSettings.theme === 'dark' ? oneDark : [],
+            lineNumbers(),           // 行番号
+            highlightActiveLine(),   // 現在行ハイライト
+            drawSelection(),         // 選択範囲の描画
+            dropCursor(),            // ドラッグ時のカーソル
+            history(),               // Undo/Redo
+            keymap.of([...defaultKeymap, ...historyKeymap]), // キーボードショートカット
+
+            // テーマ設定 (高さ100%確保と差分色調整)
+            EditorView.theme({
+                "&": { height: "100%" },
+                ".cm-scroller": { overflow: "auto" },
+                ".cm-gutters": {
+                    backgroundColor: "var(--sidebar-bg)",
+                    borderRight: "1px solid var(--sidebar-border)",
+                    color: "var(--text-color)",
+                    minWidth: "30px"
+                },
+                ".cm-merge-a .cm-changedLine": { backgroundColor: "rgba(200, 50, 50, 0.1)" },
+                ".cm-merge-b .cm-changedLine": { backgroundColor: "rgba(50, 200, 50, 0.1)" }
+            })
+        ];
+
+        // シンタックスハイライト用
+        if (fileData.originalPath) {
+            const langExt = getLanguageExtensions(fileData.originalPath);
+            if (langExt) extensions.push(langExt);
+        }
+
+        // MergeView (Diffエディタ) の生成
+        globalDiffView = new MergeView({
+            a: {
+                doc: fileData.headContent || "",
+                extensions: [
+                    ...extensions,
+                    EditorView.editable.of(false), // 左側(HEAD)は編集不可
+                    EditorState.readOnly.of(true)
+                ]
+            },
+            b: {
+                doc: fileData.content || "",
+                extensions: [
+                    ...extensions,
+                    // 右側(Local)が変更されたら保存用データを更新
+                    EditorView.updateListener.of(update => {
+                        if (update.docChanged) {
+                            fileData.content = update.state.doc.toString();
+                        }
+                    })
+                ]
+            },
+            parent: editorEl,
+            orientation: "a-b", // 左右分割
+            gutter: true,
+            highlightChanges: true
+        });
+
+        // タイトルバー更新
+        if (fileTitleInput) fileTitleInput.value = fileData.fileName;
+        document.title = fileData.fileName;
+
+        return; // Diffモードの処理終了
+    }
+
+    // --- 通常モード (Text / Image) ---
+    isDiffMode = false;
+
+    if (fileType === 'text') {
         if (editorEl) editorEl.style.display = 'block';
         if (mediaViewEl) mediaViewEl.classList.add('hidden');
 
-        // ツールバーは設定がONの場合のみ表示
         if (toolbar) {
-            if (appSettings.showToolbar) {
-                toolbar.classList.remove('hidden');
-            } else {
-                toolbar.classList.add('hidden');
-            }
+            if (appSettings.showToolbar) toolbar.classList.remove('hidden');
+            else toolbar.classList.add('hidden');
         }
 
-        // 仮想README.mdの場合、または設定がOFFの場合はタイトルバーを非表示
         if (fileTitleBarEl) {
-            if (isVirtualReadme || !appSettings.showFileTitleBar) {
-                fileTitleBarEl.classList.add('hidden');
-            } else {
-                fileTitleBarEl.classList.remove('hidden');
-            }
+            if (isVirtualReadme || !appSettings.showFileTitleBar) fileTitleBarEl.classList.add('hidden');
+            else fileTitleBarEl.classList.remove('hidden');
         }
 
         // エディタの状態復元
@@ -7175,21 +7359,17 @@ function switchToFile(filePath) {
             }
         }
     } else {
-        // メディアモード (画像/PDF)
+        // メディアモード
         if (editorEl) editorEl.style.display = 'none';
         if (mediaViewEl) mediaViewEl.classList.remove('hidden');
-        if (toolbar) toolbar.classList.add('hidden'); // ツールバー非表示
-        if (searchWidget) searchWidget.classList.add('hidden'); // 検索窓非表示
-
-        // メディアファイルの場合はタイトルバーを隠す
+        if (toolbar) toolbar.classList.add('hidden');
+        if (searchWidget) searchWidget.classList.add('hidden');
         if (fileTitleBarEl) fileTitleBarEl.classList.add('hidden');
 
-        // メディア描画
         renderMediaContent(filePath, fileType);
     }
 
-    // --- UI更新処理 ---
-    // 仮想README.mdではないテキストファイルの場合のみタイトル入力欄を更新
+    // UI更新処理
     if (fileType === 'text' && !isVirtualReadme && fileTitleInput) {
         const fileName = fileData ? fileData.fileName : filePath.split(/[\/\\]/).pop();
         const extIndex = fileName.lastIndexOf('.');
@@ -7199,11 +7379,8 @@ function switchToFile(filePath) {
 
     updateOutline();
 
-    if (isPdfPreviewVisible) {
-        // PDFプレビュー画面（右ペイン）はテキストファイル以外または仮想README.md以外で更新
-        if (fileType === 'text' && !isVirtualReadme) {
-            generatePdfPreview();
-        }
+    if (isPdfPreviewVisible && fileType === 'text' && !isVirtualReadme) {
+        generatePdfPreview();
     }
 
     if (fileData) {
@@ -7212,7 +7389,6 @@ function switchToFile(filePath) {
     }
 
     updateFileStats();
-
     onEditorInput(false);
 }
 
@@ -7362,16 +7538,25 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
     }
 
     let content;
-    if (targetPath && targetPath !== currentFilePath) {
+    const fileData = openedFiles.get(currentFilePath);
+
+    // コンテンツ取得ロジック
+    if (fileData && fileData.type === 'diff') {
+        // Diffモードの場合: MergeViewの右側(b)のエディタから内容を取得
+        if (globalDiffView) {
+            content = globalDiffView.b.state.doc.toString();
+        } else {
+            content = fileData.content;
+        }
+        // 保存先は仮想パス(DIFF://...)ではなく、実ファイルパスを使う
+        if (!targetPath) targetPath = fileData.originalPath;
+
+    } else if (targetPath && targetPath !== currentFilePath) {
         const targetFileData = openedFiles.get(targetPath);
         content = targetFileData ? targetFileData.content : null;
-
-        if (!content) {
-            console.warn(`Target file content not found for path: ${targetPath}`);
-            return;
-        }
+        if (!content) return;
     } else {
-        // 現在アクティブなファイルの場合
+        // 通常モード
         if (!globalEditorView) return;
         content = globalEditorView.state.doc.toString();
     }
@@ -7379,26 +7564,15 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
     if (currentFilePath === 'README.md') return;
 
     try {
-        const content = globalEditorView.state.doc.toString();
-        const fileData = openedFiles.get(currentFilePath);
-
         // ▼ 仮想ファイル（新規作成）または「名前を付けて保存」の場合
-        if ((fileData && fileData.isVirtual) || isSaveAs) {
+        if ((fileData && fileData.isVirtual && fileData.type !== 'diff') || isSaveAs) { // DiffはVirtualだが上書き保存扱いにするため除外
 
-            // ★修正: 保存場所の自動判別ロジック
             let defaultSavePath = fileData ? fileData.fileName : 'Untitled.md';
-
-            // 左側のツリーでフォルダを開いている場合は、そのフォルダ直下をデフォルトにする
             if (currentDirectoryPath && currentDirectoryPath !== '.') {
                 try {
-                    // ディレクトリパスとファイル名を結合して絶対パスにする
                     defaultSavePath = path.join(currentDirectoryPath, defaultSavePath);
-                } catch (e) {
-                    console.warn("Path join failed, using filename only:", e);
-                }
+                } catch (e) { }
             }
-            // フォルダを開いていない場合（currentDirectoryPath が null または '.'）は
-            // ファイル名のみのままにしておく -> main.js 側で markdown_vault が付与される
 
             const result = await window.electronAPI.showSaveDialog({
                 defaultPath: defaultSavePath
@@ -7407,44 +7581,40 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
             if (result.canceled || !result.filePath) return;
 
             const newPath = result.filePath;
-            const newName = path.basename(newPath); // pathモジュールが必要(renderer.js冒頭でrequire済前提)
+            const newName = path.basename(newPath);
 
-            // ファイル保存実行
             await window.electronAPI.saveFile(newPath, content);
-
-            // タブ情報と内部データを更新 (Untitled-X -> 実際のパス)
             updateTabsAfterRename(currentFilePath, newPath, newName);
 
-            // 仮想フラグを消去
             const newFileData = openedFiles.get(newPath);
             if (newFileData) {
                 newFileData.isVirtual = false;
                 newFileData.content = content;
             }
-
-            // 履歴に追加
             addToRecentFiles(newPath);
-
             showNotification(`ファイルを保存しました: ${newName}`, 'success');
 
         } else {
-            // ▼ 既存ファイルの上書き保存
+            // ▼ 既存ファイルの上書き保存 (Diff含む)
+            // Diffモードの場合、targetPath (実パス) を使用する
+            const savePath = (fileData && fileData.type === 'diff') ? targetPath : currentFilePath;
+
             if (typeof window.electronAPI?.saveFile === 'function') {
-                await window.electronAPI.saveFile(currentFilePath, content);
+                await window.electronAPI.saveFile(savePath, content);
 
                 if (fileData) {
                     fileData.content = content;
                 }
-                fileModificationState.delete(currentFilePath);
-
-                const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
-                if (tab) {
-                    const fileName = path.basename(currentFilePath);
-                    tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${filePath}}">×</span>`;
+                // Diffモードでない場合のみダーティフラグを消す（Diffの場合は比較しないと不明なため）
+                if (fileData.type !== 'diff') {
+                    fileModificationState.delete(currentFilePath);
+                    const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
+                    if (tab) {
+                        const fileName = path.basename(currentFilePath);
+                        tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${currentFilePath}}">×</span>`;
+                    }
                 }
-                console.log(`✅ ファイルを保存しました: ${currentFilePath}`);
 
-                // トースト通知（オプション）
                 // showNotification('保存しました', 'success');
             }
         }
@@ -8688,6 +8858,151 @@ function showCommitContextMenu(x, y, commit) {
             }
         }
     ]);
+}
+
+// [renderer.js] 末尾に追加
+
+/**
+ * 外部変更を検知した際の分岐処理
+ */
+async function checkExternalFileChange(filePath) {
+    // 既に別のファイルに切り替わっていたら無視
+    if (currentFilePath !== filePath) return;
+
+    // ファイルが存在するか確認 (削除された場合は何もしないか、別途閉じる処理が必要だが今回は無視)
+    // ※ Electronのfsモジュール経由で確認したいが、ここでは簡易的に読み込み試行で代用
+    
+    const isDirty = fileModificationState.get(filePath);
+
+    if (!isDirty) {
+        // パターンA: 未編集 (Clean) -> 自動リロード
+        console.log('Auto-reloading external changes...');
+        await reloadFileFromDisk(filePath);
+    } else {
+        // パターンB: 編集済み (Dirty) -> 警告ダイアログ
+        // モーダルが既に表示されていないかチェック
+        if (!document.querySelector('.external-change-modal')) {
+            showExternalChangeModal(filePath);
+        }
+    }
+}
+
+/**
+ * ディスクからファイルを再読み込みし、カーソル位置を維持する (修正版)
+ */
+async function reloadFileFromDisk(filePath) {
+    if (!globalEditorView) return;
+
+    try {
+        // 1. ディスクから最新の内容を読み込む
+        const newContent = await window.electronAPI.loadFile(filePath);
+
+        // ★追加: 現在のエディタの内容と比較し、同じなら何もしない (自分の保存による検知を無視)
+        const currentContent = globalEditorView.state.doc.toString();
+        if (newContent === currentContent) {
+            console.log('Content match, skipping reload.');
+            return; 
+        }
+
+        // 2. 現在のカーソル位置を保存
+        const currentSelection = globalEditorView.state.selection;
+
+        // 3. エディタの内容を更新
+        const transaction = {
+            changes: { from: 0, to: globalEditorView.state.doc.length, insert: newContent },
+            selection: currentSelection, // カーソル位置の復元
+            scrollIntoView: true,
+            annotations: ExternalChange.of(true) // 外部変更としてマーク
+        };
+
+        globalEditorView.dispatch(transaction);
+
+        // 内部データの更新
+        const fileData = openedFiles.get(filePath);
+        if (fileData) {
+            fileData.content = newContent;
+        }
+        
+        updateFileStats();
+        
+        // 本当に外部からの変更があった場合のみ通知
+        showNotification('ファイルを再読み込みしました', 'info');
+
+    } catch (e) {
+        console.error('Auto-reload failed:', e);
+    }
+}
+
+/**
+ * 外部変更競合時の警告モーダル
+ */
+function showExternalChangeModal(filePath) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay external-change-modal'; // 重複防止用クラス
+
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+    content.style.maxWidth = '500px';
+    content.style.borderLeft = '5px solid #e81123'; // 警告色
+
+    const title = document.createElement('h3');
+    title.textContent = '外部での変更を検知';
+    title.style.marginTop = '0';
+    title.style.color = '#e81123';
+
+    const message = document.createElement('div');
+    message.className = 'modal-message';
+    message.innerHTML = `
+        ファイル <strong>${path.basename(filePath)}</strong> が外部で変更されましたが、<br>
+        このエディタ内に<strong>未保存の変更</strong>があります。<br><br>
+        どうしますか？
+    `;
+
+    const buttons = document.createElement('div');
+    buttons.className = 'modal-buttons';
+    buttons.style.justifyContent = 'flex-end';
+    buttons.style.gap = '10px';
+
+    // ボタン1: ディスクの内容を読み込む (破棄)
+    const btnReload = document.createElement('button');
+    btnReload.className = 'modal-btn';
+    btnReload.textContent = 'ディスクの内容を読み込む (変更を破棄)';
+    btnReload.style.backgroundColor = '#d9534f';
+    btnReload.style.color = 'white';
+    btnReload.style.border = 'none';
+    
+    btnReload.onclick = async () => {
+        overlay.remove();
+        // ダーティフラグを消してからリロード
+        fileModificationState.delete(filePath);
+        // タブの●マークを消す
+        const tab = document.querySelector(`[data-filepath="${CSS.escape(filePath)}"]`);
+        if (tab) {
+            const fileName = path.basename(filePath);
+            tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${filePath}">×</span>`;
+        }
+        await reloadFileFromDisk(filePath);
+    };
+
+    // ボタン2: 自分の変更を維持
+    const btnKeep = document.createElement('button');
+    btnKeep.className = 'modal-btn primary';
+    btnKeep.textContent = '自分の変更を維持';
+    
+    btnKeep.onclick = () => {
+        overlay.remove();
+        // 何もしない（後でユーザーがCtrl+Sを押せば上書き保存される）
+        showNotification('変更を維持しました。上書き保存可能です。', 'info');
+    };
+
+    buttons.appendChild(btnReload);
+    buttons.appendChild(btnKeep);
+
+    content.appendChild(title);
+    content.appendChild(message);
+    content.appendChild(buttons);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
 }
 
 document.addEventListener('click', () => {

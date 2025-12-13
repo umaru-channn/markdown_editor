@@ -2056,9 +2056,12 @@ body[data-theme="dark"] .cm-language-item:hover {
     border: 1px solid var(--sidebar-border);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     z-index: 9999;
-    min-width: 160px; /* 幅をコンパクトに */
-    border-radius: 4px; /* 角丸を少し小さく */
-    padding: 2px; /* 全体の余白を詰める */
+    min-width: 160px;
+    /* 幅をコンパクトに */
+    border-radius: 4px;
+    /* 角丸を少し小さく */
+    padding: 2px;
+    /* 全体の余白を詰める */
     color: var(--text-color);
     font-family: var(--editor-font-family, sans-serif);
     animation: fadeIn 0.05s ease-out;
@@ -2067,30 +2070,37 @@ body[data-theme="dark"] .cm-language-item:hover {
 /* ダークモード時の調整 */
 body[data-theme="dark"] .context-menu,
 body[data-theme="dark"] .account-menu {
-    background-color: #252526; /* VS Code 標準のメニュー背景色 */
+    background-color: #252526;
+    /* VS Code 標準のメニュー背景色 */
     border-color: #454545;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .context-menu-item,
 .account-menu-item {
-    padding: 3px 8px; /* 上下の余白を大幅に削減 */
+    padding: 3px 8px;
+    /* 上下の余白を大幅に削減 */
     cursor: pointer;
-    font-size: 16px; /* 文字サイズは維持 */
+    font-size: 16px;
+    /* 文字サイズは維持 */
     color: inherit;
     border-radius: 3px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 0; /* マージンを削除 */
-    line-height: 1.2; /* 行の高さも詰める */
+    margin-bottom: 0;
+    /* マージンを削除 */
+    line-height: 1.2;
+    /* 行の高さも詰める */
 }
 
 .context-menu-item:hover,
 .account-menu-item:hover {
-    background-color: #04395e; /* ホバー色を少し濃い目に(VS Code風) */
+    background-color: #04395e;
+    /* ホバー色を少し濃い目に(VS Code風) */
     color: white;
 }
+
 /* ダークモード以外のホバーは青 */
 body:not([data-theme="dark"]) .context-menu-item:hover,
 body:not([data-theme="dark"]) .account-menu-item:hover {
@@ -2115,7 +2125,8 @@ body:not([data-theme="dark"]) .account-menu-item:hover {
 .account-menu-separator {
     height: 1px;
     background-color: var(--sidebar-border);
-    margin: 3px 4px; /* セパレータの上下余白も詰める */
+    margin: 3px 4px;
+    /* セパレータの上下余白も詰める */
     opacity: 0.5;
 }
 
@@ -2134,7 +2145,8 @@ body:not([data-theme="dark"]) .account-menu-item:hover {
 
 /* 親アイテムのスタイル調整 */
 .context-menu-item {
-    position: relative; /* サブメニューの基準位置にするため必須 */
+    position: relative;
+    /* サブメニューの基準位置にするため必須 */
 }
 
 /* サブメニューのコンテナ（通常は非表示） */
@@ -2142,8 +2154,10 @@ body:not([data-theme="dark"]) .account-menu-item:hover {
     display: none;
     position: absolute;
     color: #000;
-    left: 98%; /* 親の右側に表示 */
-    top: -4px; /* 位置微調整 */
+    left: 98%;
+    /* 親の右側に表示 */
+    top: -4px;
+    /* 位置微調整 */
     background-color: var(--main-bg);
     border: 1px solid var(--sidebar-border);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -2154,7 +2168,7 @@ body:not([data-theme="dark"]) .account-menu-item:hover {
 }
 
 /* 親アイテムホバー時にサブメニューを表示 */
-.context-menu-item:hover > .context-submenu {
+.context-menu-item:hover>.context-submenu {
     display: block;
     animation: fadeIn 0.05s ease-out;
 }
@@ -2170,7 +2184,8 @@ body[data-theme="dark"] .context-submenu {
 /* サブメニューがあることを示す矢印 */
 .submenu-arrow {
     font-size: 10px;
-    margin-left: auto; /* 右端に寄せる */
+    margin-left: auto;
+    /* 右端に寄せる */
     opacity: 0.6;
     padding-left: 10px;
 }
@@ -2837,9 +2852,9 @@ body[data-theme="dark"] .icon-btn.active {
 .cm-selectionBackground {
     /* 色の設定 */
     background-color: rgba(0, 122, 204, 0.4) !important;
-    
+
     /* 【重要】ここにあった position: relative; は削除してください */
-    
+
     /* 文字やコードブロック背景の上から色を重ねる設定 */
     mix-blend-mode: multiply;
 }
@@ -2848,7 +2863,7 @@ body[data-theme="dark"] .icon-btn.active {
 body[data-theme="dark"] .cm-selectionBackground {
     background-color: rgba(66, 133, 244, 0.4) !important;
     /* ダークモードでは multiply だと暗くなるので screen にする */
-    mix-blend-mode: screen; 
+    mix-blend-mode: screen;
 }
 
 /* 標準の検索パネルを強制的に非表示にする (ゾンビ表示対策) */
@@ -3954,7 +3969,10 @@ body[data-theme="dark"] .cm-execution-close-btn:hover {
 .snippet-slider {
     position: absolute;
     cursor: pointer;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background-color: #ccc;
     transition: .4s;
     border-radius: 20px;
@@ -3972,11 +3990,11 @@ body[data-theme="dark"] .cm-execution-close-btn:hover {
     border-radius: 50%;
 }
 
-.snippet-toggle input:checked + .snippet-slider {
+.snippet-toggle input:checked+.snippet-slider {
     background-color: #007acc;
 }
 
-.snippet-toggle input:checked + .snippet-slider:before {
+.snippet-toggle input:checked+.snippet-slider:before {
     transform: translateX(16px);
 }
 
@@ -3984,6 +4002,7 @@ body[data-theme="dark"] .snippet-item {
     background-color: #2d2d2d;
     border-color: #444;
 }
+
 body[data-theme="dark"] .snippet-slider {
     background-color: #555;
 }
@@ -4022,21 +4041,26 @@ input[type="number"],
 input[type="search"],
 input[type="password"],
 textarea,
-.cm-content,      /* エディタ本文 */
-.cm-scroller,     /* エディタスクロール領域 */
-.terminal-content, /* ターミナル領域 */
+.cm-content,
+/* エディタ本文 */
+.cm-scroller,
+/* エディタスクロール領域 */
+.terminal-content,
+/* ターミナル領域 */
 .xterm-screen canvas {
     cursor: text !important;
 }
 
 /* 1. 基本領域: 通常の矢印カーソル */
-html, body, 
-.top-bar, 
-.status-bar, 
-.left-pane, 
-.right-pane, 
+html,
+body,
+.top-bar,
+.status-bar,
+.left-pane,
+.right-pane,
 .activity-bar,
-.cm-gutters { /* 行番号エリア */
+.cm-gutters {
+    /* 行番号エリア */
     cursor: default;
 }
 
@@ -4046,27 +4070,31 @@ input[type="number"],
 input[type="search"],
 input[type="password"],
 textarea,
-.cm-content,      /* エディタ本文 */
-.cm-scroller,     /* エディタスクロール領域 */
-.terminal-content, /* ターミナル領域 */
+.cm-content,
+/* エディタ本文 */
+.cm-scroller,
+/* エディタスクロール領域 */
+.terminal-content,
+/* ターミナル領域 */
 .xterm-screen canvas {
     cursor: text !important;
 }
 
 /* 3. クリック可能な要素: 指マーク (ポインター) */
-button, 
-a, 
-select, 
+button,
+a,
+select,
 label.checkbox-label,
-.tab, 
-.tree-item, 
-.icon, 
+.tab,
+.tree-item,
+.icon,
 .header-btn,
 .window-control-btn,
 .settings-nav-item,
 .dropdown-item,
 .context-menu-item,
-.cm-live-link,     /* リンクテキスト */
+.cm-live-link,
+/* リンクテキスト */
 .cm-table-add-row-btn,
 .cm-table-add-col-btn {
     cursor: pointer;
@@ -4113,7 +4141,7 @@ body[data-theme="dark"] .cm-table-cell-content mark {
 
 body[data-theme="dark"] .cm-table-cell-content code {
     background-color: rgba(255, 255, 255, 0.1);
-    
+
 }
 
 .ͼ11 {
@@ -4157,7 +4185,7 @@ body[data-theme="dark"] .cm-mermaid-mode-group {
 .cm-mermaid-mode-btn.active {
     background-color: var(--main-bg);
     color: #007acc;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     font-weight: 600;
 }
 
@@ -4191,10 +4219,12 @@ body[data-theme="dark"] .cm-mermaid-mode-btn.active {
     padding: 10px;
     background-color: var(--main-bg);
     border: 1px solid var(--cb-border-color);
-    border-top: none; /* 上のヘッダーと繋げる */
+    border-top: none;
+    /* 上のヘッダーと繋げる */
     border-bottom-left-radius: var(--cb-radius);
     border-bottom-right-radius: var(--cb-radius);
-    box-sizing: border-box; /* パディングを含めたサイズ計算にする */
+    box-sizing: border-box;
+    /* パディングを含めたサイズ計算にする */
 }
 
 /* ダークモード時の調整（必要であれば） */
@@ -4214,17 +4244,21 @@ body[data-theme="dark"] .cm-mermaid-preview {
     text-align: center;
     width: 100%;
     min-height: 1em;
-    
-    margin: 0;       /* ★重要: 外側の余白をなくす（ズレの原因） */
-    padding: 10px 0; /* 代わりに内側に余白をつける */
-    
-    cursor: pointer; /* クリックできることを示すカーソル */
-    background-color: var(--main-bg); /* 背景色を明示（線が透けるのを防ぐ） */
+
+    margin: 0;
+    /* ★重要: 外側の余白をなくす（ズレの原因） */
+    padding: 10px 0;
+    /* 代わりに内側に余白をつける */
+
+    cursor: pointer;
+    /* クリックできることを示すカーソル */
+    background-color: var(--main-bg);
+    /* 背景色を明示（線が透けるのを防ぐ） */
 }
 
 /* ダークモード時の数式の色調整（必要に応じて） */
 body[data-theme="dark"] .katex {
-    color: #d4d4d4; 
+    color: #d4d4d4;
 }
 
 /* ========== Project Search Styles ========== */
@@ -4298,6 +4332,7 @@ body[data-theme="dark"] .katex {
 body[data-theme="dark"] .search-result-file-header {
     background-color: rgba(255, 255, 255, 0.05);
 }
+
 body[data-theme="dark"] .search-result-file-header:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
@@ -4308,7 +4343,8 @@ body[data-theme="dark"] .search-result-file-header:hover {
 }
 
 .search-result-match {
-    padding: 2px 4px 2px 16px; /* インデント */
+    padding: 2px 4px 2px 16px;
+    /* インデント */
     cursor: pointer;
     font-size: 12px;
     color: #666;
@@ -4356,7 +4392,8 @@ body[data-theme="dark"] .match-highlight {
 /* ヘッダー埋め込み用の検索ボックススタイル */
 .project-search-input-header {
     width: 100%;
-    height: 24px; /* ヘッダー(30px)に収まる高さ */
+    height: 24px;
+    /* ヘッダー(30px)に収まる高さ */
     padding: 0 8px;
     border: 1px solid var(--sidebar-border);
     border-radius: 3px;
@@ -4376,4 +4413,68 @@ body[data-theme="dark"] .match-highlight {
     display: flex;
     flex-direction: column;
     height: 100%;
+}
+
+/* ========== Merge View (Diff) Styles ========== */
+
+/* コンテナの高さを確保してスクロール可能にする */
+.cm-merge {
+    height: 100% !important;
+    display: flex !important;
+    border: none !important;
+    overflow: hidden !important; /* 外側は隠して、内部のエディタでスクロールさせる */
+}
+
+/* 左右のエディタ領域 */
+.cm-merge-view {
+    flex: 1;
+    min-width: 0; /* Flexboxの子要素が縮小できるようにする重要設定 */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* 二重スクロール防止 */
+}
+
+/* Diffビュー内のエディタ本体を強制的に高さ100%にする */
+.cm-merge-view .cm-editor {
+    height: 100% !important;
+    flex: 1;
+}
+
+/* Diffビュー内のスクロール領域 */
+.cm-merge-view .cm-scroller {
+    overflow: auto !important;
+    height: 100% !important;
+}
+
+/* Diffビュー内ではコンテンツの最大幅制限（通常エディタ用）を解除する */
+.cm-merge-view .cm-content {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 10px 5px !important; /* パディングを少し詰める */
+}
+
+/* 中央のガター（コネクタ部分） */
+.cm-merge-gutter {
+    background-color: var(--sidebar-bg);
+    border-color: var(--sidebar-border);
+    z-index: 10;
+}
+
+/* 変更箇所のハイライト (Light Theme) */
+.cm-merge-a .cm-changedLine { background-color: rgba(255, 0, 0, 0.1); }
+.cm-merge-b .cm-changedLine { background-color: rgba(0, 255, 0, 0.1); }
+.cm-merge-a .cm-changedText { background-color: rgba(255, 200, 200, 0.5); }
+.cm-merge-b .cm-changedText { background-color: rgba(200, 255, 200, 0.5); }
+
+/* Dark Theme Overrides */
+body[data-theme="dark"] .cm-merge-a .cm-changedLine { background-color: rgba(160, 50, 50, 0.2); }
+body[data-theme="dark"] .cm-merge-b .cm-changedLine { background-color: rgba(50, 100, 50, 0.2); }
+body[data-theme="dark"] .cm-merge-a .cm-changedText { background-color: rgba(255, 100, 100, 0.3); }
+body[data-theme="dark"] .cm-merge-b .cm-changedText { background-color: rgba(100, 255, 100, 0.3); }
+
+/* 変更を元に戻すボタン */
+.cm-merge-revert {
+    color: #888;
+    font-weight: bold;
+    cursor: pointer;
 }

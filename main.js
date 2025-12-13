@@ -1568,7 +1568,7 @@ ipcMain.handle('show-save-dialog', async (event, options) => {
 
   let defaultPath = options?.defaultPath || 'Untitled.md';
 
-  // ★修正: パスが絶対パスでない（ファイル名のみの）場合、markdown_vault フォルダを強制付与
+  // パスが絶対パスでない（ファイル名のみの）場合、markdown_vault フォルダを強制付与
   if (!path.isAbsolute(defaultPath)) {
     const vaultDir = path.join(app.getPath('userData'), 'markdown_vault');
     // フォルダが存在しない場合は作成
@@ -2638,10 +2638,10 @@ ipcMain.handle('generate-pdf', async (event, htmlContent, options = {}) => {
 
     // Load HTML content
     const htmlTemplate = getPdfHtmlTemplate(htmlContent, options);
-    // ★変更: HTMLを一時ファイルとして書き出す
+    // HTMLを一時ファイルとして書き出す
     fs.writeFileSync(tempHtmlPath, htmlTemplate);
 
-    // ★変更: ファイルとしてロードする (これで file:// 画像が表示可能になる)
+    // ファイルとしてロードする (これで file:// 画像が表示可能になる)
     await pdfWindow.loadFile(tempHtmlPath);
 
     // Generate PDF with options
@@ -2696,13 +2696,13 @@ ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        webSecurity: false // ★重要
+        webSecurity: false
       }
     });
 
     const htmlTemplate = getPdfHtmlTemplate(htmlContent, options);
 
-    // ★変更: 一時ファイル経由でロード
+    // 一時ファイル経由でロード
     fs.writeFileSync(tempHtmlPath, htmlTemplate);
     await pdfWindow.loadFile(tempHtmlPath);
 
@@ -3312,6 +3312,27 @@ ipcMain.handle('git-get-remote-url', async (event, repoPath) => {
     // originのURLを取得
     const url = await git.getConfig({ fs, dir, path: 'remote.origin.url' });
     return { success: true, url }; // urlがundefinedなら未設定
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// git-show: 指定したリビジョンのファイル内容を取得
+ipcMain.handle('git-show', async (event, repoPath, hash, filepath) => {
+  try {
+    const dir = repoPath;
+    if (!dir) throw new Error('Repo path is required');
+
+    // Windowsパス区切り(\)をGit用(/)に変換
+    const gitFilePath = filepath.replace(/\\/g, '/');
+    
+    // git show HEAD:path/to/file の形式で実行
+    // バイナリファイルなどの場合のエラーハンドリングが必要ですが、まずはテキスト前提で実装
+    const result = await runGitCommand(dir, `show "${hash}:${gitFilePath}"`);
+    
+    if (!result.success) throw new Error(result.error);
+    
+    return { success: true, content: result.stdout };
   } catch (error) {
     return { success: false, error: error.message };
   }

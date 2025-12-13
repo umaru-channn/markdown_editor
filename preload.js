@@ -51,6 +51,7 @@ window.electronAPI = {
   gitDeleteHistory: (repoPath) => ipcRenderer.invoke('git-delete-history', repoPath),
   gitCommitAmend: (repoPath) => ipcRenderer.invoke('git-commit-amend', repoPath),
   gitPushForce: (repoPath) => ipcRenderer.invoke('git-push-force', repoPath),
+  gitShow: (repoPath, hash, filepath) => ipcRenderer.invoke('git-show', repoPath, hash, filepath),
 
   // renderer.jsの呼び出し名に合わせて追加・マッピング
   gitLog: (repoPath, depth) => ipcRenderer.invoke('git-log', repoPath, depth), // 旧APIとの互換性用
