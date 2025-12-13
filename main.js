@@ -3264,8 +3264,8 @@ ipcMain.handle('git-pull-no-ff', async (event, repoPath) => {
     return { success: true };
   } catch (error) {
     // 既存のエラーメッセージ翻訳関数があれば通す
-    const msg = typeof getJapaneseGitErrorMessage === 'function' 
-      ? getJapaneseGitErrorMessage(error.message || error.toString()) 
+    const msg = typeof getJapaneseGitErrorMessage === 'function'
+      ? getJapaneseGitErrorMessage(error.message || error.toString())
       : (error.message || error.toString());
     return { success: false, error: msg };
   }
@@ -3345,13 +3345,13 @@ ipcMain.handle('git-show', async (event, repoPath, hash, filepath) => {
 
     // Windowsパス区切り(\)をGit用(/)に変換
     const gitFilePath = filepath.replace(/\\/g, '/');
-    
+
     // git show HEAD:path/to/file の形式で実行
     // バイナリファイルなどの場合のエラーハンドリングが必要ですが、まずはテキスト前提で実装
     const result = await runGitCommand(dir, `show "${hash}:${gitFilePath}"`);
-    
+
     if (!result.success) throw new Error(result.error);
-    
+
     return { success: true, content: result.stdout };
   } catch (error) {
     return { success: false, error: error.message };
@@ -4406,6 +4406,74 @@ while (ip < instructions.length) {
       });
     });
   });
+});
+
+// 指定されたファイルへのバックリンク（[[filename]]を含むファイル）を検索
+ipcMain.handle('scan-backlinks', async (event, targetFileName, rootDir) => {
+  if (!rootDir || !targetFileName) return [];
+
+  // 拡張子をチェック
+  const ext = path.extname(targetFileName).toLowerCase();
+  const isMarkdown = ext === '.md' || ext === '.markdown';
+
+  // 検索対象の文字列を決定
+  // Markdownファイルなら拡張子なしの名前 (例: "Note")
+  // それ以外ならファイル名そのまま (例: "image.png")
+  const searchName = isMarkdown ? path.parse(targetFileName).name : targetFileName;
+
+  const results = [];
+  const excludePatterns = loadAppSettings().excludePatterns || '';
+
+  // 再帰的にファイルを検索する内部関数
+  async function scanDir(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      // 除外判定
+      if (shouldExclude(entry.name, excludePatterns)) continue;
+
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        await scanDir(fullPath);
+      } else if (entry.isFile() && (entry.name.endsWith('.md') || entry.name.endsWith('.markdown'))) {
+        // 自分自身はスキップ
+        if (entry.name === targetFileName) continue;
+
+        try {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          // Wikiリンク [[Target]] または [[Target|Label]] を検索
+          // 簡単のため、ファイル名(拡張子なし)が含まれているかチェック
+          // より厳密にするなら正規表現: /\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g
+          const regex = new RegExp(`\\[\\[${escapeRegExp(searchName)}(?:\\|.*?)?\\]\\]`, 'i');
+
+          if (regex.test(content)) {
+            // マッチした場合、プレビュー用に周辺テキストを抽出
+            const matchIndex = content.search(regex);
+            const start = Math.max(0, matchIndex - 20);
+            const end = Math.min(content.length, matchIndex + 60);
+            const preview = (start > 0 ? '...' : '') + content.substring(start, end).replace(/\n/g, ' ') + '...';
+
+            results.push({
+              path: fullPath,
+              name: entry.name,
+              preview: preview
+            });
+          }
+        } catch (e) {
+          // 読み込みエラーは無視
+        }
+      }
+    }
+  }
+
+  // 正規表現エスケープ用ヘルパー
+  function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  await scanDir(rootDir);
+  return results;
 });
 
 // This method will be called when Electron has finished

@@ -16,7 +16,7 @@ const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dro
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, indentUnit } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
-const { closeBrackets } = require("@codemirror/autocomplete");
+const { closeBrackets, autocompletion } = require("@codemirror/autocomplete");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
 const { tablePlugin } = require("./tablePlugin.js");
 const { MergeView } = require("@codemirror/merge");
@@ -154,7 +154,7 @@ let isMaximized = false;
 let savedRightActivityBarState = true;
 let activeContextMenu = null;
 let globalDiffView = null; // Diffビューのインスタンス保持用
-let isDiffMode = false;    // 現在Diffモードかどうか
+let isBacklinksVisible = false; // ★追加: バックリンクパネルの表示状態
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -183,6 +183,15 @@ function getPrismLanguageFromPath(filePath) {
     return langMap[ext] || 'markdown';
 }
 
+// スニペットの初期値を定数として定義
+const DEFAULT_SNIPPETS = [
+    { trigger: ";date", replacement: "{{date}}", label: "今日の日付 (YYYY-MM-DD)" },
+    { trigger: ";time", replacement: "{{time}}", label: "現在の時刻 (HH:mm)" },
+    { trigger: ";datetime", replacement: "{{date}} {{time}}", label: "日時" },
+    { trigger: ";todo", replacement: "- [ ] ", label: "TODOボックス" },
+    { trigger: ";note", replacement: "> 📝 **Note:** ", label: "ノート修飾" }
+];
+
 // 設定管理
 let appSettings = {
     fontSize: '16px',
@@ -203,6 +212,7 @@ let appSettings = {
     showToolbar: true,
     showFileTitleBar: true,
     showWhitespace: false,
+    textSnippets: [...DEFAULT_SNIPPETS],
     enabledSnippets: [],
     // PDF設定のデフォルト値
     pdfOptions: {
@@ -216,6 +226,56 @@ let appSettings = {
         pageRanges: ''
     }
 };
+
+// スニペットの動的置換処理
+function getDynamicReplacement(text) {
+    const now = new Date();
+    const pad = (n) => n.toString().padStart(2, '0');
+    const yyyy = now.getFullYear();
+    const mm = pad(now.getMonth() + 1);
+    const dd = pad(now.getDate());
+    const HH = pad(now.getHours());
+    const MM = pad(now.getMinutes());
+
+    return text
+        .replace(/{{date}}/g, `${yyyy}-${mm}-${dd}`)
+        .replace(/{{time}}/g, `${HH}:${MM}`);
+}
+
+// スニペット補完プロバイダ
+function textSnippetCompletion(context) {
+    // 入力中の単語を取得 (セミコロン等も含む)
+    let word = context.matchBefore(/\S+/);
+    if (!word) return null;
+    if (word.from == word.to && !context.explicit) return null;
+
+    const snippets = appSettings.textSnippets || [];
+
+    // トリガーが一致する（または前方一致する）ものを候補にする
+    const options = snippets
+        .filter(s => s.trigger.startsWith(word.text))
+        .map(s => ({
+            label: s.trigger,
+            displayLabel: s.trigger, // リスト表示名
+            detail: s.label,         // 説明文
+            type: "text",
+            apply: (view, completion, from, to) => {
+                // 選択されたら置換を実行
+                const insertText = getDynamicReplacement(s.replacement);
+                view.dispatch({
+                    changes: { from: from, to: to, insert: insertText },
+                    selection: { anchor: from + insertText.length } // カーソルを末尾へ
+                });
+            }
+        }));
+
+    if (options.length === 0) return null;
+
+    return {
+        from: word.from,
+        options: options
+    };
+}
 
 // ========== Command Registry ==========
 const COMMANDS_REGISTRY = [
@@ -1031,6 +1091,99 @@ function openSettingsTab() {
 
     // ビューを切り替え
     switchMainView('content-settings');
+}
+
+// ========== スニペット設定UIロジック ==========
+
+function renderSnippetsSettingsList() {
+    const tbody = document.getElementById('snippets-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    const snippets = appSettings.textSnippets || [];
+
+    snippets.forEach((snippet, index) => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid var(--sidebar-border)';
+
+        tr.innerHTML = `
+            <td style="padding: 8px; font-family: monospace;">${escapeHtml(snippet.trigger)}</td>
+            <td style="padding: 8px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(snippet.replacement)}</td>
+            <td style="padding: 8px; color: #888;">${escapeHtml(snippet.label || '')}</td>
+            <td style="padding: 8px; text-align: center;">
+                <button class="btn-delete-snippet" data-index="${index}" style="background: none; border: none; cursor: pointer; color: #d9534f;">×</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    // 削除ボタンのイベント
+    document.querySelectorAll('.btn-delete-snippet').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            appSettings.textSnippets.splice(index, 1);
+            saveSettings();
+            renderSnippetsSettingsList();
+        });
+    });
+}
+
+function setupSnippetSettingsEvents() {
+    const btnAdd = document.getElementById('btn-add-snippet');
+    const inputTrigger = document.getElementById('snippet-trigger-input');
+    const inputReplace = document.getElementById('snippet-replace-input');
+    const inputLabel = document.getElementById('snippet-label-input');
+
+    if (btnAdd) {
+        btnAdd.addEventListener('click', () => {
+            const trigger = inputTrigger.value.trim();
+            const replacement = inputReplace.value;
+            const label = inputLabel.value.trim();
+
+            if (!trigger || !replacement) {
+                showNotification('トリガーと置換テキストを入力してください', 'error');
+                return;
+            }
+
+            // 重複チェック
+            if (!appSettings.textSnippets) appSettings.textSnippets = [];
+            const exists = appSettings.textSnippets.some(s => s.trigger === trigger);
+            if (exists) {
+                showNotification('このトリガーは既に存在します', 'error');
+                return;
+            }
+
+            appSettings.textSnippets.push({ trigger, replacement, label });
+            saveSettings();
+
+            // 入力欄クリア
+            inputTrigger.value = '';
+            inputReplace.value = '';
+            inputLabel.value = '';
+
+            renderSnippetsSettingsList();
+            showNotification('スニペットを追加しました', 'success');
+        });
+    }
+
+    // 設定画面のタブ切り替えでスニペットリストを更新するためのリスナー
+    const navItem = document.querySelector('.settings-nav-item[data-section="snippets"]');
+    if (navItem) {
+        navItem.addEventListener('click', () => {
+            renderSnippetsSettingsList();
+        });
+    }
+
+    // デフォルトに戻すボタンの処理
+    const btnReset = document.getElementById('btn-reset-snippets');
+    if (btnReset) {
+        btnReset.addEventListener('click', () => {
+            appSettings.textSnippets = JSON.parse(JSON.stringify(DEFAULT_SNIPPETS));
+            saveSettings();
+            renderSnippetsSettingsList();
+            showNotification('スニペットを初期化しました', 'success');
+        });
+    }
 }
 
 /**
@@ -2234,6 +2387,45 @@ function setupSearchWidget(view) {
     };
 }
 
+// Wikiリンクのオートコンプリート機能
+async function wikiLinkCompletion(context) {
+    // "[[" の入力を検知
+    let word = context.matchBefore(/\[\[[\w\s\-]*/);
+    if (!word) return null;
+
+    if (word.from == word.to && !context.explicit) return null;
+
+    // 非同期で候補リストを作成
+    let candidates = [];
+
+    if (currentDirectoryPath) {
+        try {
+            // 現在のディレクトリ内のファイルを取得
+            const files = await window.electronAPI.readDirectory(currentDirectoryPath);
+            candidates = files
+                .filter(f => !f.isDirectory) // ディレクトリのみ除外（すべてのファイルを表示）
+                .map(f => {
+                    let labelName = f.name;
+                    // Markdownファイルの場合は拡張子を省略して表示（従来の挙動）
+                    // それ以外のファイル（png, js等）は拡張子付きで表示する
+                    if (f.name.endsWith('.md') || f.name.endsWith('.markdown')) {
+                        labelName = f.name.replace(/\.(md|markdown)$/, '');
+                    }
+
+                    return { label: labelName, type: "text", detail: "File" };
+                });
+        } catch (e) {
+            console.error("WikiLink completion error:", e);
+        }
+    }
+
+    // 準備ができたらオブジェクトを返す
+    return {
+        from: word.from + 2, // "[[" の後ろから補完開始
+        options: candidates  // ここには必ず配列(Array)を渡す必要がある
+    };
+}
+
 /**
  * コマンドIDに対応するキーバインド設定を常に配列で取得するヘルパー
  * 既存の設定が文字列でも配列でもエラーにならないように吸収します
@@ -2462,6 +2654,89 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
     decorations: v => v.decorations
 });
 
+// Wikiリンクのレンダリング（括弧と中身を別々に装飾）とクリック処理
+const wikiLinkPlugin = ViewPlugin.fromClass(class {
+    constructor(view) {
+        this.decorations = this.buildDecorations(view);
+    }
+    update(update) {
+        if (update.docChanged || update.viewportChanged) {
+            this.decorations = this.buildDecorations(update.view);
+        }
+    }
+    buildDecorations(view) {
+        const builder = new RangeSetBuilder();
+        const text = view.state.doc.toString();
+        // Regex: [[ (filename) (| label)? ]]
+        const regex = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+
+        let match;
+        // マッチした箇所を順番に装飾を追加
+        while ((match = regex.exec(text))) {
+            const start = match.index;
+            const end = start + match[0].length;
+            const contentStart = start + 2;
+            const contentEnd = end - 2;
+            const fileName = match[1];
+
+            // 1. 開始括弧 [[ (グレー表示)
+            builder.add(start, contentStart, Decoration.mark({ class: "cm-wiki-link-bracket" }));
+
+            // 2. リンクテキスト (青色・クリック可能)
+            builder.add(contentStart, contentEnd, Decoration.mark({
+                tagName: "span",
+                class: "cm-wiki-link-text",
+                attributes: {
+                    "data-filename": fileName,
+                    "title": "Ctrl + Click で開く" // ツールチップ
+                }
+            }));
+
+            // 3. 終了括弧 ]] (グレー表示)
+            builder.add(contentEnd, end, Decoration.mark({ class: "cm-wiki-link-bracket" }));
+        }
+        return builder.finish();
+    }
+}, {
+    decorations: v => v.decorations,
+
+    // クリックイベントハンドラ (mousedown -> click に変更して安定化)
+    eventHandlers: {
+        click: (e, view) => {
+            const target = e.target;
+            // リンク部分がクリックされたか判定
+            if (target.classList.contains("cm-wiki-link-text") || target.closest(".cm-wiki-link-text")) {
+                const el = target.classList.contains("cm-wiki-link-text") ? target : target.closest(".cm-wiki-link-text");
+
+                // Ctrlキー (MacはCmdキー) が押されている場合のみジャンプ
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const fileName = el.dataset.filename;
+                    if (fileName) {
+                        handleWikiLinkClick(fileName);
+                    }
+                }
+            }
+        }
+    }
+});
+
+// Wikiリンククリック時の処理
+async function handleWikiLinkClick(linkText) {
+    if (!currentDirectoryPath) return;
+
+    let targetFileName = linkText;
+    if (!path.extname(linkText)) {
+        targetFileName = `${linkText}.md`;
+    }
+
+    let fullPath = path.join(currentDirectoryPath, targetFileName);
+
+    // openFile関数を呼び出して開く
+    openFile(fullPath, targetFileName);
+}
+
 // getCombinedKeymapにfilePathを渡すように修正
 function createEditorState(content, filePath) {
     const initialTheme = appSettings.theme === 'dark' ? oneDark : [];
@@ -2510,6 +2785,8 @@ function createEditorState(content, filePath) {
             whitespaceCompartment.of(appSettings.showWhitespace ? customHighlightWhitespace : []),
 
             conflictField,
+            wikiLinkPlugin,
+            autocompletion({ override: [wikiLinkCompletion, textSnippetCompletion] }),
 
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
@@ -3771,6 +4048,11 @@ function updateTerminalVisibility() {
     const terminalHeader = document.getElementById('terminal-header');
     const pdfPreviewHeader = document.getElementById('pdf-preview-header');
     const pdfPreviewContainer = document.getElementById('pdf-preview-container');
+
+    // バックリンク用の要素取得
+    const backlinksHeader = document.getElementById('backlinks-header');
+    const backlinksContainer = document.getElementById('backlinks-container');
+
     const showCalendar = window.calendarAPI ? window.calendarAPI.getVisible() : false;
 
     if (rightActivityBar) {
@@ -3779,36 +4061,39 @@ function updateTerminalVisibility() {
 
     const showPdf = isPdfPreviewVisible;
     const showTerminalRight = isTerminalVisible && isPositionRight;
-    const needRightPane = (showPdf || showTerminalRight || showCalendar) && isRightActivityBarVisible;
+    const showBacklinks = isBacklinksVisible;
+
+    const needRightPane = (showPdf || showTerminalRight || showCalendar || showBacklinks) && isRightActivityBarVisible;
 
     const barWidth = isRightActivityBarVisible ? rightActivityBarWidth : 0;
     document.documentElement.style.setProperty('--right-activity-offset,', barWidth + 'px');
 
-    // レイアウト変更中のフラグは一時的に立てるが、CSSトランジション削除に伴い即座に解除してOK
     document.body.classList.add('is-layout-changing');
 
     if (needRightPane) {
         rightPane.classList.remove('hidden');
         if (resizerRight) resizerRight.classList.remove('hidden');
 
-        // 排他制御に応じたヘッダー/コンテンツの表示・非表示
-        // まず全て隠す
+        // まず全てのヘッダーとコンテンツを非表示にする（リセット）
         if (terminalHeader) terminalHeader.classList.add('hidden');
         if (terminalContainer) terminalContainer.classList.add('hidden');
         if (pdfPreviewHeader) pdfPreviewHeader.classList.add('hidden');
         if (pdfPreviewContainer) pdfPreviewContainer.classList.add('hidden');
-        // カレンダーはAPI側でDOM操作しているので、ここでは干渉しないか、APIの状態に任せる
-        // ただし、もし calendarAPI がDOMクラス操作だけで完結していない場合はここでも制御が必要だが、
-        // 今回は calendarAPI.updateView() が呼ばれている前提で、他要素を隠すだけで良い。
+        if (backlinksHeader) backlinksHeader.classList.add('hidden');
+        if (backlinksContainer) backlinksContainer.classList.add('hidden');
 
+        // 必要なものだけ表示
         if (showCalendar) {
-            // カレンダーが表示中の場合、他は既に隠されている
+            // カレンダーはAPI側で制御されるため何もしない
         } else if (showPdf) {
             if (pdfPreviewHeader) pdfPreviewHeader.classList.remove('hidden');
             if (pdfPreviewContainer) pdfPreviewContainer.classList.remove('hidden');
         } else if (showTerminalRight) {
             if (terminalHeader) terminalHeader.classList.remove('hidden');
             if (terminalContainer) terminalContainer.classList.remove('hidden');
+        } else if (showBacklinks) {
+            if (backlinksHeader) backlinksHeader.classList.remove('hidden');
+            if (backlinksContainer) backlinksContainer.classList.remove('hidden');
         }
 
         const rightPaneWidth = rightPane.style.width || '350px';
@@ -3817,6 +4102,7 @@ function updateTerminalVisibility() {
         mainContent.style.marginRight = (parseFloat(rightPaneWidth) + barWidth) + 'px';
 
     } else {
+        // 右ペイン全体を隠す
         rightPane.classList.add('hidden');
         if (resizerRight) resizerRight.classList.add('hidden');
 
@@ -3825,16 +4111,15 @@ function updateTerminalVisibility() {
         mainContent.style.marginRight = barWidth + 'px';
     }
 
+    // 下部ターミナルの制御
     if (isTerminalVisible && !isPositionRight) {
         bottomPane.classList.remove('hidden');
         if (resizerBottom) resizerBottom.classList.remove('hidden');
 
-        // ステータスバーの高さ (0px or 24px)
         const statusBarHeight = appSettings.showStatusBar ? 24 : 0;
 
         if (!bottomPane.style.height || bottomPane.style.height === '0px') {
             bottomPane.style.height = '200px';
-            // resizerBottom の top を直接計算（status-bar-height CSS変数は bottom-pane の bottom に使用される）
             const newResizerTop = window.innerHeight - 200 - statusBarHeight;
             if (resizerBottom) resizerBottom.style.top = `${newResizerTop}px`;
         }
@@ -3851,6 +4136,7 @@ function updateTerminalVisibility() {
         centerPane.style.marginBottom = '0px';
     }
 
+    // ターミナルのDOM移動処理
     const tabsContainer = document.getElementById('terminal-tabs-container');
     const shellDropdown = document.getElementById('shell-dropdown');
     const rightHeader = document.getElementById('terminal-header');
@@ -3878,14 +4164,15 @@ function updateTerminalVisibility() {
         }
     }
 
+    // アイコンのアクティブ状態更新 (ここが重要: if/elseの外で実行する)
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
     if (btnCalendar) btnCalendar.classList.toggle('active', showCalendar);
+    // バックリンクボタンの状態更新
+    if (btnBacklinks) btnBacklinks.classList.toggle('active', showBacklinks);
 
-    // CSSのトランジションを削除したため、即座に完了処理を行う
     document.body.classList.remove('is-layout-changing');
 
-    // レイアウト変更後にターミナルをリサイズする（少し待つ必要はほぼないが念のためRAF）
     requestAnimationFrame(() => {
         if (isTerminalVisible && activeTerminalId) {
             fitTerminal(activeTerminalId);
@@ -3947,6 +4234,7 @@ if (btnTerminalRight) {
         } else {
             isTerminalVisible = true;
             isPdfPreviewVisible = false;
+            isBacklinksVisible = false;
             if (window.calendarAPI) window.calendarAPI.hide();
         }
         updateTerminalVisibility();
@@ -4056,6 +4344,7 @@ if (btnPdfPreview) { // togglePdfPreview関数を直接呼んでいる既存コ�
             // 排他制御: PDFプレビューを開くときは他を閉じる
             isPdfPreviewVisible = true;
             isTerminalVisible = false;
+            isBacklinksVisible = false;
             if (window.calendarAPI) window.calendarAPI.hide();
             generatePdfPreview(); // PDF生成
         }
@@ -4077,6 +4366,7 @@ if (btnCalendar) {
             window.calendarAPI.show();
             isTerminalVisible = false;
             isPdfPreviewVisible = false;
+            isBacklinksVisible = false;
         }
         updateTerminalVisibility();
     });
@@ -4169,6 +4459,14 @@ async function processMarkdownForExport(markdown) {
     // 4. リストのネスト用インデント調整
     processed = processed.replace(/^(\s+)(\d+(?:-\d+)+\.)/gm, (match, indent, marker) => {
         return '&nbsp;'.repeat(indent.length) + marker;
+    });
+
+    // Wikiリンク [[Link]] -> <a href="...">Link</a> への変換
+    // PDF化の際はジャンプできないため、単なる装飾にするか、アンカーリンクにするなどの対応が必要です。
+    // ここでは簡易的に太字+色付けの装飾に変換します。
+    processed = processed.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (match, fileName, label) => {
+        const text = label || fileName;
+        return `<strong style="color: #007acc;">${text}</strong>`;
     });
 
     // 5. ブックマーク (@card URL) のHTML化
@@ -5644,6 +5942,66 @@ async function executeGitActionMenu(apiCall, successMsg) {
         }
     } catch (e) {
         showNotification(`予期せぬエラー: ${e.message}`, 'error');
+    }
+}
+
+// ========== バックリンクパネルの実装 ==========
+const btnBacklinks = document.getElementById('btn-backlinks');
+const backlinksList = document.getElementById('backlinks-list');
+
+if (btnBacklinks) {
+    btnBacklinks.addEventListener('click', () => {
+        if (isBacklinksVisible) {
+            // 既に表示中なら閉じる
+            isBacklinksVisible = false;
+        } else {
+            // 表示する (他を閉じる)
+            isBacklinksVisible = true;
+            isTerminalVisible = false;
+            isPdfPreviewVisible = false;
+            if (window.calendarAPI) window.calendarAPI.hide();
+
+            // バックリンク更新
+            updateBacklinks();
+        }
+        updateTerminalVisibility();
+    });
+}
+
+async function updateBacklinks() {
+    if (!currentFilePath || !currentDirectoryPath) return;
+    if (!backlinksList) return;
+
+    backlinksList.innerHTML = '<div style="color:#888; padding:10px;">検索中...</div>';
+
+    const fileName = path.basename(currentFilePath);
+
+    try {
+        const links = await window.electronAPI.scanBacklinks(fileName, currentDirectoryPath);
+
+        backlinksList.innerHTML = '';
+
+        if (links.length === 0) {
+            backlinksList.innerHTML = '<div style="color:#888; padding:10px;">バックリンクはありません</div>';
+            return;
+        }
+
+        links.forEach(link => {
+            const div = document.createElement('div');
+            div.className = 'backlink-item';
+            div.innerHTML = `
+                <span class="backlink-path">${link.name}</span>
+                <div class="backlink-preview">${escapeHtml(link.preview)}</div>
+            `;
+            div.addEventListener('click', () => {
+                openFile(link.path, link.name);
+            });
+            backlinksList.appendChild(div);
+        });
+
+    } catch (e) {
+        console.error(e);
+        backlinksList.innerHTML = '<div style="color:red; padding:10px;">エラーが発生しました</div>';
     }
 }
 
@@ -7557,6 +7915,10 @@ function switchToFile(filePath) {
 
     updateFileStats();
     onEditorInput(false);
+
+    if (isBacklinksVisible) {
+        updateBacklinks();
+    }
 }
 
 function closeTab(element, isSettings = false) {
@@ -9171,6 +9533,152 @@ function showExternalChangeModal(filePath) {
     overlay.appendChild(content);
     document.body.appendChild(overlay);
 }
+
+// コマンドパレット機能
+class CommandPalette {
+    constructor() {
+        this.overlay = document.getElementById('command-palette');
+        this.input = document.getElementById('command-palette-input');
+        this.list = document.getElementById('command-palette-list');
+        this.isOpen = false;
+        this.selectedIndex = 0;
+        this.filteredCommands = [];
+
+        this.init();
+    }
+
+    init() {
+        if (!this.overlay) return;
+
+        // イベントリスナー
+        this.overlay.addEventListener('click', (e) => {
+            if (e.target === this.overlay) this.close();
+        });
+
+        this.input.addEventListener('input', () => this.filterCommands());
+
+        this.input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.selectedIndex = Math.min(this.selectedIndex + 1, this.filteredCommands.length - 1);
+                this.renderList();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.selectedIndex = Math.max(this.selectedIndex - 1, 0);
+                this.renderList();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                this.executeSelected();
+            } else if (e.key === 'Escape') {
+                this.close();
+            }
+        });
+    }
+
+    open() {
+        this.isOpen = true;
+        this.overlay.classList.remove('hidden');
+        this.input.value = '';
+        this.input.focus();
+        this.filterCommands();
+    }
+
+    close() {
+        this.isOpen = false;
+        this.overlay.classList.add('hidden');
+        if (globalEditorView) globalEditorView.focus();
+    }
+
+    toggle() {
+        if (this.isOpen) this.close();
+        else this.open();
+    }
+
+    filterCommands() {
+        const query = this.input.value.toLowerCase();
+
+        // COMMANDS_REGISTRY (renderer.js内で定義済み) を使用
+        this.filteredCommands = COMMANDS_REGISTRY.filter(cmd => {
+            return cmd.name.toLowerCase().includes(query) || cmd.id.toLowerCase().includes(query);
+        });
+
+        this.selectedIndex = 0;
+        this.renderList();
+    }
+
+    renderList() {
+        this.list.innerHTML = '';
+
+        this.filteredCommands.forEach((cmd, index) => {
+            const item = document.createElement('div');
+            item.className = 'command-item';
+            if (index === this.selectedIndex) item.classList.add('selected');
+
+            // キーバインドの表示用
+            const keys = getKeybindingsForCommand(cmd.id);
+            const keyStr = keys.length > 0 ? formatKeyDisplay(keys[0]) : '';
+
+            item.innerHTML = `
+                <span class="name">${cmd.name}</span>
+                <span class="shortcut">${keyStr}</span>
+            `;
+
+            item.addEventListener('click', () => {
+                this.selectedIndex = index;
+                this.executeSelected();
+            });
+
+            // マウスオーバーで選択状態更新
+            item.addEventListener('mouseenter', () => {
+                this.selectedIndex = index;
+                const prev = this.list.querySelector('.command-item.selected');
+                if (prev) prev.classList.remove('selected');
+                item.classList.add('selected');
+            });
+
+            this.list.appendChild(item);
+        });
+
+        // 選択アイテムが見えるようにスクロール
+        const selectedEl = this.list.children[this.selectedIndex];
+        if (selectedEl) {
+            selectedEl.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    executeSelected() {
+        const cmd = this.filteredCommands[this.selectedIndex];
+        if (cmd) {
+            this.close();
+            // 少し遅らせて実行（UIが閉じるのを待つ）
+            setTimeout(() => {
+                // コンテキストに応じて実行 (editorコマンドの場合はviewを渡す必要がある)
+                if (cmd.context === 'editor' && globalEditorView) {
+                    cmd.run(globalEditorView);
+                } else {
+                    cmd.run();
+                }
+            }, 50);
+        }
+    }
+}
+
+// インスタンス作成
+let commandPalette;
+window.addEventListener('load', () => {
+    // ... 既存のloadイベント内 ...
+    commandPalette = new CommandPalette();
+    setupSnippetSettingsEvents();
+});
+
+// ショートカットキー登録 (Ctrl+Shift+P)
+COMMANDS_REGISTRY.push({
+    id: 'view:command-palette',
+    name: 'コマンドパレット',
+    defaultKey: 'Mod-Shift-p',
+    context: 'global',
+    run: () => commandPalette && commandPalette.toggle()
+});
 
 document.addEventListener('click', () => {
     ContextMenu.close();

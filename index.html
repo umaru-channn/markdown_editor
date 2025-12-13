@@ -781,6 +781,7 @@
                                 <li class="settings-nav-item" data-section="appearance">外観</li>
                                 <li class="settings-nav-item" data-section="pdf">PDF設定</li>
                                 <li class="settings-nav-item" data-section="hotkeys">ホットキー (Hotkeys)</li>
+                                <div class="settings-nav-item" data-section="snippets">スニペット</div>
                                 <li class="settings-nav-item" data-section="sync">クラウド同期</li>
                             </ul>
                         </div>
@@ -1171,6 +1172,57 @@
                                 </div>
                             </div>
 
+                            <div class="settings-section" id="settings-section-snippets">
+                                <h3>テキストスニペット設定</h3>
+                                <p class="settings-desc">エディタ内でトリガーを入力すると定型文に展開されます。<br><code>{{date}}</code>
+                                    は今日の日付、<code>{{time}}</code> は現在の時刻に置換されます。</p>
+
+                                <div class="snippet-input-group"
+                                    style="display: flex; gap: 10px; margin-bottom: 15px; align-items: flex-end;">
+                                    <div style="flex: 1;">
+                                        <label style="font-size: 12px; display: block; margin-bottom: 4px;">トリガー (例:
+                                            ;test)</label>
+                                        <input type="text" id="snippet-trigger-input" class="settings-input"
+                                            placeholder=";test">
+                                    </div>
+                                    <div style="flex: 2;">
+                                        <label
+                                            style="font-size: 12px; display: block; margin-bottom: 4px;">置換テキスト</label>
+                                        <input type="text" id="snippet-replace-input" class="settings-input"
+                                            placeholder="定型文...">
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <label style="font-size: 12px; display: block; margin-bottom: 4px;">ラベル
+                                            (任意)</label>
+                                        <input type="text" id="snippet-label-input" class="settings-input"
+                                            placeholder="説明">
+                                    </div>
+                                    <button id="btn-add-snippet" class="modal-btn primary"
+                                        style="height: 36px;">追加</button>
+                                </div>
+
+                                <div class="snippets-list-container"
+                                    style="border: 1px solid var(--sidebar-border); border-radius: 4px; max-height: 300px; overflow-y: auto;">
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                        <thead style="background: var(--sidebar-bg); position: sticky; top: 0;">
+                                            <tr>
+                                                <th style="padding: 8px; text-align: left; width: 20%;">トリガー</th>
+                                                <th style="padding: 8px; text-align: left; width: 40%;">置換テキスト</th>
+                                                <th style="padding: 8px; text-align: left; width: 30%;">ラベル</th>
+                                                <th style="padding: 8px; text-align: center; width: 10%;">操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="snippets-table-body">
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div style="margin-top: 10px; text-align: right;">
+                                    <button id="btn-reset-snippets" class="modal-btn"
+                                        style="font-size: 12px; padding: 4px 8px;">デフォルトに戻す</button>
+                                </div>
+                            </div>
+
                             <div class="settings-section" id="settings-section-sync">
                                 <h2>クラウド同期 (Cloud Sync)</h2>
                                 <div class="setting-item">
@@ -1225,6 +1277,13 @@
                 <div id="pdf-preview-container" class="pdf-preview-content hidden">
                     <canvas id="pdf-canvas"></canvas>
                 </div>
+
+                <div class="backlinks-header hidden" id="backlinks-header">
+                    バックリンク (リンク元)
+                </div>
+                <div id="backlinks-container" class="backlinks-content hidden">
+                    <div class="backlinks-list" id="backlinks-list"></div>
+                </div>
             </div>
 
             <div class="resizer" id="resizer-right"></div>
@@ -1252,6 +1311,13 @@
                         <line x1="16" y1="2" x2="16" y2="6"></line>
                         <line x1="8" y1="2" x2="8" y2="6"></line>
                         <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                </div>
+                <div class="icon" id="btn-backlinks" title="バックリンク">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                     </svg>
                 </div>
                 <!-- <div class="icon" id="btn-info" title="情報">
@@ -1287,6 +1353,15 @@
         </div>
     </div>
 
+    <div id="command-palette" class="command-palette-overlay hidden">
+        <div class="command-palette-modal">
+            <input type="text" id="command-palette-input" class="command-palette-input" placeholder="コマンドを入力..."
+                autocomplete="off">
+            <div id="command-palette-list" class="command-palette-list">
+            </div>
+        </div>
+    </div>
+
     <!-- 通知用コンテナ -->
     <div id="notification-container" class="notification-container"></div>
 
@@ -1299,18 +1374,10 @@
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
     <script src="node_modules/katex/dist/katex.min.js"></script>
     <script src="node_modules/katex/dist/contrib/auto-render.min.js"></script>
-    <script type="module">
-        import mermaid from './node_modules/mermaid/dist/mermaid.esm.min.mjs';
-        // 初期化設定（必要に応じてテーマなどを設定可能）
-        mermaid.initialize({ startOnLoad: false, theme: 'default' });
-        // グローバル変数として公開し、livePreviewPlugin.jsからアクセス可能にする
-        window.mermaid = mermaid;
-    </script>
     <script src="node_modules/marked/lib/marked.umd.js"></script>
     <script type="module">
         import mermaid from './node_modules/mermaid/dist/mermaid.esm.min.mjs';
         // 初期化設定
-        // ★修正: htmlLabels: false を追加して、Canvas書き出し時の汚染エラーを防ぐ
         mermaid.initialize({
             startOnLoad: false,
             theme: 'default',

@@ -3,6 +3,7 @@ const { ipcRenderer } = require('electron');
 
 // contextBridge ではなく window オブジェクトに直接割り当てる
 window.electronAPI = {
+  scanBacklinks: (targetFileName, rootDir) => ipcRenderer.invoke('scan-backlinks', targetFileName, rootDir),
   // --- Terminal APIs ---
   getTerminalConfig: () => ipcRenderer.invoke('terminal:get-config'),
   updateTerminalConfig: (updates) => ipcRenderer.invoke('terminal:update-config', updates),
