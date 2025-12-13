@@ -12,7 +12,7 @@
 const path = require('path');
 const { webFrame } = require('electron');
 const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder, StateField } = require("@codemirror/state");
-const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration } = require("@codemirror/view");
+const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration, WidgetType } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, indentUnit } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
@@ -2508,6 +2508,8 @@ function createEditorState(content, filePath) {
             autoCloseBracketsCompartment.of(appSettings.autoCloseBrackets ? closeBrackets() : []),
             lineNumbersCompartment.of(appSettings.showLineNumbers ? lineNumbers() : []),
             whitespaceCompartment.of(appSettings.showWhitespace ? customHighlightWhitespace : []),
+
+            conflictField,
 
             EditorView.updateListener.of(update => {
                 if (update.docChanged) {
@@ -5534,122 +5536,114 @@ function handleRemoteSettingsClick(e) {
 }
 
 /**
- * Git操作用の拡張ボタン群にイベントリスナーを設定する関数
+ * Git操作用の拡張ボタン群の設定（「...」メニューの実装）
  */
 function setupGitExtraButtons() {
-    // ボタン要素の取得
-    const btnIgnore = document.getElementById('btn-git-ignore-apply');
-    const btnHistory = document.getElementById('btn-git-delete-history');
-    const btnAmend = document.getElementById('btn-git-amend');
-    const btnForce = document.getElementById('btn-git-force-push');
+    const btnMore = document.getElementById('btn-git-more');
+    if (!btnMore) return;
 
-    // リスナー設定用ヘルパー: すでに設定済みならスキップするためのフラグ管理などは
-    // DOM要素が静的なので、DOMContentLoaded時に一度だけ呼ばれる前提でシンプルに記述します
+    const newBtnMore = btnMore.cloneNode(true);
+    btnMore.parentNode.replaceChild(newBtnMore, btnMore);
 
-    // --- 1. .gitignore再適用ボタン ---
-    if (btnIgnore) {
-        // 重複登録防止のため、クローンして置換（簡易的なリスナーリセット）
-        const newBtn = btnIgnore.cloneNode(true);
-        btnIgnore.parentNode.replaceChild(newBtn, btnIgnore);
+    newBtnMore.addEventListener('click', (e) => {
+        e.stopPropagation();
 
-        newBtn.addEventListener('click', async () => {
-            showCompactConfirmModal('.gitignoreを再適用しますか？\n(キャッシュを削除して再コミットします)', async () => {
-                await executeGitAction(newBtn, () => window.electronAPI.gitApplyGitignore(currentDirectoryPath), '.gitignoreを適用しました');
-            });
-        });
-    }
+        const rect = newBtnMore.getBoundingClientRect();
 
-    // --- 2. 履歴全削除ボタン ---
-    if (btnHistory) {
-        const newBtn = btnHistory.cloneNode(true);
-        btnHistory.parentNode.replaceChild(newBtn, btnHistory);
+        ContextMenu.show(rect.left, rect.bottom + 5, [
+            {
+                label: 'Pull (--no-ff)',
+                click: async () => {
+                    if (!currentDirectoryPath) return;
+                    try {
+                        showNotification('Pull (--no-ff) を実行中...', 'info');
+                        const result = await window.electronAPI.gitPullNoFF(currentDirectoryPath);
 
-        newBtn.addEventListener('click', async () => {
-            showCompactConfirmModal('【危険】履歴を全削除しますか？\n現在のファイル状態を「最初のコミット」として履歴をリセットします。', async () => {
-                await executeGitAction(newBtn, () => window.electronAPI.gitDeleteHistory(currentDirectoryPath), '履歴をリセットしました');
-            });
-        });
-    }
+                        if (result.success) {
+                            showNotification('Pull (--no-ff) 完了', 'success');
+                        } else {
+                            showNotification(`Pullエラー: ${result.error}`, 'error');
+                        }
 
-    // --- 3. Amendボタン ---
-    if (btnAmend) {
-        const newBtn = btnAmend.cloneNode(true);
-        btnAmend.parentNode.replaceChild(newBtn, btnAmend);
-
-        newBtn.addEventListener('click', async () => {
-            // ▼ 事前チェック: ステージングがあるか確認
-            try {
-                const status = await window.electronAPI.gitStatus(currentDirectoryPath);
-                if (!status.success || !status.staged || status.staged.length === 0) {
-                    showNotification('上書きする変更（ステージ済みファイル）がありません', 'error');
-                    return;
+                        // ステータス更新とファイルの強制リロード
+                        refreshGitStatus();
+                        if (currentFilePath && !openedFiles.get(currentFilePath)?.isVirtual) {
+                            await reloadFileFromDisk(currentFilePath);
+                        }
+                    } catch (e) {
+                        showNotification(`エラー: ${e.message}`, 'error');
+                    }
                 }
-            } catch (e) {
-                console.error(e);
-                return;
-            }
-
-            showCompactConfirmModal('直前のコミットを上書きしますか？\n(現在のステージング内容が含まれます)', async () => {
-                await executeGitAction(newBtn, () => window.electronAPI.gitCommitAmend(currentDirectoryPath), 'コミットを上書きしました');
-            });
-        });
-    }
-
-    // --- 4. Force Pushボタン ---
-    if (btnForce) {
-        const newBtn = btnForce.cloneNode(true);
-        btnForce.parentNode.replaceChild(newBtn, btnForce);
-
-        newBtn.addEventListener('click', async () => {
-            // ▼ 事前チェック: リモートがあるか確認
-            try {
-                const remote = await window.electronAPI.gitGetRemoteUrl(currentDirectoryPath);
-                if (!remote.success || !remote.url) {
-                    showNotification('リモートリポジトリ(origin)が設定されていません', 'error');
-                    return;
+            },
+            { type: 'separator' },
+            {
+                label: '.gitignoreを再適用',
+                click: async () => {
+                    showCompactConfirmModal('.gitignoreを再適用しますか？\n(キャッシュを削除して再コミットします)', async () => {
+                        await executeGitActionMenu(() => window.electronAPI.gitApplyGitignore(currentDirectoryPath), '.gitignoreを適用しました');
+                    });
                 }
-            } catch (e) {
-                console.error(e);
-                return;
-            }
+            },
+            {
+                label: 'Amend (直前のコミットに上書き)',
+                click: async () => {
+                    try {
+                        const status = await window.electronAPI.gitStatus(currentDirectoryPath);
+                        if (!status.success || !status.staged || status.staged.length === 0) {
+                            showNotification('上書きする変更（ステージ済みファイル）がありません', 'error');
+                            return;
+                        }
+                    } catch (e) { console.error(e); return; }
 
-            showCompactConfirmModal('強制プッシュしますか？\n(リモートの履歴が上書きされます)', async () => {
-                await executeGitAction(newBtn, () => window.electronAPI.gitPushForce(currentDirectoryPath), '強制プッシュ完了');
-            });
-        });
-    }
+                    showCompactConfirmModal('直前のコミットを上書きしますか？\n(現在のステージング内容が含まれます)', async () => {
+                        await executeGitActionMenu(() => window.electronAPI.gitCommitAmend(currentDirectoryPath), 'コミットを上書きしました');
+                    });
+                }
+            },
+            { type: 'separator' },
+            {
+                label: '強制プッシュ (Force Push)',
+                click: async () => {
+                    try {
+                        const remote = await window.electronAPI.gitGetRemoteUrl(currentDirectoryPath);
+                        if (!remote.success || !remote.url) {
+                            showNotification('リモートリポジトリ(origin)が設定されていません', 'error');
+                            return;
+                        }
+                    } catch (e) { console.error(e); return; }
+
+                    showCompactConfirmModal('強制プッシュしますか？\n(リモートの履歴が上書きされます)', async () => {
+                        await executeGitActionMenu(() => window.electronAPI.gitPushForce(currentDirectoryPath), '強制プッシュ完了');
+                    });
+                }
+            },
+            {
+                label: '履歴を全削除 (Reset History)',
+                click: async () => {
+                    showCompactConfirmModal('【危険】履歴を全削除しますか？\n現在のファイル状態を「最初のコミット」として履歴をリセットします。', async () => {
+                        await executeGitActionMenu(() => window.electronAPI.gitDeleteHistory(currentDirectoryPath), '履歴をリセットしました');
+                    });
+                }
+            }
+        ]);
+    });
 }
 
-// ヘルパー: ボタン作成
-function createHeaderBtn(icon, title, onClick) {
-    const btn = document.createElement('button');
-    btn.className = 'header-btn';
-    btn.innerHTML = icon;
-    btn.title = title;
-    btn.addEventListener('click', () => onClick(btn));
-    return btn;
-}
-
-// ヘルパー: Gitアクション実行ラッパー
-async function executeGitAction(btn, apiCall, successMsg) {
+// ヘルパー: メニュー用Gitアクション実行ラッパー (ボタン無効化処理なし版)
+async function executeGitActionMenu(apiCall, successMsg) {
     if (!currentDirectoryPath) return;
     try {
-        btn.classList.add('syncing'); // 回転などのアニメーションがあれば
-        btn.disabled = true;
-
+        showNotification('処理中...', 'info');
         const result = await apiCall();
 
         if (result.success) {
             showNotification(successMsg, 'success');
-            refreshGitStatus(); // 画面更新
+            refreshGitStatus();
         } else {
             showNotification(`エラー: ${result.error}`, 'error');
         }
     } catch (e) {
         showNotification(`予期せぬエラー: ${e.message}`, 'error');
-    } finally {
-        btn.classList.remove('syncing');
-        btn.disabled = false;
     }
 }
 
@@ -6667,7 +6661,7 @@ window.addEventListener('load', async () => {
                 }
             }, 500);
 
-            // 2. ★追加: 現在開いているファイルの自動再読み込み判定
+            // 2. 現在開いているファイルの自動再読み込み判定
             // (renameイベントはファイル消失の可能性があるため、changeイベントのみ対象とするのが安全ですが、
             //  エディタによっては保存時に rename -> change の順で走ることもあるため、
             //  ここではファイルが存在するか確認してから処理します)
@@ -7034,6 +7028,178 @@ async function renderMediaContent(filePath, type) {
     }
 }
 
+// ========== コンフリクト解消機能の実装 (修正版) ==========
+
+// 1. ボタンを表示するためのウィジェット
+class ConflictWidget extends WidgetType {
+    constructor(startLine, midLine, endLine) {
+        super();
+        this.startLine = startLine;
+        this.midLine = midLine;
+        this.endLine = endLine;
+    }
+
+    eq(other) {
+        return other.startLine === this.startLine &&
+            other.midLine === this.midLine &&
+            other.endLine === this.endLine;
+    }
+
+    toDOM(view) {
+        const div = document.createElement("div");
+        div.className = "conflict-actions-widget";
+
+        const label = document.createElement("span");
+        label.textContent = "コンフリクト:";
+        label.style.fontWeight = "bold";
+        label.style.fontSize = "11px";
+        label.style.marginRight = "8px";
+
+        const createBtn = (text, cls, type) => {
+            const btn = document.createElement("button");
+            btn.textContent = text;
+            btn.className = `conflict-btn ${cls}`;
+            // マウスダウンイベントを止めてカーソル移動を防ぐ
+            btn.onmousedown = (e) => e.preventDefault();
+            btn.onclick = (e) => {
+                e.preventDefault();
+                this.resolve(view, type);
+            };
+            return btn;
+        };
+
+        div.appendChild(label);
+        div.appendChild(createBtn("自分の変更 (Current)", "current", "current"));
+        div.appendChild(createBtn("相手の変更 (Incoming)", "incoming", "incoming"));
+        div.appendChild(createBtn("両方残す", "both", "both"));
+
+        return div;
+    }
+
+    resolve(view, type) {
+        const doc = view.state.doc;
+        // 行番号から位置を取得
+        const startPos = doc.line(this.startLine).from;
+        const endPos = doc.line(this.endLine).to;
+
+        let insertText = "";
+
+        if (type === 'current') {
+            // 中身がある場合のみ抽出
+            if (this.midLine > this.startLine + 1) {
+                const textStart = doc.line(this.startLine + 1).from;
+                const textEnd = doc.line(this.midLine - 1).to;
+                insertText = doc.sliceString(textStart, textEnd);
+            }
+        } else if (type === 'incoming') {
+            if (this.endLine > this.midLine + 1) {
+                const textStart = doc.line(this.midLine + 1).from;
+                const textEnd = doc.line(this.endLine - 1).to;
+                insertText = doc.sliceString(textStart, textEnd);
+            }
+        } else if (type === 'both') {
+            const current = (this.midLine > this.startLine + 1)
+                ? doc.sliceString(doc.line(this.startLine + 1).from, doc.line(this.midLine - 1).to)
+                : "";
+            const incoming = (this.endLine > this.midLine + 1)
+                ? doc.sliceString(doc.line(this.midLine + 1).from, doc.line(this.endLine - 1).to)
+                : "";
+            // 両方残す場合は間に改行を入れて結合
+            insertText = current + (current && incoming ? "\n" : "") + incoming;
+        }
+
+        view.dispatch({
+            changes: { from: startPos, to: endPos, insert: insertText },
+            scrollIntoView: true
+        });
+    }
+}
+
+// 2. ハイライトロジック (引数を state に変更)
+function conflictHighlighter(state) {
+    const builder = new RangeSetBuilder();
+    const doc = state.doc; // view.state.doc ではなく state.doc を使用
+
+    let startLine = -1;
+    let midLine = -1;
+
+    // ドキュメント全体を走査
+    for (let i = 1; i <= doc.lines; i++) {
+        const line = doc.line(i);
+        const text = line.text;
+
+        // 正規表現でインデントがあっても検出できるように修正
+        if (/^\s*<<<<<<< /.test(text) || text.trim() === '<<<<<<<') {
+            startLine = i;
+            midLine = -1;
+        } else if (/^\s*=======/.test(text) && startLine !== -1) {
+            midLine = i;
+        } else if (/^\s*>>>>>>>/.test(text) && startLine !== -1 && midLine !== -1) {
+            const endLine = i;
+
+            // RangeSetBuilderには「位置の昇順」で追加する必要があります
+
+            const startPos = doc.line(startLine).from;
+
+            // 1. 開始行 (<<<<<<<)
+            // ウィジェット (ボタン) を追加
+            builder.add(startPos, startPos, Decoration.widget({
+                widget: new ConflictWidget(startLine, midLine, endLine),
+                side: -1,
+                block: true
+            }));
+
+            // マーカー行の色付け
+            builder.add(startPos, startPos, Decoration.line({ class: "cm-conflict-marker" }));
+
+            // 2. 自分の変更 (Current) エリア
+            if (midLine > startLine + 1) {
+                for (let l = startLine + 1; l < midLine; l++) {
+                    const pos = doc.line(l).from;
+                    builder.add(pos, pos, Decoration.line({ class: "cm-conflict-current-content" }));
+                }
+            }
+
+            // 3. 中間行 (=======)
+            const midPos = doc.line(midLine).from;
+            builder.add(midPos, midPos, Decoration.line({ class: "cm-conflict-marker" }));
+
+            // 4. 相手の変更 (Incoming) エリア
+            if (endLine > midLine + 1) {
+                for (let l = midLine + 1; l < endLine; l++) {
+                    const pos = doc.line(l).from;
+                    builder.add(pos, pos, Decoration.line({ class: "cm-conflict-incoming-content" }));
+                }
+            }
+
+            // 5. 終了行 (>>>>>>>)
+            const endPos = doc.line(endLine).from;
+            builder.add(endPos, endPos, Decoration.line({ class: "cm-conflict-marker" }));
+
+            // リセットして次の検索へ
+            startLine = -1;
+            midLine = -1;
+        }
+    }
+    return builder.finish();
+}
+
+// 3. プラグイン定義 (StateFieldに変更)
+const conflictField = StateField.define({
+    create(state) {
+        return conflictHighlighter(state);
+    },
+    update(decorations, tr) {
+        // ドキュメントが変更された場合のみ再計算
+        if (tr.docChanged) {
+            return conflictHighlighter(tr.state);
+        }
+        // 変更がない場合は位置のマッピングだけ行う（高速化）
+        return decorations.map(tr.changes);
+    },
+    provide: f => EditorView.decorations.from(f)
+});
+
 /**
  * Git Diffビューを新しいタブで開く関数
  * @param {string} filePath - リポジトリルートからの相対パス
@@ -7194,7 +7360,7 @@ function switchToFile(filePath) {
     // 古いパスを保存
     const previouslyActivePath = currentFilePath;
 
-    // --- 【追加】Diffビューからの切り替え時のクリーンアップ ---
+    // --- Diffビューからの切り替え時のクリーンアップ ---
     if (globalDiffView) {
         // Diffビューを破棄してエディタをクリア
         const editorEl = document.getElementById('editor');
@@ -7273,6 +7439,7 @@ function switchToFile(filePath) {
             drawSelection(),         // 選択範囲の描画
             dropCursor(),            // ドラッグ時のカーソル
             history(),               // Undo/Redo
+            conflictField,         // コンフリクト解消プラグイン
             keymap.of([...defaultKeymap, ...historyKeymap]), // キーボードショートカット
 
             // テーマ設定 (高さ100%確保と差分色調整)
@@ -8871,7 +9038,7 @@ async function checkExternalFileChange(filePath) {
 
     // ファイルが存在するか確認 (削除された場合は何もしないか、別途閉じる処理が必要だが今回は無視)
     // ※ Electronのfsモジュール経由で確認したいが、ここでは簡易的に読み込み試行で代用
-    
+
     const isDirty = fileModificationState.get(filePath);
 
     if (!isDirty) {
@@ -8897,11 +9064,11 @@ async function reloadFileFromDisk(filePath) {
         // 1. ディスクから最新の内容を読み込む
         const newContent = await window.electronAPI.loadFile(filePath);
 
-        // ★追加: 現在のエディタの内容と比較し、同じなら何もしない (自分の保存による検知を無視)
+        // 現在のエディタの内容と比較し、同じなら何もしない (自分の保存による検知を無視)
         const currentContent = globalEditorView.state.doc.toString();
         if (newContent === currentContent) {
             console.log('Content match, skipping reload.');
-            return; 
+            return;
         }
 
         // 2. 現在のカーソル位置を保存
@@ -8922,9 +9089,9 @@ async function reloadFileFromDisk(filePath) {
         if (fileData) {
             fileData.content = newContent;
         }
-        
+
         updateFileStats();
-        
+
         // 本当に外部からの変更があった場合のみ通知
         showNotification('ファイルを再読み込みしました', 'info');
 
@@ -8970,7 +9137,7 @@ function showExternalChangeModal(filePath) {
     btnReload.style.backgroundColor = '#d9534f';
     btnReload.style.color = 'white';
     btnReload.style.border = 'none';
-    
+
     btnReload.onclick = async () => {
         overlay.remove();
         // ダーティフラグを消してからリロード
@@ -8988,7 +9155,7 @@ function showExternalChangeModal(filePath) {
     const btnKeep = document.createElement('button');
     btnKeep.className = 'modal-btn primary';
     btnKeep.textContent = '自分の変更を維持';
-    
+
     btnKeep.onclick = () => {
         overlay.remove();
         // 何もしない（後でユーザーがCtrl+Sを押せば上書き保存される）

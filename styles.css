@@ -4478,3 +4478,140 @@ body[data-theme="dark"] .cm-merge-b .cm-changedText { background-color: rgba(100
     font-weight: bold;
     cursor: pointer;
 }
+
+/* Conflict Resolution UI */
+
+/* コンフリクト領域全体の背景 */
+.cm-conflict-current-content {
+    background-color: rgba(64, 200, 174, 0.2); /* 緑系 (Current) */
+    display: inline-block; /* 行全体に適用するため */
+    width: 100%;
+}
+
+.cm-conflict-incoming-content {
+    background-color: rgba(64, 166, 255, 0.2); /* 青系 (Incoming) */
+    display: inline-block;
+    width: 100%;
+}
+
+/* マーカー行（<<<<<<<, =======, >>>>>>>）のスタイル */
+.cm-conflict-marker {
+    font-weight: bold;
+    color: #888;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* ダークモード調整 */
+body[data-theme="dark"] .cm-conflict-marker {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ccc;
+}
+
+/* 操作ボタンを含むウィジェットのコンテナ */
+.conflict-actions-widget {
+    background-color: var(--sidebar-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin: 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: fit-content;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    z-index: 20;
+    pointer-events: auto; /* クリック可能にする */
+}
+
+/* ボタンのスタイル */
+.conflict-btn {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+}
+
+.conflict-btn.current {
+    color: #2da44e; /* GitHub Green */
+}
+.conflict-btn.current:hover {
+    background-color: rgba(45, 164, 78, 0.1);
+}
+
+.conflict-btn.incoming {
+    color: #007acc; /* VS Code Blue */
+}
+.conflict-btn.incoming:hover {
+    background-color: rgba(0, 122, 204, 0.1);
+}
+
+.conflict-btn.both {
+    color: var(--text-color);
+    opacity: 0.8;
+}
+.conflict-btn.both:hover {
+    background-color: rgba(128, 128, 128, 0.1);
+}
+
+/* ========== Git UI Update ========== */
+
+/* メインのコミットボタンを目立たせる */
+.git-action-btn.primary {
+    background-color: #007acc;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 6px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.git-action-btn.primary:hover {
+    background-color: #005a9e;
+}
+
+/* 同期ボタンエリアのコンテナ */
+.git-sync-actions {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+
+/* 同期ボタン (Pull/Push) */
+.git-sync-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background-color: var(--sidebar-bg); /* 背景を控えめに */
+    border: 1px solid var(--sidebar-border);
+    color: var(--text-color);
+    border-radius: 3px;
+    padding: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+}
+
+.git-sync-btn:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+    border-color: #999;
+}
+
+body[data-theme="dark"] .git-sync-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.git-sync-btn.icon-only {
+    flex: 0 0 auto; /* 幅を自動にしてアイコンのみサイズに */
+    padding: 4px 6px;
+}
+
+.git-sync-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}

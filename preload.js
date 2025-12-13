@@ -52,6 +52,7 @@ window.electronAPI = {
   gitCommitAmend: (repoPath) => ipcRenderer.invoke('git-commit-amend', repoPath),
   gitPushForce: (repoPath) => ipcRenderer.invoke('git-push-force', repoPath),
   gitShow: (repoPath, hash, filepath) => ipcRenderer.invoke('git-show', repoPath, hash, filepath),
+  gitPullNoFF: (path) => ipcRenderer.invoke('git-pull-no-ff', path),
 
   // renderer.jsの呼び出し名に合わせて追加・マッピング
   gitLog: (repoPath, depth) => ipcRenderer.invoke('git-log', repoPath, depth), // 旧APIとの互換性用

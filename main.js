@@ -3251,6 +3251,26 @@ ipcMain.handle('git-pull', async (event, repoPath) => {
   }
 });
 
+// --- git-pull --no-ff (CLI版) ---
+ipcMain.handle('git-pull-no-ff', async (event, repoPath) => {
+  try {
+    const dir = repoPath;
+    // runGitCommand は main.js 内に既存の関数として定義されている前提
+    const result = await runGitCommand(dir, 'pull --no-ff');
+
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+    return { success: true };
+  } catch (error) {
+    // 既存のエラーメッセージ翻訳関数があれば通す
+    const msg = typeof getJapaneseGitErrorMessage === 'function' 
+      ? getJapaneseGitErrorMessage(error.message || error.toString()) 
+      : (error.message || error.toString());
+    return { success: false, error: msg };
+  }
+});
+
 // --- git-push (認証対応) ---
 ipcMain.handle('git-push', async (event, repoPath) => {
   try {
