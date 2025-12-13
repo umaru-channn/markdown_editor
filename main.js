@@ -85,7 +85,7 @@ function setupAutoUpdater() {
       }
     });
   });
-  
+
   autoUpdater.on('error', (err) => {
     log.error('Update Error:', err);
   });
@@ -1090,8 +1090,102 @@ function createWindow() {
     }
   })
 
-  // --- Integrated Terminal Setup with TerminalService ---
+  // ========== プロジェクト全体検索 (Grep) ==========
+  // テキストファイルかどうかを判定するヘルパー関数
+  function isTextFile(filepath) {
+    const ext = path.extname(filepath).toLowerCase();
+    // 一般的なテキスト拡張子 + コード系
+    const textExts = [
+      '.txt', '.md', '.markdown', '.js', '.ts', '.json', '.html', '.css', '.scss',
+      '.xml', '.yaml', '.yml', '.py', '.rb', '.php', '.java', '.c', '.cpp', '.h',
+      '.cs', '.go', '.rs', '.sh', '.bat', '.ps1', '.sql', '.csv', '.ini', '.conf',
+      '.log', '.gitignore', '.env'
+    ];
+    return textExts.includes(ext);
+  }
 
+  // ファイル内検索を行う関数
+  async function searchInFile(filePath, query, results, limit) {
+    try {
+      // ファイルサイズチェック (例: 1MB以上はスキップ)
+      const stats = fs.statSync(filePath);
+      if (stats.size > 1024 * 1024) return;
+
+      const content = fs.readFileSync(filePath, 'utf8');
+
+      // NULLバイトが含まれていたらバイナリとみなしてスキップ
+      if (content.indexOf('\0') !== -1) return;
+
+      const lines = content.split(/\r?\n/);
+
+      // 大文字小文字を区別しない検索
+      const lowerQuery = query.toLowerCase();
+
+      for (let i = 0; i < lines.length; i++) {
+        if (results.length >= limit) return; // 制限件数に達したら終了
+
+        const line = lines[i];
+        if (line.toLowerCase().includes(lowerQuery)) {
+          // 結果に追加
+          results.push({
+            filePath: filePath,
+            lineNum: i + 1,
+            content: line.trim() // 表示用にトリム
+          });
+        }
+      }
+    } catch (e) {
+      // 読み込みエラーは無視
+    }
+  }
+
+  // ディレクトリを再帰的に探索する関数
+  async function grepRecursive(dir, query, results, limit, excludePatterns) {
+    if (results.length >= limit) return;
+
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (results.length >= limit) return;
+
+        const fullPath = path.join(dir, entry.name);
+
+        // 除外チェック (既存の shouldExclude 関数を利用)
+        if (shouldExclude(entry.name, excludePatterns)) continue;
+
+        if (entry.isDirectory()) {
+          await grepRecursive(fullPath, query, results, limit, excludePatterns);
+        } else if (entry.isFile()) {
+          // テキストファイル判定 (または全てのファイルを対象にして中身で判定)
+          // ここでは簡易的に拡張子チェックを通す
+          if (isTextFile(fullPath)) {
+            await searchInFile(fullPath, query, results, limit);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Grep dir error:', e);
+    }
+  }
+
+  ipcMain.handle('grep-search', async (event, query, dirPath) => {
+    if (!query || !dirPath) return { success: false, results: [] };
+
+    const settings = loadAppSettings();
+    const excludePatterns = settings.excludePatterns || 'node_modules, .git, dist, build';
+    const MAX_RESULTS = 1000; // 結果件数の上限
+    const results = [];
+
+    try {
+      await grepRecursive(dirPath, query, results, MAX_RESULTS, excludePatterns);
+      return { success: true, results: results };
+    } catch (error) {
+      return { success: false, error: error.message, results: [] };
+    }
+  });
+
+  // --- Integrated Terminal Setup with TerminalService ---
   // Set up terminal service event handlers
   terminalService.on('terminal-data', ({ terminalId, data }) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

@@ -62,6 +62,13 @@
                             <polyline points="12 6 12 12 16 14"></polyline>
                         </svg>
                     </button>
+                    <button class="side-switch" data-target="search" id="btn-top-search" title="全体検索">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                    </button>
                 </div>
             </div>
             <div class="tabs-container">
@@ -332,6 +339,19 @@
                             </svg>
                         </button>
                     </div>
+                    <div class="header-search-container content-hidden" id="header-search-container"
+                        style="flex: 1; padding: 0 5px; position: relative;">
+                        <input type="text" id="project-search-input" placeholder="検索 (Enter)"
+                            class="project-search-input-header" style="padding-right: 24px;">
+                        <button id="project-search-clear" class="icon-btn" title="クリア"
+                            style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; display: none;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- ファイルエクスプローラー -->
@@ -396,6 +416,13 @@
                 <div class="left-pane-content content-hidden" id="content-recent">
                     <strong>最近開いたファイル</strong>
                     <ul id="recent-files-list" class="recent-files-list"></ul>
+                </div>
+
+                <div class="left-pane-content content-hidden" id="content-search">
+                    <div class="search-panel-container">
+                        <div class="search-status" id="project-search-status"></div>
+                        <div class="search-results-list" id="project-search-results"></div>
+                    </div>
                 </div>
             </div>
 

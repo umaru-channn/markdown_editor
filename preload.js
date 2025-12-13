@@ -106,6 +106,9 @@ window.electronAPI = {
   fetchUrlTitle: (url) => ipcRenderer.invoke('fetch-url-title', url),
   fetchUrlMetadata: (url) => ipcRenderer.invoke('fetch-url-metadata', url),
 
+  // Grep検索
+  grepSearch: (query, dirPath) => ipcRenderer.invoke('grep-search', query, dirPath),
+
   // Settings
   loadAppSettings: () => ipcRenderer.invoke('load-app-settings'),
   saveAppSettings: (settings) => ipcRenderer.invoke('save-app-settings', settings),

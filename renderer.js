@@ -1421,15 +1421,15 @@ function handleListRenumbering(view, changes) {
     for (let i = minChangedLine - 1; i >= 1; i--) {
         const line = doc.line(i);
         const text = line.text;
-        
+
         // リスト行なら開始地点の候補として更新
         if (text.match(ORDERED_RE)) {
             startLine = i;
-        } 
+        }
         // 空行（Loose Listの合間）なら、まだリストブロック内の可能性があるので遡行継続
         else if (text.trim() === '') {
             continue;
-        } 
+        }
         // リストでも空行でもないなら、そこがリストブロックの境界
         else {
             break;
@@ -1496,7 +1496,7 @@ function handleListRenumbering(view, changes) {
                         // スタックにあるどの階層よりも浅い（または中途半端な）インデントの場合
                         // 新しい階層としてみなすか、最も近い親の下につけるか等の判断が必要だが
                         // ここでは「親が見つからなかったので新しい兄弟」として扱う
-                         stack.push({ indentLen: indentLen, count: 1 });
+                        stack.push({ indentLen: indentLen, count: 1 });
                         break;
                     }
                 }
@@ -1524,9 +1524,9 @@ function handleListRenumbering(view, changes) {
 
     // 5. 修正を実行
     if (changesSpec.length > 0) {
-        dispatch({ 
-            changes: changesSpec, 
-            annotations: ExternalChange.of(true) 
+        dispatch({
+            changes: changesSpec,
+            annotations: ExternalChange.of(true)
         });
     }
 }
@@ -3908,11 +3908,13 @@ function switchHeaderButtons(targetId) {
     const headerButtonsGit = document.getElementById('header-buttons-git');
     const headerButtonsOutline = document.getElementById('header-buttons-outline');
     const headerButtonsRecent = document.getElementById('header-buttons-recent');
+    const headerSearchContainer = document.getElementById('header-search-container');
 
     if (headerButtonsFiles) headerButtonsFiles.classList.add('content-hidden');
     if (headerButtonsGit) headerButtonsGit.classList.add('content-hidden');
     if (headerButtonsOutline) headerButtonsOutline.classList.add('content-hidden');
     if (headerButtonsRecent) headerButtonsRecent.classList.add('content-hidden');
+    if (headerSearchContainer) headerSearchContainer.classList.add('content-hidden');
 
     if (targetId === 'files' && headerButtonsFiles) {
         headerButtonsFiles.classList.remove('content-hidden');
@@ -3922,6 +3924,12 @@ function switchHeaderButtons(targetId) {
         headerButtonsOutline.classList.remove('content-hidden');
     } else if (targetId === 'recent' && headerButtonsRecent) {
         headerButtonsRecent.classList.remove('content-hidden');
+    } else if (targetId === 'search' && headerSearchContainer) {
+        // 検索タブの時は検索ヘッダーを表示
+        headerSearchContainer.classList.remove('content-hidden');
+        // 入力欄にフォーカスを当てる
+        const input = document.getElementById('project-search-input');
+        if (input) setTimeout(() => input.focus(), 50);
     }
 }
 
@@ -6371,7 +6379,202 @@ function setupAccountButton() {
     });
 }
 
+// ========== プロジェクト全体検索 (Grep) ==========
+const projectSearchInput = document.getElementById('project-search-input');
+const projectSearchResults = document.getElementById('project-search-results');
+const projectSearchStatus = document.getElementById('project-search-status');
+const projectSearchClearBtn = document.getElementById('project-search-clear');
 
+// 検索実行関数
+async function executeProjectSearch() {
+    if (!currentDirectoryPath) {
+        if (projectSearchStatus) projectSearchStatus.textContent = "フォルダが開かれていません";
+        return;
+    }
+
+    const query = projectSearchInput.value.trim();
+    if (!query) return;
+
+    if (projectSearchStatus) projectSearchStatus.textContent = "検索中...";
+    if (projectSearchResults) projectSearchResults.innerHTML = "";
+
+    try {
+        const result = await window.electronAPI.grepSearch(query, currentDirectoryPath);
+
+        if (result.success) {
+            renderSearchResults(result.results, query);
+        } else {
+            if (projectSearchStatus) projectSearchStatus.textContent = `エラー: ${result.error}`;
+        }
+    } catch (e) {
+        console.error(e);
+        if (projectSearchStatus) projectSearchStatus.textContent = "検索エラーが発生しました";
+    }
+}
+
+// 検索結果のレンダリング
+function renderSearchResults(results, query) {
+    if (!projectSearchResults) return;
+    projectSearchResults.innerHTML = "";
+
+    if (results.length === 0) {
+        if (projectSearchStatus) projectSearchStatus.textContent = "見つかりませんでした";
+        return;
+    }
+
+    if (projectSearchStatus) {
+        // ファイル数とマッチ数を計算（簡易）
+        const fileCount = new Set(results.map(r => r.filePath)).size;
+        projectSearchStatus.textContent = `${results.length} 件の結果 (${fileCount} ファイル)`;
+    }
+
+    // ファイルごとに結果をグループ化
+    const grouped = {};
+    results.forEach(item => {
+        if (!grouped[item.filePath]) grouped[item.filePath] = [];
+        grouped[item.filePath].push(item);
+    });
+
+    // ファイルごとのブロックを作成
+    Object.keys(grouped).forEach(filePath => {
+        const matches = grouped[filePath];
+
+        // ファイル名の表示用パス (相対パス)
+        let displayPath = filePath;
+        if (currentDirectoryPath && filePath.startsWith(currentDirectoryPath)) {
+            displayPath = path.relative(currentDirectoryPath, filePath);
+        }
+        const fileName = path.basename(filePath);
+        const dirName = path.dirname(displayPath); // ディレクトリ部分のみ
+
+        const fileBlock = document.createElement('div');
+        fileBlock.className = 'search-result-file';
+
+        // ヘッダー (ファイル名)
+        const header = document.createElement('div');
+        header.className = 'search-result-file-header';
+        header.title = filePath;
+        header.innerHTML = `
+            <span style="font-weight:bold;">${fileName}</span>
+            <span style="color:#888; font-size:0.9em; margin-left:6px;">${dirName}</span>
+            <span style="margin-left:auto; background:#ccc; color:#fff; border-radius:10px; padding:0 6px; font-size:10px;">${matches.length}</span>
+        `;
+
+        // ヘッダークリックで開閉（トグル）
+        header.addEventListener('click', () => {
+            const container = header.nextElementSibling;
+            if (container) {
+                container.style.display = container.style.display === 'none' ? 'flex' : 'none';
+            }
+        });
+
+        fileBlock.appendChild(header);
+
+        // マッチ行リスト
+        const matchesContainer = document.createElement('div');
+        matchesContainer.className = 'search-result-matches';
+
+        matches.forEach(match => {
+            const item = document.createElement('div');
+            item.className = 'search-result-match';
+            item.title = match.content; // ホバーで全文表示
+
+            // キーワードハイライト処理
+            // HTMLエスケープ後にハイライトタグを挿入
+            const safeContent = escapeHtml(match.content);
+            const safeQuery = escapeHtml(query);
+            // 大文字小文字を無視して置換
+            const highlightedContent = safeContent.replace(
+                new RegExp(escapeRegExp(safeQuery), 'gi'),
+                (m) => `<span class="match-highlight">${m}</span>`
+            );
+
+            item.innerHTML = `
+                <span class="search-match-line">${match.lineNum}</span>
+                <span>${highlightedContent}</span>
+            `;
+
+            // クリックで行へジャンプ
+            item.addEventListener('click', async () => {
+                await openFile(match.filePath, fileName);
+                // ファイルが開くまで少し待つか、openFileが完了した後にジャンプ
+                setTimeout(() => {
+                    scrollToLine(match.lineNum - 1); // 0-indexedに変換
+                    // ハイライト（選択）
+                    if (globalEditorView) {
+                        const line = globalEditorView.state.doc.line(match.lineNum);
+                        globalEditorView.dispatch({
+                            selection: { anchor: line.from, head: line.to },
+                            scrollIntoView: true
+                        });
+                        globalEditorView.focus();
+                    }
+                }, 100);
+            });
+
+            matchesContainer.appendChild(item);
+        });
+
+        fileBlock.appendChild(matchesContainer);
+        projectSearchResults.appendChild(fileBlock);
+    });
+}
+
+// ヘルパー: HTMLエスケープ
+function escapeHtml(text) {
+    if (!text) return text;
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// ヘルパー: 正規表現エスケープ
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// イベントリスナー設定 (window.onload内などで呼び出し)
+if (projectSearchInput) {
+    // 入力時にクリアボタンの表示制御と、空になった時の結果クリアを行う
+    projectSearchInput.addEventListener('input', () => {
+        const hasText = projectSearchInput.value.length > 0;
+
+        // ボタンの表示切り替え
+        if (projectSearchClearBtn) {
+            projectSearchClearBtn.style.display = hasText ? 'flex' : 'none';
+        }
+
+        // 文字が空になったら検索結果とステータスをクリア
+        if (!hasText) {
+            if (projectSearchResults) projectSearchResults.innerHTML = '';
+            if (projectSearchStatus) projectSearchStatus.textContent = '';
+        }
+    });
+
+    projectSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            executeProjectSearch();
+        }
+    });
+}
+
+// クリアボタンのクリックイベント
+if (projectSearchClearBtn) {
+    projectSearchClearBtn.addEventListener('click', () => {
+        if (projectSearchInput) {
+            projectSearchInput.value = '';
+            projectSearchInput.focus();
+        }
+        projectSearchClearBtn.style.display = 'none';
+
+        // 結果とステータスをクリア
+        if (projectSearchResults) projectSearchResults.innerHTML = '';
+        if (projectSearchStatus) projectSearchStatus.textContent = '';
+    });
+}
 
 window.addEventListener('load', async () => {
     console.log('Markdown IDE loaded');
