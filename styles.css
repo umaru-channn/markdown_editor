@@ -4780,3 +4780,97 @@ body[data-theme="dark"] .cm-wiki-link-text {
 .ͼ6 {
     text-decoration: none !important;
 }
+
+/* 右側（分割画面）のファイルタイトル用スタイル */
+#file-title-split-text {
+    font-size: 1.5em;       /* 左側と同じサイズ */
+    font-weight: bold;      /* 左側と同じ太さ */
+    color: var(--text-color);
+    width: 100%;
+    text-align: center;     /* 中央揃え */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+/* エディタ分割用のリサイザー */
+#resizer-editor-split {
+    width: 6px; /* つかみやすい幅に設定 */
+    cursor: col-resize;
+    background-color: var(--main-bg); /* 通常時は背景色と同じ */
+    border-left: 1px solid var(--sidebar-border); /* 境界線を表示 */
+    z-index: 10;
+    flex-shrink: 0; /* 縮まないようにする */
+    transition: background-color 0.2s;
+}
+
+#resizer-editor-split:hover,
+#resizer-editor-split.resizing {
+    background-color: #007acc; /* ホバー時・ドラッグ時は青くする */
+}
+
+/* 分割していないときは隠す */
+#resizer-editor-split.hidden {
+    display: none !important;
+}
+
+/* ドラッグ可能なタブのカーソルを変更 */
+.tab {
+    cursor: grab;
+}
+
+.tab:active {
+    cursor: grabbing;
+}
+
+/* ドラッグ中のタブのスタイル（半透明にするなど） */
+.tab.dragging {
+    opacity: 0.5;
+    background-color: #444; /* 暗めの色にして目立たせる */
+    border: 1px dashed #666;
+}
+
+.tab[draggable="true"] {
+    cursor: grab;
+}
+
+/* アクティブなエディタを目立たせる */
+.active-editor-pane {
+    box-shadow: none !important;
+    transition: box-shadow 0.2s;
+}
+
+/* --- ドラッグ＆ドロップ時のハイライト演出 --- */
+
+/* ケース1: まだ分割されていない時（右半分だけ光らせる） */
+.cm-editor.editor-drag-preview-split::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0; /* 右寄せ */
+    width: 50%; /* 幅50% */
+    height: 100%;
+    /* 好みの青色（薄め） */
+    background-color: rgba(83, 156, 255, 0.2);
+    border: 3px solid #539cff;
+    border-left: 2px dashed #539cff; /* 境界線を破線にしてみる */
+    z-index: 500;
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+/* ケース2: 既に分割されている時（そのエディタ全体を光らせる） */
+.cm-editor.editor-drag-over::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(83, 156, 255, 0.2);
+    border: 3px solid #539cff;
+    z-index: 500;
+    pointer-events: none;
+    box-sizing: border-box;
+}

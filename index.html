@@ -403,10 +403,18 @@
 
             <!-- 中央ペイン（エディタ） -->
             <div class="center-pane" id="center-pane">
-                <!-- ファイルタイトル入力バー -->
-                <div class="file-title-bar hidden" id="file-title-bar">
-                    <input type="text" id="file-title-input" class="file-title-input" placeholder="ファイル名"
-                        spellcheck="false">
+                <div style="display: flex; width: 100%; overflow: hidden;">
+                    <div class="file-title-bar hidden" id="file-title-bar"
+                        style="flex: 1; border-right: 1px solid transparent;">
+                        <input type="text" id="file-title-input" class="file-title-input" placeholder="ファイル名"
+                            spellcheck="false">
+                    </div>
+
+                    <div class="file-title-bar hidden" id="file-title-bar-split"
+                        style="flex: 1; display: none; border-left: 1px solid var(--sidebar-border);">
+                        <input type="text" id="file-title-input-split" class="file-title-input" placeholder="ファイル名"
+                            spellcheck="false">
+                    </div>
                 </div>
 
                 <!-- 拡張ツールバー -->
@@ -692,7 +700,13 @@
                 </div>
 
                 <div class="editor-area" id="content-readme">
-                    <div id="editor" style="height: 100%;"></div>
+                    <div id="editor-wrapper"
+                        style="display: flex; flex: 1; height: 100%; width: 100%; overflow: hidden;">
+                        <div id="editor" style="width: 100%; height: 100%;"></div>
+                        <div id="resizer-editor-split" class="hidden"></div>
+                        <div id="editor-split"
+                            style="width: 0%; height: 100%; display: none; border-left: 1px solid #444;"></div>
+                    </div>
 
                     <div id="media-view" class="hidden"
                         style="height: 100%; width: 100%; display: flex; flex-direction: column; overflow: hidden; background-color: var(--main-bg);">

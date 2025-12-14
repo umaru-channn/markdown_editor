@@ -68,6 +68,7 @@ const rightActivityBar = document.querySelector('.right-activity-bar');
 const bottomPane = document.getElementById('bottom-pane');
 const centerPane = document.getElementById('center-pane');
 const btnCalendar = document.getElementById('btn-calendar');
+const resizerEditorSplit = document.getElementById('resizer-editor-split');
 
 // トップバー操作
 const btnToggleLeftPane = document.getElementById('btn-toggle-leftpane');
@@ -103,6 +104,7 @@ const closedTabsHistory = [];
 // ファイルタイトル入力
 const fileTitleBar = document.getElementById('file-title-bar');
 const fileTitleInput = document.getElementById('file-title-input');
+const fileTitleInputSplit = document.getElementById('file-title-input-split');
 
 // ファイル統計情報
 const fileStatsElement = document.getElementById('file-stats');
@@ -154,7 +156,9 @@ let isMaximized = false;
 let savedRightActivityBarState = true;
 let activeContextMenu = null;
 let globalDiffView = null; // Diffビューのインスタンス保持用
-let isBacklinksVisible = false; // ★追加: バックリンクパネルの表示状態
+let isBacklinksVisible = false; // バックリンクパネルの表示状態
+let isResizingEditorSplit = false;
+let activeEditorView = null;
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -547,61 +551,65 @@ function updateLeftPaneWidthVariable() {
 // ========== ビュー切り替えロジック (重要: タブと画面の同期) ==========
 
 /**
- * メインビュー（エディタ or 設定画面）を切り替え、タブのアクティブ状態を更新する
- * @param {string} targetId - 表示したいコンテンツのID ('content-readme', 'content-settings' など)
+ * 設定画面のDOM要素を取得するヘルパー
+ */
+function getSettingsElement() {
+    return document.getElementById('content-settings');
+}
+
+/**
+ * 設定画面DOMを一時退避場所（非表示）に戻すヘルパー
+ */
+function detachSettingsView() {
+    const settingsEl = getSettingsElement();
+    if (settingsEl && settingsEl.parentElement) {
+        settingsEl.classList.add('content-hidden');
+        // 元の場所（center-pane直下など、邪魔にならない場所）に戻しておく
+        // ここでは center-pane の最後尾に追加しておく（非表示なので影響なし）
+        document.getElementById('center-pane').appendChild(settingsEl);
+    }
+}
+
+/**
+ * メインビュー切り替えロジック
+ * 修正: ツールバーの表示制御を setActiveEditor に委譲し、ここではコンテナの表示のみ行う
  */
 function switchMainView(targetId) {
-    // 1. すべてのメインコンテンツを非表示にする
-    const contentIds = ['content-readme', 'content-settings'];
-    contentIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.add('content-hidden');
-    });
-
-    // 2. 指定されたコンテンツを表示する
-    const targetEl = document.getElementById(targetId);
-    if (targetEl) {
-        targetEl.classList.remove('content-hidden');
+    // 常にエディタエリアを表示（設定画面もこの中に埋め込むため）
+    const readmeContent = document.getElementById('content-readme');
+    if (readmeContent) {
+        readmeContent.classList.remove('content-hidden');
     }
 
-    // 3. タブのアクティブ状態を更新する
-    document.querySelectorAll('.editor-tabs .tab').forEach(tab => {
-        tab.classList.remove('active');
+    // 古い設定画面コンテナ(もし退避場所にあれば)を隠す
+    const settingsEl = document.getElementById('content-settings');
+    if (settingsEl && settingsEl.parentElement === document.getElementById('center-pane')) {
+        settingsEl.classList.add('content-hidden');
+    }
 
-        // 設定タブの場合
-        if (targetId === 'content-settings' && tab.id === 'tab-settings') {
-            tab.classList.add('active');
+    // 左側のファイルタイトルバーの表示制御
+    // 右側のタイトルバー制御は switchToFile や openInSplitView で行う
+    const fileTitleBar = document.getElementById('file-title-bar');
+    if (fileTitleBar) {
+        // 分割表示中は、アクティブなファイルに関わらず左側のバーを表示し続ける
+        if (isSplitLayoutVisible) {
+            fileTitleBar.classList.remove('hidden');
         }
-        // エディタ（ファイル）の場合
-        else if (targetId === 'content-readme' && tab.dataset.filepath === currentFilePath) {
-            tab.classList.add('active');
-        }
-    });
-
-    // 4. ツールバーとファイルタイトルバーの表示制御
-    const toolbar = document.querySelector('.toolbar');
-
-    if (targetId === 'content-readme') {
-        // エディタ画面: 設定がONの場合のみツールバーを表示
-        if (toolbar) {
-            if (appSettings.showToolbar) {
-                toolbar.classList.remove('hidden');
+        // 全画面表示のときは、READMEや設定画面なら隠す（既存ロジック）
+        else if (currentFilePath === 'README.md' || currentFilePath === 'settings://view') {
+            fileTitleBar.classList.add('hidden');
+        } else {
+            // 通常ファイルの場合
+            if (appSettings.showFileTitleBar) {
+                fileTitleBar.classList.remove('hidden');
             } else {
-                toolbar.classList.add('hidden');
+                fileTitleBar.classList.add('hidden');
             }
         }
-
-        // タイトルバーはREADME以外 かつ 設定がONの場合のみ表示
-        if (currentFilePath !== 'README.md' && appSettings.showFileTitleBar) {
-            if (fileTitleBar) fileTitleBar.classList.remove('hidden');
-        } else {
-            if (fileTitleBar) fileTitleBar.classList.add('hidden');
-        }
-    } else {
-        // 設定画面など: ツールバーとタイトルバーを両方非表示
-        if (toolbar) toolbar.classList.add('hidden');
-        if (fileTitleBar) fileTitleBar.classList.add('hidden');
     }
+
+    // タブのアクティブ状態更新
+    updateTabVisuals();
 }
 
 // ========== 設定関連の関数 ==========
@@ -820,42 +828,50 @@ function applySettingsToUI() {
 }
 
 function updateEditorSettings() {
-    if (!globalEditorView) return;
+    // 適用するエフェクトを作成
+    const effects = [
+        themeCompartment.reconfigure(appSettings.theme === 'dark' ? oneDark : []),
+        editorStyleCompartment.reconfigure(EditorView.theme({
+            ".cm-content": {
+                fontSize: appSettings.fontSize,
+                fontFamily: appSettings.fontFamily
+            },
+            ".cm-gutters": {
+                fontSize: appSettings.fontSize,
+                fontFamily: appSettings.fontFamily
+            }
+        }))
+    ];
 
-    // CodeMirrorのテーマとスタイルを更新
-    globalEditorView.dispatch({
-        effects: [
-            themeCompartment.reconfigure(appSettings.theme === 'dark' ? oneDark : []),
-            editorStyleCompartment.reconfigure(EditorView.theme({
-                ".cm-content": {
-                    fontSize: appSettings.fontSize,
-                    fontFamily: appSettings.fontFamily
-                },
-                ".cm-gutters": {
-                    fontSize: appSettings.fontSize,
-                    fontFamily: appSettings.fontFamily
-                }
-            }))
-        ]
-    });
+    // 左側のエディタに適用
+    if (globalEditorView) {
+        globalEditorView.dispatch({ effects: effects });
+    }
+
+    // 右側のエディタ（存在する場合）にも適用
+    if (splitEditorView) {
+        splitEditorView.dispatch({ effects: effects });
+    }
 }
 
 // インデント設定をエディタに適用する関数
 function updateIndentSettings() {
-    if (!globalEditorView) return;
-
     const size = parseInt(appSettings.tabSize, 10);
     const useSpaces = appSettings.insertSpaces;
-
-    // スペース挿入ならスペースN個、そうでなければタブ文字
     const indentString = useSpaces ? " ".repeat(size) : "\t";
 
-    globalEditorView.dispatch({
-        effects: [
-            indentUnitCompartment.reconfigure(indentUnit.of(indentString)),
-            tabSizeCompartment.reconfigure(EditorState.tabSize.of(size))
-        ]
-    });
+    const effects = [
+        indentUnitCompartment.reconfigure(indentUnit.of(indentString)),
+        tabSizeCompartment.reconfigure(EditorState.tabSize.of(size))
+    ];
+
+    if (globalEditorView) {
+        globalEditorView.dispatch({ effects: effects });
+    }
+
+    if (splitEditorView) {
+        splitEditorView.dispatch({ effects: effects });
+    }
 }
 
 // 設定画面のイベントリスナー
@@ -1072,25 +1088,44 @@ function setupSettingsListeners() {
     document.getElementById('pdf-page-ranges')?.addEventListener('input', updatePdfSettings); // inputイベントでリアルタイム反映
 }
 
-// 設定タブを開く処理（重複防止対応）
+// 設定タブを開く処理（修正版：ファイルとして扱う・分割対応）
 function openSettingsTab() {
-    let settingsTab = document.getElementById('tab-settings');
 
-    // タブが存在しない場合のみ作成
-    if (!settingsTab) {
-        settingsTab = document.createElement('div');
-        settingsTab.className = 'tab';
-        settingsTab.id = 'tab-settings';
-        settingsTab.dataset.target = 'content-settings';
-        settingsTab.innerHTML = '設定 <span class="close-tab" id="close-settings-tab">×</span>';
+    // READMEが開いている場合は閉じる
+    if (openedFiles.has('README.md')) {
+        closeWelcomeReadme();
+    }
+
+    const settingsPath = 'settings://view';
+
+    // 既にデータとして登録されているかチェック
+    // ビューの判定ロジックは switchToFile に任せるため、ここでは単純な登録チェックのみ行う
+    if (!openedFiles.has(settingsPath)) {
+        // 開いていない場合は新規登録
+        openedFiles.set(settingsPath, {
+            fileName: '設定',
+            type: 'settings',
+            isVirtual: true,
+            content: '' // 設定画面はDOMなのでコンテンツ文字列は不要
+        });
+
+        // タブ作成
+        const tab = document.createElement('div');
+        tab.className = 'tab';
+        tab.dataset.filepath = settingsPath;
+        tab.id = 'tab-settings'; // 識別用ID
+        tab.innerHTML = '設定 <span class="close-tab" data-filepath="settings://view">×</span>';
+
+        enableTabDragging(tab); // ドラッグ可能にする
 
         if (editorTabsContainer) {
-            editorTabsContainer.appendChild(settingsTab);
+            editorTabsContainer.appendChild(tab);
         }
     }
 
-    // ビューを切り替え
-    switchMainView('content-settings');
+    // 常に switchToFile を呼び出すことで、分割レイアウトの復元(showSplitLayout)や
+    // 適切なペインのアクティブ化を実行させる
+    switchToFile(settingsPath, activePane);
 }
 
 // ========== スニペット設定UIロジック ==========
@@ -1226,6 +1261,12 @@ function getAvailableUntitledNumber() {
 
 // 新規タブ作成用関数
 function createNewTab() {
+
+    // READMEが開いている場合は閉じる
+    if (openedFiles.has('README.md')) {
+        closeWelcomeReadme();
+    }
+
     // 空き番号を取得
     const nextNumber = getAvailableUntitledNumber();
 
@@ -1250,6 +1291,8 @@ function createNewTab() {
     tab.dataset.filepath = virtualPath;
     // ● (未保存マーク) を最初からつけておく
     tab.innerHTML = `${fileName} ● <span class="close-tab" data-filepath="${virtualPath}">×</span>`;
+
+    enableTabDragging(tab);
 
     // タブコンテナに追加
     if (editorTabsContainer) {
@@ -2031,18 +2074,123 @@ const pasteHandler = EditorView.domEventHandlers({
     }
 });
 
-// 高機能ドロップハンドラー (dragover追加)
+// 高機能ドロップハンドラー (dragover追加・分割機能対応版)
 const dropHandler = EditorView.domEventHandlers({
-    // これがないとドラッグ時に駐車禁止マークが出てドロップできません
+    // ドラッグがエディタに入ってきた時
+    dragenter(event, view) {
+        // タブを持っている場合のみ反応
+        if (event.dataTransfer.types.includes('application/x-markdown-tab')) {
+            event.preventDefault();
+            if (!isSplitView) {
+                view.dom.classList.add('editor-drag-preview-split');
+            } else {
+                view.dom.classList.add('editor-drag-over');
+            }
+        }
+    },
+
+    // ドラッグしてエディタ上を動いている時
     dragover(event, view) {
+        // タブを持っている場合
+        if (event.dataTransfer.types.includes('application/x-markdown-tab')) {
+            event.preventDefault();
+            // クラスが外れていたら付け直す
+            if (!isSplitView) {
+                if (!view.dom.classList.contains('editor-drag-preview-split')) {
+                    view.dom.classList.add('editor-drag-preview-split');
+                }
+            } else {
+                if (!view.dom.classList.contains('editor-drag-over')) {
+                    view.dom.classList.add('editor-drag-over');
+                }
+            }
+            return true;
+        }
+        // 通常のファイルドロップの場合も dragover を許可する（駐車禁止マーク回避）
         event.preventDefault();
         return false;
     },
+
+    // ドラッグがエディタから出た時
+    dragleave(event, view) {
+        if (event.relatedTarget && view.dom.contains(event.relatedTarget)) {
+            return;
+        }
+        view.dom.classList.remove('editor-drag-over');
+        view.dom.classList.remove('editor-drag-preview-split');
+    },
+
+    // ドロップされた時
     drop(event, view) {
+        view.dom.classList.remove('editor-drag-over');
+        view.dom.classList.remove('editor-drag-preview-split');
         const { dataTransfer } = event;
 
         // -------------------------------------------------
-        // ケース1: ファイルがドロップされた場合 (ローカルファイル)
+        // ケース1: タブがドロップされた場合 (画面分割・移動)
+        // -------------------------------------------------
+        const tabPath = dataTransfer.getData('application/x-markdown-tab');
+        if (tabPath) {
+            event.preventDefault();
+
+            if (!isSplitView) {
+                // まだ分割されていない場合 -> ドロップ位置に応じて左右分割 (Swap logic)
+                const isLeftHalf = event.clientX < window.innerWidth / 2;
+                openInSplitView(tabPath, isLeftHalf ? 'left' : 'right');
+            } else {
+                // 設定画面の二重配置防止 (Swap処理)
+                // 設定画面をドロップした場合、もう片方に設定画面があれば、中身を入れ替える
+                if (tabPath === 'settings://view') {
+                    // 左にドロップする場合
+                    if (view === globalEditorView) {
+                        // 右側に設定画面があるなら、右側を「左側の元の内容」に切り替える
+                        if (splitGroup.rightPath === 'settings://view') {
+                            const originalLeft = splitGroup.leftPath;
+                            splitGroup.rightPath = originalLeft; // 情報を更新
+
+                            // 右側エディタの表示を更新 (順序重要: 先に右を更新して設定DOMを解放する)
+                            if (splitEditorView) {
+                                setActiveEditor(splitEditorView);
+                                switchToFile(originalLeft, 'right');
+                            }
+                        }
+                    }
+                    // 右にドロップする場合
+                    else if (splitEditorView && view === splitEditorView) {
+                        // 左側に設定画面があるなら、左側を「右側の元の内容」に切り替える
+                        if (splitGroup.leftPath === 'settings://view') {
+                            const originalRight = splitGroup.rightPath;
+                            splitGroup.leftPath = originalRight; // 情報を更新
+
+                            // 左側エディタの表示を更新
+                            if (globalEditorView) {
+                                setActiveEditor(globalEditorView);
+                                switchToFile(originalRight, 'left');
+                            }
+                        }
+                    }
+                }
+                // 既に分割されている場合 -> 対象ペインの内容を置き換える (Swapしない)
+                if (view === globalEditorView) {
+                    // 左側にドロップ
+                    // 【修正】先にグループ情報を更新して「左側はこのファイルだ」と確定させる
+                    splitGroup.leftPath = tabPath;
+                    setActiveEditor(globalEditorView);
+                    switchToFile(tabPath, 'left');
+                } else {
+                    // 右側にドロップ
+                    if (splitEditorView) {
+                        splitGroup.rightPath = tabPath; // 【修正】先にグループ情報を更新
+                        setActiveEditor(splitEditorView);
+                        switchToFile(tabPath, 'right');
+                    }
+                }
+            }
+            return true;
+        }
+
+        // -------------------------------------------------
+        // ケース2: ファイルがドロップされた場合 (ローカルファイル)
         // -------------------------------------------------
         if (dataTransfer.files && dataTransfer.files.length > 0) {
             event.preventDefault();
@@ -2061,7 +2209,9 @@ const dropHandler = EditorView.domEventHandlers({
 
             // A. 画像ファイルの処理
             if (imageFiles.length > 0) {
-                if (!currentFilePath || currentFilePath === 'README.md') {
+                const targetPath = view.filePath || currentFilePath;
+
+                if (!targetPath || targetPath === 'README.md') {
                     showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
                     return true;
                 }
@@ -2071,7 +2221,7 @@ const dropHandler = EditorView.domEventHandlers({
                     reader.onload = async (e) => {
                         const arrayBuffer = e.target.result;
                         try {
-                            const targetDir = path.dirname(currentFilePath);
+                            const targetDir = path.dirname(targetPath);
                             const result = await window.electronAPI.saveClipboardImage(new Uint8Array(arrayBuffer), targetDir);
 
                             if (result.success) {
@@ -2083,12 +2233,14 @@ const dropHandler = EditorView.domEventHandlers({
                                     changes: { from: insertPos, insert: insertText },
                                     selection: { anchor: insertPos + insertText.length }
                                 });
+                                view.focus();
                                 showNotification('画像を保存しました', 'success');
                             } else {
                                 showNotification(`保存失敗: ${result.error}`, 'error');
                             }
                         } catch (err) {
                             console.error(err);
+                            showNotification(`エラー: ${err.message}`, 'error');
                         }
                     };
                     reader.readAsArrayBuffer(file);
@@ -2099,6 +2251,7 @@ const dropHandler = EditorView.domEventHandlers({
             if (textFiles.length > 0) {
                 const file = textFiles[0];
                 if (file.path) {
+                    setActiveEditor(view);
                     openFile(file.path, file.name);
                 }
             }
@@ -2106,7 +2259,7 @@ const dropHandler = EditorView.domEventHandlers({
         }
 
         // -------------------------------------------------
-        // ケース2: Webページからの画像ドラッグ (HTML/URL)
+        // ケース3: Webページからの画像ドラッグ (HTML/URL)
         // -------------------------------------------------
         const html = dataTransfer.getData('text/html');
         if (html) {
@@ -2117,14 +2270,15 @@ const dropHandler = EditorView.domEventHandlers({
             if (img && img.src) {
                 event.preventDefault();
 
-                if (!currentFilePath || currentFilePath === 'README.md') {
+                const targetPath = view.filePath || currentFilePath;
+                if (!targetPath || targetPath === 'README.md') {
                     showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
                     return true;
                 }
 
                 (async () => {
                     try {
-                        const targetDir = path.dirname(currentFilePath);
+                        const targetDir = path.dirname(targetPath);
 
                         if (img.src.startsWith('data:')) {
                             const response = await fetch(img.src);
@@ -2157,16 +2311,47 @@ const dropHandler = EditorView.domEventHandlers({
                         changes: { from: insertPos, insert: insertText },
                         selection: { anchor: insertPos + insertText.length }
                     });
+                    view.focus();
                 }
                 return true;
             }
         }
 
-        // -------------------------------------------------
-        // ケース3: 通常のテキストドラッグ
-        // -------------------------------------------------
         return false;
     }
+});
+
+// ========== アクティブな画面（左右）の判定処理（修正版） ==========
+let activePane = 'left'; // 初期値
+
+document.addEventListener('DOMContentLoaded', () => {
+    // 左側のコンテナ類
+    const leftContainer = document.getElementById('editor');
+    const mainTitleBar = document.getElementById('file-title-bar');
+
+    // 右側のコンテナ類
+    const rightContainer = document.getElementById('editor-split');
+    const splitTitleBar = document.getElementById('file-title-bar-split');
+
+    // 左側をアクティブにする処理
+    const activateLeft = () => {
+        activePane = 'left';
+        if (globalEditorView) setActiveEditor(globalEditorView);
+    };
+
+    // 右側をアクティブにする処理
+    const activateRight = () => {
+        activePane = 'right';
+        if (splitEditorView) setActiveEditor(splitEditorView);
+    };
+
+    // 左側のクリック判定 (エディタ + タイトルバー)
+    if (leftContainer) leftContainer.addEventListener('mousedown', activateLeft);
+    if (mainTitleBar) mainTitleBar.addEventListener('mousedown', activateLeft);
+
+    // 右側のクリック判定 (エディタ + タイトルバー)
+    if (rightContainer) rightContainer.addEventListener('mousedown', activateRight);
+    if (splitTitleBar) splitTitleBar.addEventListener('mousedown', activateRight);
 });
 
 // ========== 検索ウィジェット管理 ==========
@@ -2796,9 +2981,24 @@ function createEditorState(content, filePath) {
                     // 外部変更でなければ、入力イベントとして処理（保存フラグなど）
                     onEditorInput(!isExternal);
 
-                    // ユーザー操作による変更なら、リスト番号の自動修正を実行
+                    // ユーザー操作による変更なら、同期処理とリスト修正を実行
                     if (!isExternal) {
+                        // 1. リスト番号の自動修正
                         handleListRenumbering(update.view, update.changes);
+
+                        // 2. 同一ファイルを開いている別のビューへ同期
+                        if (isSplitView) {
+                            const currentView = update.view;
+                            const otherView = (currentView === globalEditorView) ? splitEditorView : globalEditorView;
+
+                            // もう片方のビューが存在し、かつ同じファイルを開いている場合
+                            if (otherView && otherView.filePath === currentView.filePath) {
+                                otherView.dispatch({
+                                    changes: update.changes,
+                                    annotations: ExternalChange.of(true) // ループ防止用アノテーション
+                                });
+                            }
+                        }
                     }
                 }
             })
@@ -3139,6 +3339,36 @@ function setupHotkeySearch() {
     }
 }
 
+// 設定画面へのドラッグ＆ドロップ対応（新規追加）
+function setupSettingsDropHandler() {
+    const settingsEl = document.getElementById('content-settings');
+    if (!settingsEl) return;
+
+    settingsEl.addEventListener('dragover', (e) => {
+        // タブがドラッグされている場合のみ反応
+        if (e.dataTransfer.types.includes('application/x-markdown-tab')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            // 視覚的フィードバック（青い枠線を表示）
+            settingsEl.style.boxShadow = 'inset 0 0 0 2px #007acc';
+        }
+    });
+
+    settingsEl.addEventListener('dragleave', () => {
+        settingsEl.style.boxShadow = '';
+    });
+
+    settingsEl.addEventListener('drop', (e) => {
+        settingsEl.style.boxShadow = '';
+        const tabPath = e.dataTransfer.getData('application/x-markdown-tab');
+        if (tabPath) {
+            e.preventDefault();
+            e.stopPropagation();
+            openInSplitView(tabPath);
+        }
+    });
+}
+
 function initEditor() {
     if (globalEditorView) return;
 
@@ -3150,8 +3380,21 @@ function initEditor() {
         parent: editorContainer,
     });
 
+    // パス情報をViewに紐付ける
+    globalEditorView.filePath = 'README.md';
+
+    // フォーカス時にアクティブに設定
+    globalEditorView.contentDOM.addEventListener('focus', () => setActiveEditor(globalEditorView));
+    globalEditorView.contentDOM.addEventListener('click', () => setActiveEditor(globalEditorView));
+
+    // 最初は左側をアクティブに
+    setActiveEditor(globalEditorView);
+
     // カスタム検索ウィジェットのセットアップ
     searchWidgetControl = setupSearchWidget(globalEditorView);
+
+    // 設定画面へのドラッグ＆ドロップを有効化
+    setupSettingsDropHandler();
 }
 
 // ========== エディタ操作ヘルパー ==========
@@ -3446,32 +3689,47 @@ function setTextAlignment(view, alignment) {
     view.focus();
 }
 
-// ==========ツールバー ボタン イベントリスナー ==========
-document.getElementById('btn-save')?.addEventListener('click', () => saveCurrentFile(false));
-document.getElementById('toolbar-undo')?.addEventListener('click', () => { if (globalEditorView) { undo(globalEditorView); globalEditorView.focus(); } });
-document.getElementById('toolbar-redo')?.addEventListener('click', () => { if (globalEditorView) { redo(globalEditorView); globalEditorView.focus(); } });
+// ========== ツールバー ボタン イベントリスナー (修正版) ==========
 
-document.getElementById('btn-h2')?.addEventListener('click', () => toggleLinePrefix(globalEditorView, "##"));
-document.getElementById('btn-h3')?.addEventListener('click', () => toggleLinePrefix(globalEditorView, "###"));
+// 保存はアクティブなファイルを対象にするよう saveCurrentFile 内で処理されます
+document.getElementById('btn-save')?.addEventListener('click', () => saveCurrentFile(false));
+
+// Undo / Redo
+document.getElementById('toolbar-undo')?.addEventListener('click', () => {
+    const view = getActiveView();
+    if (view) { undo(view); view.focus(); }
+});
+document.getElementById('toolbar-redo')?.addEventListener('click', () => {
+    const view = getActiveView();
+    if (view) { redo(view); view.focus(); }
+});
+
+// 見出し
+document.getElementById('btn-h2')?.addEventListener('click', () => toggleLinePrefix(getActiveView(), "##"));
+document.getElementById('btn-h3')?.addEventListener('click', () => toggleLinePrefix(getActiveView(), "###"));
 
 document.querySelectorAll('.dropdown-item[data-action^="h"]').forEach(item => {
     item.addEventListener('click', (e) => {
         const level = parseInt(e.target.dataset.action.replace('h', ''));
         const hashes = "#".repeat(level);
-        toggleLinePrefix(globalEditorView, hashes);
+        toggleLinePrefix(getActiveView(), hashes);
     });
 });
 
-document.getElementById('bold-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "**"));
-document.getElementById('italic-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "*"));
-document.getElementById('strike-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "~~"));
-document.getElementById('highlight-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "=="));
+// 装飾
+document.getElementById('bold-btn')?.addEventListener('click', () => toggleMark(getActiveView(), "**"));
+document.getElementById('italic-btn')?.addEventListener('click', () => toggleMark(getActiveView(), "*"));
+document.getElementById('strike-btn')?.addEventListener('click', () => toggleMark(getActiveView(), "~~"));
+document.getElementById('highlight-btn')?.addEventListener('click', () => toggleMark(getActiveView(), "=="));
 
-document.getElementById('link-btn')?.addEventListener('click', () => insertLink(globalEditorView));
-document.getElementById('image-btn')?.addEventListener('click', () => insertImage(globalEditorView));
-// ローカル画像挿入ボタンの処理
+// 挿入
+document.getElementById('link-btn')?.addEventListener('click', () => insertLink(getActiveView()));
+document.getElementById('image-btn')?.addEventListener('click', () => insertImage(getActiveView()));
+
+// ローカル画像挿入ボタン (修正)
 document.getElementById('local-image-btn')?.addEventListener('click', async () => {
-    if (!globalEditorView) return;
+    const view = getActiveView(); // アクティブなビューを取得
+    if (!view) return;
 
     try {
         const result = await window.electronAPI.selectFile();
@@ -3482,9 +3740,7 @@ document.getElementById('local-image-btn')?.addEventListener('click', async () =
             // 可能であれば相対パスに変換
             if (currentDirectoryPath) {
                 try {
-                    // Windows環境でのパス区切り文字対策も含めて相対パス化
                     const relativePath = path.relative(currentDirectoryPath, absolutePath);
-                    // 画像パスとしてはスラッシュ区切りが望ましいため置換
                     insertPath = relativePath.replace(/\\/g, '/');
                 } catch (e) {
                     console.warn('Relative path calculation failed:', e);
@@ -3494,36 +3750,37 @@ document.getElementById('local-image-btn')?.addEventListener('click', async () =
             const fileName = path.basename(absolutePath);
             let insertText = `![${fileName}](${insertPath})\n`;
 
-            const { state, dispatch } = globalEditorView;
+            const { state, dispatch } = view; // viewを使用
             const { from, to } = state.selection.main;
 
             dispatch({
                 changes: { from: from, to: to, insert: insertText },
                 selection: { anchor: from + insertText.length }
             });
-            globalEditorView.focus();
+            view.focus();
         }
     } catch (e) {
         console.error('Local image insertion failed:', e);
         showNotification(`エラー: ${e.message}`, 'error');
     }
 });
-document.getElementById('btn-table')?.addEventListener('click', () => insertTable(globalEditorView));
 
-document.getElementById('code-btn')?.addEventListener('click', () => insertCodeBlock(globalEditorView));
-document.getElementById('inline-code-btn')?.addEventListener('click', () => toggleMark(globalEditorView, "`"));
-document.getElementById('quote-btn')?.addEventListener('click', () => toggleLinePrefix(globalEditorView, ">"));
-document.getElementById('hr-btn')?.addEventListener('click', () => insertHorizontalRule(globalEditorView));
-document.getElementById('btn-page-break')?.addEventListener('click', () => insertPageBreak(globalEditorView));
+document.getElementById('btn-table')?.addEventListener('click', () => insertTable(getActiveView()));
+document.getElementById('code-btn')?.addEventListener('click', () => insertCodeBlock(getActiveView()));
+document.getElementById('inline-code-btn')?.addEventListener('click', () => toggleMark(getActiveView(), "`"));
+document.getElementById('quote-btn')?.addEventListener('click', () => toggleLinePrefix(getActiveView(), ">"));
+document.getElementById('hr-btn')?.addEventListener('click', () => insertHorizontalRule(getActiveView()));
+document.getElementById('btn-page-break')?.addEventListener('click', () => insertPageBreak(getActiveView()));
 
-if (btnBulletList) btnBulletList.addEventListener('click', () => toggleList(globalEditorView, 'ul'));
-if (btnNumberList) btnNumberList.addEventListener('click', () => toggleList(globalEditorView, 'ol'));
-if (btnCheckList) btnCheckList.addEventListener('click', () => toggleList(globalEditorView, 'task'));
+// リスト
+if (btnBulletList) btnBulletList.addEventListener('click', () => toggleList(getActiveView(), 'ul'));
+if (btnNumberList) btnNumberList.addEventListener('click', () => toggleList(getActiveView(), 'ol'));
+if (btnCheckList) btnCheckList.addEventListener('click', () => toggleList(getActiveView(), 'task'));
 
-// 配置ボタンのリスナー
-document.getElementById('btn-align-left')?.addEventListener('click', () => setTextAlignment(globalEditorView, 'left'));
-document.getElementById('btn-align-center')?.addEventListener('click', () => setTextAlignment(globalEditorView, 'center'));
-document.getElementById('btn-align-right')?.addEventListener('click', () => setTextAlignment(globalEditorView, 'right'));
+// 配置
+document.getElementById('btn-align-left')?.addEventListener('click', () => setTextAlignment(getActiveView(), 'left'));
+document.getElementById('btn-align-center')?.addEventListener('click', () => setTextAlignment(getActiveView(), 'center'));
+document.getElementById('btn-align-right')?.addEventListener('click', () => setTextAlignment(getActiveView(), 'right'));
 
 // PDFエクスポート処理を共通関数として定義
 async function executePdfExport() {
@@ -3597,10 +3854,13 @@ colorPicker.addEventListener('input', (e) => {
 
 // 3. 選択範囲のテキストを<span>タグで囲んで色をつける関数
 function applyTextColor(color) {
-    // エディタがまだ準備できていない場合は何もしない
-    if (!globalEditorView) return;
+    // グローバルではなくアクティブなビューを取得
+    const view = getActiveView();
 
-    const state = globalEditorView.state;
+    // エディタがまだ準備できていない場合は何もしない
+    if (!view) return;
+
+    const state = view.state;
     if (!state) return;
 
     const { from, to } = state.selection.main;
@@ -3612,7 +3872,6 @@ function applyTextColor(color) {
     let text = state.sliceDoc(from, to);
 
     // 既に色がついている場合（<span>で囲まれている場合）は、中身を取り出してネストを防ぐ
-    // これにより、パレットを動かしている間に <span><span>...</span></span> と増殖するのを防ぎます
     const spanMatch = text.match(/^<span style="color: [^"]+">([\s\S]*?)<\/span>$/);
     if (spanMatch) {
         text = spanMatch[1];
@@ -3622,15 +3881,13 @@ function applyTextColor(color) {
     const coloredText = `<span style="color: ${color}">${text}</span>`;
 
     // エディタの内容を書き換える
-    globalEditorView.dispatch({
+    view.dispatch({
         changes: { from, to, insert: coloredText },
-        // 挿入後、挿入したテキスト全体を選択状態にする
-        // これにより、連続して色を変更（ドラッグ操作）した際に、同じ範囲に対して色を上書きできます
         selection: { anchor: from, head: from + coloredText.length }
     });
 
     // エディタにフォーカスを戻す
-    globalEditorView.focus();
+    view.focus();
 }
 
 // ========== ツールバーのレスポンシブ対応 (オーバーフローメニュー) ==========
@@ -6146,78 +6403,6 @@ if (resizerBottom) {
     });
 }
 
-document.addEventListener('mousemove', (e) => {
-
-    if (isResizingLeft && resizerLeft) {
-        const activityBarWidth = 50; // CSS変数の値と合わせる
-        // マウス位置からアクティビティバーの幅を引いてサイドバーの幅を算出
-        let newWidth = e.clientX - activityBarWidth;
-
-        // 最小幅・最大幅の制限 (例: 150px ~ 600px)
-        if (newWidth < 160) newWidth = 160;
-        if (newWidth > 600) newWidth = 600;
-
-        const widthStr = newWidth + 'px';
-
-        // CSS変数を更新して幅を変更
-        document.documentElement.style.setProperty('--leftpane-width', widthStr);
-        // トップバーの左側コントロール幅も同期させる
-        document.documentElement.style.setProperty('--current-left-pane-width', widthStr);
-    }
-
-    if (isResizingRight && resizerRight) {
-        const rightActivityBarWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--activitybar-width')) || 50;
-        const newWidth = window.innerWidth - e.clientX - rightActivityBarWidth;
-
-        if (newWidth > 100 && newWidth < 800) {
-            rightPane.style.width = newWidth + 'px';
-            resizerRight.style.right = (newWidth + rightActivityBarWidth) + 'px';
-            document.documentElement.style.setProperty('--right-pane-width', newWidth + 'px');
-            const mainContent = centerPane.parentElement;
-            mainContent.style.marginRight = (newWidth + rightActivityBarWidth) + 'px';
-
-            if (activeTerminalId) {
-                requestAnimationFrame(() => fitTerminal(activeTerminalId));
-            }
-        }
-    }
-
-    if (isResizingBottom && resizerBottom) {
-        const newHeight = window.innerHeight - e.clientY - 24;
-
-        if (newHeight > 50 && newHeight < window.innerHeight - 200) {
-            bottomPane.style.height = newHeight + 'px';
-            resizerBottom.style.top = (window.innerHeight - newHeight - 24) + 'px';
-
-            centerPane.style.marginBottom = newHeight + 'px';
-
-            if (activeTerminalId) {
-                requestAnimationFrame(() => fitTerminal(activeTerminalId));
-            }
-        }
-    }
-});
-
-document.addEventListener('mouseup', () => {
-    if (isResizingLeft) {
-        isResizingLeft = false;
-        if (resizerLeft) resizerLeft.classList.remove('resizing');
-        document.body.classList.remove('is-resizing-col');
-    }
-    if (isResizingRight) {
-        isResizingRight = false;
-        if (resizerRight) resizerRight.classList.remove('resizing');
-        document.body.classList.remove('is-resizing-col');
-        if (activeTerminalId) setTimeout(() => fitTerminal(activeTerminalId), 50);
-    }
-    if (isResizingBottom) {
-        isResizingBottom = false;
-        if (resizerBottom) resizerBottom.classList.remove('resizing');
-        document.body.classList.remove('is-resizing-row');
-        if (activeTerminalId) setTimeout(() => fitTerminal(activeTerminalId), 50);
-    }
-});
-
 if (fileTitleInput) {
     fileTitleInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
@@ -6247,34 +6432,11 @@ if (fileTitleInput) {
                     const newPath = result.path;
                     const newFileName = newPath.split(separator).pop();
 
-                    const fileData = openedFiles.get(oldPath);
-                    if (fileData) {
-                        fileData.fileName = newFileName;
-                        openedFiles.set(newPath, fileData);
-                        openedFiles.delete(oldPath);
-                    }
-
-                    if (fileModificationState.has(oldPath)) {
-                        fileModificationState.set(newPath, fileModificationState.get(oldPath));
-                        fileModificationState.delete(oldPath);
-                    }
-
-                    currentFilePath = newPath;
-                    document.title = `${newFileName} - Markdown IDE`;
-
-                    const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
-                    if (tab) {
-                        tab.dataset.filepath = newPath;
-                        const closeBtn = tab.querySelector('.close-tab');
-                        if (closeBtn) {
-                            closeBtn.dataset.filepath = newPath;
-                        }
-                        const isDirty = tab.innerHTML.includes('●');
-                        tab.innerHTML = `${newFileName} ${isDirty ? '● ' : ''}<span class="close-tab" data-filepath="${newPath}">×</span>`;
-                    }
-
+                    // 共通のリネーム後処理を呼び出し（ここを修正）
+                    // updateTabsAfterRenameを使用することで、エディタのパス情報やタブ、左右のタイトルバーが正しく同期されます
+                    updateTabsAfterRename(oldPath, newPath, newFileName);
+                    updateRecentFilesAfterRename(oldPath, newPath);
                     initializeFileTreeWithState();
-                    updateRecentFilesAfterRename(oldPath, newPath); // Recent Filesも更新
 
                     console.log(`Renamed ${oldPath} to ${newPath}`);
                 } else {
@@ -6286,6 +6448,65 @@ if (fileTitleInput) {
         } catch (e) {
             console.error('Error during rename:', e);
             fileTitleInput.value = currentNameWithoutExt;
+        }
+    });
+}
+
+if (fileTitleInputSplit) {
+    // フォーカス時に右側をアクティブにする
+    fileTitleInputSplit.addEventListener('focus', () => {
+        if (splitEditorView) {
+            activePane = 'right';
+            setActiveEditor(splitEditorView);
+        }
+    });
+
+    // Enterキーで確定
+    fileTitleInputSplit.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            fileTitleInputSplit.blur();
+        }
+    });
+
+    // フォーカスアウト時にリネーム実行
+    fileTitleInputSplit.addEventListener('blur', async () => {
+        const newName = fileTitleInputSplit.value.trim();
+
+        // アクティブなパスを使用 (focusイベントで右側になっているはず)
+        if (!newName || !currentFilePath) return;
+
+        const separator = currentFilePath.includes('\\') ? '\\' : '/';
+        const currentFileName = currentFilePath.split(separator).pop();
+        const currentExt = currentFileName.includes('.') ? '.' + currentFileName.split('.').pop() : '';
+        const currentNameWithoutExt = currentFileName.replace(currentExt, '');
+
+        if (newName === currentNameWithoutExt) return;
+
+        try {
+            if (typeof window.electronAPI?.renameFile === 'function') {
+                const oldPath = currentFilePath;
+                const result = await window.electronAPI.renameFile(currentFilePath, newName);
+
+                if (result.success) {
+                    const newPath = result.path;
+                    const newFileName = newPath.split(separator).pop();
+
+                    // 共通のリネーム後処理を呼び出し
+                    updateTabsAfterRename(oldPath, newPath, newFileName);
+                    updateRecentFilesAfterRename(oldPath, newPath);
+                    initializeFileTreeWithState();
+
+                    console.log(`Renamed (Right Pane) ${oldPath} to ${newPath}`);
+                } else {
+                    console.error('Rename failed:', result.error);
+                    showNotification(`ファイル名の変更に失敗しました: ${result.error}`, 'error');
+                    fileTitleInputSplit.value = currentNameWithoutExt;
+                }
+            }
+        } catch (e) {
+            console.error('Error during rename:', e);
+            fileTitleInputSplit.value = currentNameWithoutExt;
         }
     });
 }
@@ -6303,17 +6524,35 @@ function updateTabsAfterRename(oldPath, newPath, newName) {
         fileModificationState.delete(oldPath);
     }
 
+    // ビューのパス情報を更新
+    if (globalEditorView && globalEditorView.filePath === oldPath) {
+        globalEditorView.filePath = newPath;
+    }
+    if (splitEditorView && splitEditorView.filePath === oldPath) {
+        splitEditorView.filePath = newPath;
+    }
+
+    // 現在アクティブなパスなら更新
     if (currentFilePath === oldPath) {
         currentFilePath = newPath;
         document.title = `${newName} - Markdown IDE`;
-
-        if (fileTitleInput) {
-            const extIndex = newName.lastIndexOf('.');
-            const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
-            fileTitleInput.value = nameNoExt;
-        }
     }
 
+    // ▼ 修正: 左側のエディタがこのファイルを表示している場合、左のタイトルバーを更新
+    if (globalEditorView && globalEditorView.filePath === newPath && fileTitleInput) {
+        const extIndex = newName.lastIndexOf('.');
+        const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
+        fileTitleInput.value = nameNoExt;
+    }
+
+    // ▼ 修正: 右側のエディタがこのファイルを表示している場合、右のタイトルバーを更新
+    if (splitEditorView && splitEditorView.filePath === newPath && fileTitleInputSplit) {
+        const extIndex = newName.lastIndexOf('.');
+        const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
+        fileTitleInputSplit.value = nameNoExt;
+    }
+
+    // タブの表示更新
     const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
     if (tab) {
         tab.dataset.filepath = newPath;
@@ -6321,9 +6560,10 @@ function updateTabsAfterRename(oldPath, newPath, newName) {
         if (closeBtn) {
             closeBtn.dataset.filepath = newPath;
         }
-
+        // Dirtyマーク(●)を維持しつつ名前更新
         const isDirty = tab.innerHTML.includes('●');
-        tab.childNodes[0].textContent = newName + ' ';
+        // HTML構造を壊さないように書き換え
+        tab.innerHTML = `<span class="tab-filename">${newName}</span> ${isDirty ? '● ' : ''}<span class="close-tab" data-filepath="${newPath}">×</span>`;
     }
 }
 
@@ -6942,6 +7182,7 @@ if (projectSearchClearBtn) {
     });
 }
 
+// window load イベントリスナー全文 (setupTabReordering呼び出しを追加)
 window.addEventListener('load', async () => {
     console.log('Markdown IDE loaded');
 
@@ -6955,6 +7196,8 @@ window.addEventListener('load', async () => {
     renderCssSnippetsList();
 
     setupHotkeySearch();
+
+    setupSettingsActivationHandler();
 
     // 設定画面のメニューがクリックされたらリストを描画
     const hotkeyNav = document.querySelector('.settings-nav-item[data-section="hotkeys"]');
@@ -7098,6 +7341,9 @@ window.addEventListener('load', async () => {
     setupGitExtraButtons();
     // アカウントボタンのセットアップ
     setupAccountButton();
+
+    // タブ並べ替え機能のセットアップ
+    setupTabReordering();
 
     // メインプロセスからのコンテキストメニューコマンド受信
     window.electronAPI.onEditorContextMenuCommand((command) => {
@@ -7631,13 +7877,27 @@ async function openFile(filePath, fileName) {
             closeWelcomeReadme();
         }
 
-        // 既に開いているかチェック
-        let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
+        // --- 重複オープン防止チェック (ファイルが既に開かれている場合) ---
 
-        if (tab) {
-            switchToFile(normalizedPath);
+        const isLeftFile = globalEditorView && globalEditorView.filePath === normalizedPath;
+        const isRightFile = isSplitView && splitEditorView && splitEditorView.filePath === normalizedPath;
+
+        if (isLeftFile) {
+            setActiveEditor(globalEditorView);
+            activePane = 'left';
             return;
         }
+
+        if (isRightFile) {
+            setActiveEditor(splitEditorView);
+            activePane = 'right';
+            return;
+        }
+
+        // --- 以降は新規オープン処理 (分割されていない場合のみ) ---
+
+        // 既存のタブが存在するかチェック（非アクティブなタブの場合）
+        let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
 
         // ファイルタイプ判定
         const fileType = getFileType(normalizedPath);
@@ -7656,7 +7916,7 @@ async function openFile(filePath, fileName) {
                 fileContent = `ファイル: ${fileName}\n(内容は読み込めません)`;
             }
         } else {
-            // 画像やPDFの場合は内容は空でOK（パスを使って表示するため）
+            // 画像やPDFの場合は内容は空でOK
             fileContent = null;
         }
 
@@ -7665,6 +7925,10 @@ async function openFile(filePath, fileName) {
             tab.className = 'tab';
             tab.dataset.filepath = normalizedPath;
             tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
+
+            enableTabDragging(tab);
+
+            // 現在はタブバーが1つなのでそこに追加
             editorTabsContainer.appendChild(tab);
 
             // type情報を保存
@@ -7675,7 +7939,12 @@ async function openFile(filePath, fileName) {
             });
         }
 
-        switchToFile(normalizedPath);
+        // 新しいファイルは常にメインペインで開く (activePane は現在 left に戻っているはず)
+        const targetPane = 'left';
+
+        // 指定されたペイン（左または右）でファイルを開く
+        switchToFile(normalizedPath, targetPane);
+
     } catch (error) {
         console.error('Failed to open file:', error);
     }
@@ -7714,258 +7983,430 @@ function closeWelcomeReadme() {
     }
 }
 
-function switchToFile(filePath) {
-    // 古いパスを保存
+function switchToFile(filePath, targetPane = 'left') {
+
+    // // 設定画面の二重表示防止 & 自動フォーカス移動
+    // if (filePath === 'settings://view' && isSplitLayoutVisible) {
+    //     const isLeftSettings = (splitGroup.leftPath === 'settings://view');
+    //     const isRightSettings = (splitGroup.rightPath === 'settings://view');
+
+    //     // 既にどこかで設定画面が開かれている場合
+    //     if (isLeftSettings || isRightSettings) {
+    //         // 開かれている方のペインをターゲットに強制変更する
+    //         // これにより、二重に開こうとした場合も、既存の方にフォーカスが移動するだけになる
+    //         targetPane = isRightSettings ? 'right' : 'left';
+    //     }
+    // }
+
     const previouslyActivePath = currentFilePath;
 
-    // --- Diffビューからの切り替え時のクリーンアップ ---
-    if (globalDiffView) {
-        // Diffビューを破棄してエディタをクリア
-        const editorEl = document.getElementById('editor');
-        if (editorEl) {
-            editorEl.innerHTML = '';
-            // Flex設定を解除してブロック要素に戻す（重要）
-            editorEl.style.display = 'block';
-            editorEl.style.flexDirection = '';
-            editorEl.style.overflow = '';
-        }
-
-        globalDiffView = null;
-        isDiffMode = false;
-
-        // 通常のエディタ(globalEditorView)も再作成が必要になるため破棄
-        globalEditorView = null;
-        initEditor(); // 再初期化
-    }
-    // -------------------------------------------------------
-
-    // ファイル切り替え時に古いファイルの自動保存タイマーをクリア
     if (autoSaveTimer) {
         clearTimeout(autoSaveTimer);
         autoSaveTimer = null;
     }
 
-    // 1. 現在開いているファイルの状態を保存する (テキストファイルの場合のみ)
-    if (previouslyActivePath && globalEditorView && openedFiles.has(previouslyActivePath)) {
-        const currentFileData = openedFiles.get(previouslyActivePath);
-        if (!currentFileData.type || currentFileData.type === 'text') {
-            currentFileData.editorState = globalEditorView.state;
-            currentFileData.content = globalEditorView.state.doc.toString();
-        }
-    }
-
-    // 2. パスを更新
-    currentFilePath = filePath;
     const fileData = openedFiles.get(filePath);
+    if (!fileData && filePath !== 'README.md') return;
 
-    // タイプ判定 (diffタイプを追加)
-    const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
-    const isVirtualReadme = fileData && fileData.isVirtual === true;
+    // 1. 直前のファイル状態保存
+    if (previouslyActivePath && openedFiles.has(previouslyActivePath)) {
+        const currentFileData = openedFiles.get(previouslyActivePath);
+        // 設定画面以外の場合のみ保存
+        if (currentFileData && currentFileData.type !== 'settings' && (!currentFileData.type || currentFileData.type === 'text')) {
+            let sourceView = null;
+            if (globalEditorView && globalEditorView.filePath === previouslyActivePath) sourceView = globalEditorView;
+            else if (splitEditorView && splitEditorView.filePath === previouslyActivePath) sourceView = splitEditorView;
 
-    // DOM要素取得
-    const editorEl = document.getElementById('editor');
-    const mediaViewEl = document.getElementById('media-view');
-    const toolbar = document.querySelector('.toolbar');
-    const searchWidget = document.getElementById('custom-search-widget');
-    const fileTitleBarEl = document.getElementById('file-title-bar');
-
-    // 親コンテナを表示
-    switchMainView('content-readme');
-
-    // Diffモードの処理
-    if (fileType === 'diff') {
-        if (editorEl) {
-            editorEl.style.display = 'flex'; // Flexboxにして高さを確保
-            editorEl.style.flexDirection = 'column';
-            editorEl.style.overflow = 'hidden';
-        }
-        if (mediaViewEl) mediaViewEl.classList.add('hidden');
-        if (toolbar) toolbar.classList.add('hidden'); // Diff時はツールバーを隠す
-        if (fileTitleBarEl) fileTitleBarEl.classList.add('hidden');
-
-        // コンテナクリア
-        editorEl.innerHTML = '';
-        isDiffMode = true;
-
-        // CodeMirrorの拡張機能セット (カーソル・行番号・キー操作を有効化)
-        const extensions = [
-            EditorView.lineWrapping,
-            syntaxHighlighting(defaultHighlightStyle),
-            appSettings.theme === 'dark' ? oneDark : [],
-            lineNumbers(),           // 行番号
-            highlightActiveLine(),   // 現在行ハイライト
-            drawSelection(),         // 選択範囲の描画
-            dropCursor(),            // ドラッグ時のカーソル
-            history(),               // Undo/Redo
-            conflictField,         // コンフリクト解消プラグイン
-            keymap.of([...defaultKeymap, ...historyKeymap]), // キーボードショートカット
-
-            // テーマ設定 (高さ100%確保と差分色調整)
-            EditorView.theme({
-                "&": { height: "100%" },
-                ".cm-scroller": { overflow: "auto" },
-                ".cm-gutters": {
-                    backgroundColor: "var(--sidebar-bg)",
-                    borderRight: "1px solid var(--sidebar-border)",
-                    color: "var(--text-color)",
-                    minWidth: "30px"
-                },
-                ".cm-merge-a .cm-changedLine": { backgroundColor: "rgba(200, 50, 50, 0.1)" },
-                ".cm-merge-b .cm-changedLine": { backgroundColor: "rgba(50, 200, 50, 0.1)" }
-            })
-        ];
-
-        // シンタックスハイライト用
-        if (fileData.originalPath) {
-            const langExt = getLanguageExtensions(fileData.originalPath);
-            if (langExt) extensions.push(langExt);
-        }
-
-        // MergeView (Diffエディタ) の生成
-        globalDiffView = new MergeView({
-            a: {
-                doc: fileData.headContent || "",
-                extensions: [
-                    ...extensions,
-                    EditorView.editable.of(false), // 左側(HEAD)は編集不可
-                    EditorState.readOnly.of(true)
-                ]
-            },
-            b: {
-                doc: fileData.content || "",
-                extensions: [
-                    ...extensions,
-                    // 右側(Local)が変更されたら保存用データを更新
-                    EditorView.updateListener.of(update => {
-                        if (update.docChanged) {
-                            fileData.content = update.state.doc.toString();
-                        }
-                    })
-                ]
-            },
-            parent: editorEl,
-            orientation: "a-b", // 左右分割
-            gutter: true,
-            highlightChanges: true
-        });
-
-        // タイトルバー更新
-        if (fileTitleInput) fileTitleInput.value = fileData.fileName;
-        document.title = fileData.fileName;
-
-        return; // Diffモードの処理終了
-    }
-
-    // --- 通常モード (Text / Image) ---
-    isDiffMode = false;
-
-    if (fileType === 'text') {
-        if (editorEl) editorEl.style.display = 'block';
-        if (mediaViewEl) mediaViewEl.classList.add('hidden');
-
-        if (toolbar) {
-            if (appSettings.showToolbar) toolbar.classList.remove('hidden');
-            else toolbar.classList.add('hidden');
-        }
-
-        if (fileTitleBarEl) {
-            if (isVirtualReadme || !appSettings.showFileTitleBar) fileTitleBarEl.classList.add('hidden');
-            else fileTitleBarEl.classList.remove('hidden');
-        }
-
-        // エディタの状態復元
-        if (globalEditorView) {
-            if (fileData && fileData.editorState) {
-                globalEditorView.setState(fileData.editorState);
-            } else {
-                const fileContent = fileData ? fileData.content : '';
-                const newState = createEditorState(fileContent, filePath);
-                globalEditorView.setState(newState);
+            if (sourceView) {
+                currentFileData.editorState = sourceView.state;
+                currentFileData.content = sourceView.state.doc.toString();
             }
         }
+    }
+
+    // 2. レイアウト表示/非表示判定と切り替え
+    const isSplitGroupMember = filePath === splitGroup.leftPath || filePath === splitGroup.rightPath;
+
+    if (isSplitGroupMember) {
+        // 分割グループのメンバーなら分割レイアウトを復元
+        showSplitLayout();
+
+        // 設定画面の復元 (DOMの再配置)
+        // 一度全画面表示などで設定画面が退避(detach)されている場合、
+        // ファイル側のタブ(B)をクリックして戻ってきたときに設定画面(C)も一緒に復元する必要がある
+        const settingsEl = getSettingsElement();
+        if (settingsEl) {
+            const editorWrapper = document.getElementById('editor-wrapper');
+
+            // 左側が設定画面の場合の復元
+            if (splitGroup.leftPath === 'settings://view') {
+                settingsEl.classList.remove('content-hidden');
+                settingsEl.style.flex = '1';
+                settingsEl.style.width = '100%';
+                settingsEl.style.height = '100%';
+
+                // 競合するエディタ等を隠す
+                const leftEditorDiv = document.getElementById('editor');
+                const mediaViewEl = document.getElementById('media-view');
+                if (leftEditorDiv) leftEditorDiv.style.display = 'none';
+                if (mediaViewEl) mediaViewEl.classList.add('hidden');
+
+                // 正しい位置(先頭)になければ移動
+                if (settingsEl.parentElement !== editorWrapper || editorWrapper.firstElementChild !== settingsEl) {
+                    editorWrapper.insertBefore(settingsEl, editorWrapper.firstChild);
+                }
+            }
+            // 右側が設定画面の場合の復元
+            else if (splitGroup.rightPath === 'settings://view') {
+                settingsEl.classList.remove('content-hidden');
+                settingsEl.style.flex = '1';
+                settingsEl.style.width = '100%';
+                settingsEl.style.height = '100%';
+
+                // 競合するエディタを隠す
+                const rightEditorDiv = document.getElementById('editor-split');
+                if (rightEditorDiv) rightEditorDiv.style.display = 'none';
+
+                // 正しい位置(末尾)になければ移動
+                if (settingsEl.parentElement !== editorWrapper || editorWrapper.lastElementChild !== settingsEl) {
+                    editorWrapper.appendChild(settingsEl);
+                }
+            }
+        }
+
+        // 分割ビューの内容が古い場合に強制的に更新する
+        if (splitGroup.leftPath && globalEditorView.filePath !== splitGroup.leftPath) {
+            const leftData = openedFiles.get(splitGroup.leftPath);
+            if (leftData && leftData.type !== 'settings') { // 設定以外
+                document.getElementById('editor').style.display = 'block';
+                document.getElementById('media-view').classList.add('hidden');
+
+                if (leftData.editorState) {
+                    globalEditorView.setState(leftData.editorState);
+                } else {
+                    const newState = createEditorState(leftData.content || '', splitGroup.leftPath);
+                    globalEditorView.setState(newState);
+                }
+                globalEditorView.filePath = splitGroup.leftPath;
+            }
+        }
+
+        if (splitGroup.rightPath && splitEditorView && splitEditorView.filePath !== splitGroup.rightPath) {
+            const rightData = openedFiles.get(splitGroup.rightPath);
+            if (rightData && rightData.type !== 'settings') { // 設定以外
+                document.getElementById('editor-split').style.display = 'block';
+
+                if (rightData.editorState) {
+                    splitEditorView.setState(rightData.editorState);
+                } else {
+                    const newState = createEditorState(rightData.content || '', splitGroup.rightPath);
+                    splitEditorView.setState(newState);
+                }
+                splitEditorView.filePath = splitGroup.rightPath;
+            }
+        }
+
+        // クリックされたファイルをアクティブペインに設定
+        const isLeft = filePath === splitGroup.leftPath;
+        const isRight = filePath === splitGroup.rightPath;
+
+        if (isLeft && isRight) {
+            // 両方にある場合は引数に従う
+        } else if (isRight) {
+            targetPane = 'right';
+        } else {
+            targetPane = 'left';
+        }
+
     } else {
-        // メディアモード
-        if (editorEl) editorEl.style.display = 'none';
-        if (mediaViewEl) mediaViewEl.classList.remove('hidden');
-        if (toolbar) toolbar.classList.add('hidden');
-        if (searchWidget) searchWidget.classList.add('hidden');
-        if (fileTitleBarEl) fileTitleBarEl.classList.add('hidden');
-
-        renderMediaContent(filePath, fileType);
+        // 分割グループ外のファイルなら全画面表示に切り替え
+        hideSplitLayout();
+        targetPane = 'left'; // 全画面なので左ペインで表示
     }
 
-    // UI更新処理
-    if (fileType === 'text' && !isVirtualReadme && fileTitleInput) {
-        const fileName = fileData ? fileData.fileName : filePath.split(/[\/\\]/).pop();
-        const extIndex = fileName.lastIndexOf('.');
-        const fileNameWithoutExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
-        fileTitleInput.value = fileNameWithoutExt;
+    // 3. ターゲットビュー決定
+    let targetView;
+    let isMainPane = false;
+
+    if (targetPane === 'right' && isSplitLayoutVisible && splitEditorView) {
+        targetView = splitEditorView;
+        isMainPane = false;
+    } else {
+        targetView = globalEditorView;
+        isMainPane = true;
     }
 
-    updateOutline();
+    // 4. カレントパス更新
+    currentFilePath = filePath;
 
-    if (isPdfPreviewVisible && fileType === 'text' && !isVirtualReadme) {
-        generatePdfPreview();
+    // ファイルタイプ判定
+    const fileType = fileData ? (fileData.type || 'text') : getFileType(filePath);
+    const isSettings = (fileType === 'settings');
+
+    // 親コンテナ表示
+    switchMainView('content-readme');
+
+    const editorWrapper = document.getElementById('editor-wrapper');
+    const settingsEl = getSettingsElement();
+
+    // DOM要素の参照
+    const leftEditorDiv = document.getElementById('editor');
+    const rightEditorDiv = document.getElementById('editor-split');
+    const mediaViewEl = document.getElementById('media-view');
+
+    // 設定画面以外のファイルを表示する場合、設定画面がエディタエリアに残っていたら退避させる
+    if (!isSettings && settingsEl && settingsEl.parentElement === editorWrapper) {
+        let shouldDetach = true;
+
+        // 分割表示中で、もう片方のペインが設定画面の場合は、退避させてはいけない
+        if (isSplitLayoutVisible) {
+            // 左にファイルを開こうとしているが、右が設定画面の場合
+            if (targetPane === 'left' && splitGroup.rightPath === 'settings://view') {
+                shouldDetach = false;
+            }
+            // 右にファイルを開こうとしているが、左が設定画面の場合
+            else if (targetPane === 'right' && splitGroup.leftPath === 'settings://view') {
+                shouldDetach = false;
+            }
+        }
+
+        if (shouldDetach) {
+            detachSettingsView();
+        }
+    }
+
+    // --- 設定画面の表示処理 ---
+    if (isSettings) {
+        if (!settingsEl) return;
+
+        settingsEl.classList.remove('content-hidden');
+        settingsEl.style.flex = '1';
+        settingsEl.style.width = '100%';
+        settingsEl.style.height = '100%';
+
+        if (targetPane === 'left') {
+            // 左ペインに設定を表示
+            if (leftEditorDiv) leftEditorDiv.style.display = 'none';
+            if (mediaViewEl) mediaViewEl.classList.add('hidden');
+
+            // DOMを左側の位置（wrapperの先頭）に挿入
+            editorWrapper.insertBefore(settingsEl, editorWrapper.firstChild);
+
+            // 【重要修正】分割表示中で、右側が通常ファイルなら右エディタを表示し続ける
+            if (isSplitLayoutVisible) {
+                if (rightEditorDiv && splitGroup.rightPath !== 'settings://view') {
+                    rightEditorDiv.style.display = 'block';
+                }
+            }
+        } else {
+            // 右ペインに設定を表示
+            if (rightEditorDiv) rightEditorDiv.style.display = 'none';
+
+            // 右側に設定を置く（wrapperの末尾）
+            editorWrapper.appendChild(settingsEl);
+
+            // 【重要修正】左側が通常ファイルなら左エディタを表示し続ける
+            if (leftEditorDiv && splitGroup.leftPath !== 'settings://view') {
+                leftEditorDiv.style.display = 'block';
+            }
+        }
+
+        // ビューのパス情報を更新（これがないとタブがアクティブにならない）
+        if (targetView) targetView.filePath = filePath;
+
+    } else if (!isSplitGroupMember) {
+        // --- 分割外の通常ファイル/メディアの場合 (全画面表示) ---
+
+        if (targetPane === 'left') {
+            if (leftEditorDiv) leftEditorDiv.style.display = 'block';
+        }
+
+        if (fileType === 'text' || fileType === 'diff') {
+            if (targetView) {
+                if (fileData && fileData.editorState) {
+                    targetView.setState(fileData.editorState);
+                } else {
+                    const fileContent = fileData ? fileData.content : '';
+                    const newState = createEditorState(fileContent, filePath);
+                    targetView.setState(newState);
+                }
+                targetView.filePath = filePath;
+            }
+
+            if (isMainPane && mediaViewEl) {
+                mediaViewEl.classList.add('hidden');
+            }
+        } else {
+            if (isMainPane) {
+                renderMediaContent(filePath, fileType);
+                if (leftEditorDiv) leftEditorDiv.style.display = 'none';
+                if (mediaViewEl) mediaViewEl.classList.remove('hidden');
+            }
+        }
+    }
+
+    // --- タイトルバー更新 ---
+    const fileName = fileData ? fileData.fileName : filePath.split(/[/\\]/).pop();
+    const fileTitleBarEl = document.getElementById('file-title-bar');
+    const fileTitleInput = document.getElementById('file-title-input');
+    const fileTitleInputSplit = document.getElementById('file-title-input-split');
+
+    if (isMainPane) {
+        if (fileTitleInput) {
+            if (isSettings) {
+                fileTitleInput.value = '設定';
+                fileTitleInput.disabled = true;
+            } else {
+                const extIndex = fileName.lastIndexOf('.');
+                const nameNoExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
+                fileTitleInput.value = nameNoExt;
+                fileTitleInput.disabled = false;
+            }
+        }
+
+        // 全画面表示時のタイトルバー制御
+        if (!isSplitLayoutVisible) {
+            if (fileTitleBarEl) {
+                // 【修正】README または 設定画面 の場合は隠す
+                if (filePath === 'README.md' || isSettings) {
+                    fileTitleBarEl.classList.add('hidden');
+                } else {
+                    fileTitleBarEl.classList.remove('hidden');
+                }
+            }
+        } else {
+            // 分割表示時は常に左側タイトルバーを表示（内容は設定によりけり）
+            if (fileTitleBarEl) fileTitleBarEl.classList.remove('hidden');
+        }
+    }
+
+    // 分割時のタイトルバー更新
+    if (isSplitLayoutVisible) {
+        // 左側のタイトルバー更新
+        if (fileTitleInput) {
+            // splitGroup.leftPath だけでなく、実際に表示されるパス(targetView等)を優先して判定
+            let leftPath = splitGroup.leftPath;
+            if (targetPane === 'left') leftPath = filePath; // 今回開くファイルを優先
+            else if (globalEditorView && globalEditorView.filePath) leftPath = globalEditorView.filePath; // 既存のエディタ状態を優先
+
+            if (leftPath === 'settings://view') {
+                fileTitleInput.value = '設定';
+                fileTitleInput.disabled = true;
+            } else {
+                const leftFileName = openedFiles.get(leftPath)?.fileName || '';
+                // 拡張子を除去して表示
+                const extIndex = leftFileName.lastIndexOf('.');
+                const nameNoExt = extIndex > 0 ? leftFileName.substring(0, extIndex) : leftFileName;
+
+                fileTitleInput.value = nameNoExt;
+                fileTitleInput.disabled = false;
+            }
+        }
+
+        // 右側のタイトルバー更新
+        if (fileTitleInputSplit) {
+            let rightPath = splitGroup.rightPath;
+            if (targetPane === 'right') rightPath = filePath; // 今回開くファイルを優先
+            else if (splitEditorView && splitEditorView.filePath) rightPath = splitEditorView.filePath; // 既存のエディタ状態を優先
+
+            if (rightPath === 'settings://view') {
+                fileTitleInputSplit.value = '設定';
+                fileTitleInputSplit.disabled = true;
+            } else {
+                const rightFileName = openedFiles.get(rightPath)?.fileName || '';
+                const extIndex = rightFileName.lastIndexOf('.');
+                const nameNoExt = extIndex > 0 ? rightFileName.substring(0, extIndex) : rightFileName;
+
+                fileTitleInputSplit.value = nameNoExt;
+                fileTitleInputSplit.disabled = false;
+            }
+        }
     }
 
     if (fileData) {
         document.title = `${fileData.fileName} - Markdown IDE`;
-        document.body.dataset.activeFileDir = path.dirname(filePath);
     }
 
+    updateOutline();
     updateFileStats();
+    setActiveEditor(targetView); // これにより currentFilePath が更新され、タブのアクティブ化が行われる
     onEditorInput(false);
 
-    if (isBacklinksVisible) {
-        updateBacklinks();
-    }
+    if (isBacklinksVisible) updateBacklinks();
 }
 
-function closeTab(element, isSettings = false) {
+/**
+ * ファイルのタブを閉じる関数
+ * @param {HTMLElement} element - 閉じるタブのDOM要素
+ * @param {boolean} isSettings - 設定タブかどうか
+ */
+function closeTab(element, isSettings = false) { // isSettings引数は互換性のため残すが、dataset判定を優先
     if (element) element.remove();
 
-    if (isSettings) {
-        switchToLastFileOrReadme();
-    } else {
-        const filePath = element.dataset.filepath;
+    const filePath = element.dataset.filepath;
+    const isSettingsFile = (filePath === 'settings://view');
 
-        if (filePath) {
+    if (filePath) {
+        // 設定画面の場合はDOMを退避
+        if (isSettingsFile) {
+            detachSettingsView();
+        }
 
-            // 自動保存がONかつ未保存の場合の処理を追加
-            const isDirty = fileModificationState.get(filePath);
-            const fileData = openedFiles.get(filePath);
+        // 自動保存処理
+        const isDirty = fileModificationState.get(filePath);
+        const fileData = openedFiles.get(filePath);
 
-            if (isDirty && appSettings.autoSave && appSettings.autoSaveOnClose && !(fileData && fileData.isVirtual)) {
-                // 未保存かつ自動保存(大元)と閉じる時保存がON、かつ新規ファイル(仮想ファイル)ではない場合
-                saveCurrentFile(false, filePath); // ファイルパスを渡して、このファイルを保存
-            }
+        if (isDirty && appSettings.autoSave && appSettings.autoSaveOnClose && !(fileData && fileData.isVirtual)) {
+            saveCurrentFile(false, filePath);
+        }
 
-            // 閉じたタブの情報を履歴に保存
-            if (fileData) {
-                closedTabsHistory.push({
-                    path: filePath,
-                    fileName: fileData.fileName,
-                    content: fileData.content || (globalEditorView && currentFilePath === filePath ? globalEditorView.state.doc.toString() : ''),
-                    isVirtual: fileData.isVirtual || false
-                });
-                // 履歴が増えすぎないように制限（例: 最大20件）
-                if (closedTabsHistory.length > 20) closedTabsHistory.shift();
-            }
+        // 履歴保存 (設定画面以外)
+        if (fileData && !isSettingsFile) {
+            closedTabsHistory.push({
+                path: filePath,
+                fileName: fileData.fileName,
+                content: fileData.content || (globalEditorView && currentFilePath === filePath ? globalEditorView.state.doc.toString() : ''),
+                isVirtual: fileData.isVirtual || false
+            });
+            if (closedTabsHistory.length > 20) closedTabsHistory.shift();
+        }
 
-            openedFiles.delete(filePath);
-            fileModificationState.delete(filePath);
+        // 分割グループメンバーが閉じられた場合、分割を強制的に解除する
+        const isSplitGroupMember = filePath === splitGroup.leftPath || filePath === splitGroup.rightPath;
 
-            if (currentFilePath === filePath) {
-                currentFilePath = null;
-                if (globalEditorView) {
-                    globalEditorView.dispatch({
-                        changes: { from: 0, to: globalEditorView.state.doc.length, insert: "" },
-                        annotations: ExternalChange.of(true)
-                    });
-                }
-                switchToLastFileOrReadme();
+        if (isSplitGroupMember) {
+            // 現在分割表示中なら、UIを含めて完全にリセット
+            if (isSplitLayoutVisible) {
+                closeSplitView();
+            } else {
+                // 裏で隠れている状態なら、データだけ静かにリセットしてペアを解消する
+                // (片方が欠けたら分割ペアとして成立しないため、両方nullにして解散させる)
+                splitGroup.leftPath = null;
+                splitGroup.rightPath = null;
+                isSplitView = false;
             }
         }
+
+        openedFiles.delete(filePath);
+        fileModificationState.delete(filePath);
+
+        // ※ 以前の shouldCloseSplit ロジックは新しい分割グループ管理により不要になったため削除
+
+        if (currentFilePath === filePath) {
+            currentFilePath = null;
+            // エディタクリア
+            if (globalEditorView && !isSettingsFile) {
+                globalEditorView.dispatch({
+                    changes: { from: 0, to: globalEditorView.state.doc.length, insert: "" },
+                    annotations: ExternalChange.of(true)
+                });
+            }
+            switchToLastFileOrReadme();
+        }
+    } else if (isSettings) {
+        // fallback: datasetがない場合
+        detachSettingsView();
+        switchToLastFileOrReadme();
     }
 }
 
@@ -8026,38 +8467,6 @@ function switchToLastFileOrReadme() {
     }
 }
 
-/**
- * タブを切り替える関数 (循環対応)
- * @param {number} direction - 1: 次のタブ, -1: 前のタブ
- */
-function switchTab(direction) {
-    const tabs = Array.from(document.querySelectorAll('.editor-tabs .tab'));
-    if (tabs.length <= 1) return;
-
-    const activeTab = document.querySelector('.editor-tabs .tab.active');
-    // アクティブなタブがない場合は先頭を選択
-    if (!activeTab) {
-        const target = tabs[0];
-        if (target.id === 'tab-settings') openSettingsTab();
-        else if (target.dataset.filepath) switchToFile(target.dataset.filepath);
-        return;
-    }
-
-    const currentIndex = tabs.indexOf(activeTab);
-    // 循環するようにインデックスを計算 (末尾→先頭、先頭→末尾)
-    let nextIndex = (currentIndex + direction) % tabs.length;
-    if (nextIndex < 0) nextIndex = tabs.length - 1;
-
-    const targetTab = tabs[nextIndex];
-
-    // タブの種類に応じて切り替え
-    if (targetTab.id === 'tab-settings') {
-        openSettingsTab();
-    } else if (targetTab.dataset.filepath) {
-        switchToFile(targetTab.dataset.filepath);
-    }
-}
-
 async function saveCurrentFile(isSaveAs = false, targetPath = null) {
     const filePath = targetPath || currentFilePath;
 
@@ -8067,11 +8476,12 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
     }
 
     let content;
-    const fileData = openedFiles.get(currentFilePath);
+    const fileData = openedFiles.get(filePath);
 
-    // コンテンツ取得ロジック
+    // --- コンテンツ取得ロジックの修正 ---
+
+    // Diffモードの場合
     if (fileData && fileData.type === 'diff') {
-        // Diffモードの場合: MergeViewの右側(b)のエディタから内容を取得
         if (globalDiffView) {
             content = globalDiffView.b.state.doc.toString();
         } else {
@@ -8080,21 +8490,42 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
         // 保存先は仮想パス(DIFF://...)ではなく、実ファイルパスを使う
         if (!targetPath) targetPath = fileData.originalPath;
 
-    } else if (targetPath && targetPath !== currentFilePath) {
-        const targetFileData = openedFiles.get(targetPath);
-        content = targetFileData ? targetFileData.content : null;
-        if (!content) return;
     } else {
-        // 通常モード
-        if (!globalEditorView) return;
-        content = globalEditorView.state.doc.toString();
+        // 通常モード: パスが一致するエディタを探して内容を取得
+        let sourceView = null;
+
+        if (globalEditorView && globalEditorView.filePath === filePath) {
+            sourceView = globalEditorView;
+        } else if (splitEditorView && splitEditorView.filePath === filePath) {
+            sourceView = splitEditorView;
+        } else if (filePath === currentFilePath) {
+            // パスが一致するものがない場合（基本ありえませんが）、アクティブなものを使用
+            sourceView = getActiveView();
+        }
+
+        if (sourceView) {
+            content = sourceView.state.doc.toString();
+        } else if (fileData && fileData.content !== undefined) {
+            // エディタに表示されていない（裏にある）場合はメモリ上のデータを使用
+            content = fileData.content;
+        } else if (targetPath && targetPath !== currentFilePath) {
+            // ターゲット指定保存（別名保存など）で、まだ開いていない場合
+            const targetFileData = openedFiles.get(targetPath);
+            content = targetFileData ? targetFileData.content : "";
+        }
+
+        // それでも取得できない場合は処理中断
+        if (content === undefined || content === null) {
+            console.warn(`Content for ${filePath} not found.`);
+            return;
+        }
     }
 
-    if (currentFilePath === 'README.md') return;
+    if (currentFilePath === 'README.md' && !isSaveAs) return;
 
     try {
         // ▼ 仮想ファイル（新規作成）または「名前を付けて保存」の場合
-        if ((fileData && fileData.isVirtual && fileData.type !== 'diff') || isSaveAs) { // DiffはVirtualだが上書き保存扱いにするため除外
+        if ((fileData && fileData.isVirtual && fileData.type !== 'diff') || isSaveAs) {
 
             let defaultSavePath = fileData ? fileData.fileName : 'Untitled.md';
             if (currentDirectoryPath && currentDirectoryPath !== '.') {
@@ -8125,8 +8556,7 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
 
         } else {
             // ▼ 既存ファイルの上書き保存 (Diff含む)
-            // Diffモードの場合、targetPath (実パス) を使用する
-            const savePath = (fileData && fileData.type === 'diff') ? targetPath : currentFilePath;
+            const savePath = (fileData && fileData.type === 'diff') ? targetPath : filePath;
 
             if (typeof window.electronAPI?.saveFile === 'function') {
                 await window.electronAPI.saveFile(savePath, content);
@@ -8134,17 +8564,15 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
                 if (fileData) {
                     fileData.content = content;
                 }
-                // Diffモードでない場合のみダーティフラグを消す（Diffの場合は比較しないと不明なため）
+
                 if (fileData.type !== 'diff') {
-                    fileModificationState.delete(currentFilePath);
-                    const tab = document.querySelector(`[data-filepath="${CSS.escape(currentFilePath)}"]`);
+                    fileModificationState.delete(savePath);
+                    const tab = document.querySelector(`[data-filepath="${CSS.escape(savePath)}"]`);
                     if (tab) {
-                        const fileName = path.basename(currentFilePath);
-                        tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${currentFilePath}}">×</span>`;
+                        const fileName = path.basename(savePath);
+                        tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${savePath}">×</span>`;
                     }
                 }
-
-                // showNotification('保存しました', 'success');
             }
         }
     } catch (error) {
@@ -8153,6 +8581,320 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
     }
 }
 
+// タブの選択状態（青色）を更新するヘルパー関数
+function updateTabVisuals() {
+    const tabs = document.querySelectorAll('.editor-tabs .tab');
+    tabs.forEach(tab => {
+        const path = tab.dataset.filepath;
+
+        // 設定タブかどうかにかかわらず、現在のファイルパスと一致するかで判定
+        // (設定タブのパスは 'settings://view' となっている前提)
+        if (path === currentFilePath) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+}
+
+// アクティブなエディタを設定する関数（タブ表示更新を追加）
+function setActiveEditor(view) {
+    activeEditorView = view;
+
+    const mainWrapper = document.getElementById('editor');
+    const splitWrapper = document.getElementById('editor-split');
+
+    // スタイルの切り替え（青い枠をつける）
+    if (view === splitEditorView) {
+        if (splitWrapper) splitWrapper.classList.add('active-editor-pane');
+        if (mainWrapper) mainWrapper.classList.remove('active-editor-pane');
+        activePane = 'right';
+    } else {
+        if (mainWrapper) mainWrapper.classList.add('active-editor-pane');
+        if (splitWrapper) splitWrapper.classList.remove('active-editor-pane');
+        activePane = 'left';
+    }
+
+    // グローバルなパス変数を、アクティブなエディタのものに更新
+    if (view && view.filePath) {
+        currentFilePath = view.filePath;
+
+        // ファイル統計の更新
+        updateFileStats();
+
+        // タブの選択状態を同期
+        updateTabVisuals();
+
+        // ツールバーの表示制御をここで行う
+        // 設定画面がアクティブな場合は隠し、それ以外は設定に従って表示
+        const toolbar = document.querySelector('.toolbar');
+        if (toolbar) {
+            if (currentFilePath === 'settings://view') {
+                toolbar.classList.add('hidden');
+            } else {
+                if (appSettings.showToolbar) {
+                    toolbar.classList.remove('hidden');
+                } else {
+                    toolbar.classList.add('hidden');
+                }
+            }
+        }
+    }
+}
+
+// 指定したファイルを分割エディタで開く関数 (左分割対応・同一ファイル許可・修正版)
+function openInSplitView(filePath, side = 'right') {
+    let targetPath = filePath;
+
+    // ファイルパスが指定されていない場合は現在アクティブなファイルを使用
+    if (!targetPath) {
+        targetPath = currentFilePath;
+    }
+
+    if (!targetPath) return;
+
+    // 設定画面 ('settings://view') の重複オープン防止
+    // 既に設定画面が開かれている場合は警告を出して中断する
+    if (targetPath === 'settings://view') {
+        const isOpenedInLeft = globalEditorView && globalEditorView.filePath === 'settings://view';
+        const isOpenedInRight = splitEditorView && splitEditorView.filePath === 'settings://view';
+        // const isOpenedInRight = isSplitLayoutVisible && splitEditorView && splitEditorView.filePath === 'settings://view';
+
+
+        // 左右どちらかで既に開かれている場合
+        if (isOpenedInLeft || isOpenedInRight) {
+            showNotification('設定画面は既に開かれています。\n2つ同時に開くことはできません。', 'error');
+            return; // ここで処理を終了（分割しない）
+        }
+    }
+
+    const splitEditorDiv = document.getElementById('editor-split');
+    const mainTitleBar = document.getElementById('file-title-bar');
+    const splitTitleBar = document.getElementById('file-title-bar-split');
+    const mainEditorDiv = document.getElementById('editor');
+
+    // 分割レイアウトを適用するヘルパー
+    const ensureSplitLayout = () => {
+        if (!isSplitView) {
+            isSplitView = true;
+
+            mainEditorDiv.style.width = 'calc(50% - 3px)';
+            splitEditorDiv.style.display = 'block';
+            splitEditorDiv.style.width = 'calc(50% - 3px)';
+
+            if (resizerEditorSplit) {
+                resizerEditorSplit.classList.remove('hidden');
+            }
+            splitEditorDiv.style.borderLeft = 'none';
+
+            if (mainTitleBar) {
+                mainTitleBar.style.flex = 'none';
+                mainTitleBar.style.width = '50%';
+                mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
+            }
+            if (splitTitleBar) {
+                splitTitleBar.style.display = 'flex';
+                splitTitleBar.style.width = '50%';
+                splitTitleBar.classList.remove('hidden');
+            }
+        }
+    };
+
+    // --- 左分割モード (side === 'left') ---
+    // 現在のメイン(左)にあるファイルを右に移し、新しいファイルを左に開く
+    if (side === 'left') {
+        ensureSplitLayout();
+
+        // 1. 現在の左側のファイルパスを取得
+        const currentLeftPath = globalEditorView ? globalEditorView.filePath : null;
+
+        // 2. 右側(splitEditorView)を初期化または更新して、左側にあったファイルを開く
+        if (currentLeftPath) {
+            const leftFileData = openedFiles.get(currentLeftPath);
+            let leftContent = leftFileData ? (leftFileData.content || '') : '';
+
+            // 現在のステートがあればそれを使う
+            if (globalEditorView) {
+                leftContent = globalEditorView.state.doc.toString();
+            }
+
+            if (!splitEditorView) {
+                // 新規作成
+                const newState = createEditorState(leftContent, currentLeftPath);
+                splitEditorView = new EditorView({
+                    state: newState,
+                    parent: splitEditorDiv
+                });
+                splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+                splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+            } else {
+                // 既存更新
+                const newState = createEditorState(leftContent, currentLeftPath);
+                splitEditorView.setState(newState);
+            }
+            splitEditorView.filePath = currentLeftPath;
+
+            // 右側のタイトルバー設定
+            if (fileTitleInputSplit) {
+                const fName = currentLeftPath.split(/[/\\]/).pop();
+                const extIndex = fName.lastIndexOf('.');
+                const nameNoExt = extIndex > 0 ? fName.substring(0, extIndex) : fName;
+                fileTitleInputSplit.value = nameNoExt;
+                fileTitleInputSplit.disabled = false;
+            }
+        }
+
+        // 3. 【重要】先に永続化状態（分割グループ情報）を更新する
+        // これにより switchToFile 内で isSplitGroupMember が true になり、全画面に戻らずに済む
+        isSplitView = true;
+        splitGroup.leftPath = targetPath;
+        splitGroup.rightPath = currentLeftPath;
+
+        // 4. 左側(globalEditorView)でターゲットファイルを開く
+        switchToFile(targetPath, 'left');
+
+        return;
+    }
+
+    // --- 通常の右分割モード (side === 'right') ---
+
+    // 既存の右側チェック（既に開いている場合）
+    if (isSplitLayoutVisible && splitEditorView && splitEditorView.filePath === targetPath) {
+        ensureSplitLayout();
+        // 設定画面以外ならアクティブにする
+        if (targetPath !== 'settings://view') {
+            setActiveEditor(splitEditorView);
+            activePane = 'right';
+
+            // ここでも念のためグループ情報を更新しておく
+            isSplitView = true;
+            splitGroup.leftPath = globalEditorView.filePath;
+            splitGroup.rightPath = targetPath;
+            return;
+        }
+    }
+
+    ensureSplitLayout();
+
+    // 1. 先にグループ情報を更新して「分割状態であること」を確定させる
+    isSplitView = true;
+    splitGroup.leftPath = globalEditorView.filePath;
+    splitGroup.rightPath = targetPath;
+
+    // ファイル情報の取得
+    const fileData = openedFiles.get(targetPath);
+
+    // 設定画面の場合
+    if (fileData && fileData.type === 'settings') {
+        if (!splitEditorView) {
+            splitEditorView = new EditorView({ parent: splitEditorDiv });
+            splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+            splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+        }
+        splitEditorView.filePath = targetPath;
+        switchToFile(targetPath, 'right');
+        if (fileTitleInputSplit) {
+            fileTitleInputSplit.value = '設定';
+            fileTitleInputSplit.disabled = true;
+        }
+        return;
+    }
+
+    // 通常ファイル
+    if (fileTitleInputSplit) {
+        const fileName = targetPath.split(/[/\\]/).pop();
+        const extIndex = fileName.lastIndexOf('.');
+        const nameNoExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
+        fileTitleInputSplit.value = nameNoExt;
+        fileTitleInputSplit.title = targetPath;
+        fileTitleInputSplit.disabled = false;
+    }
+
+    // コンテンツ取得とエディタ生成
+    let content = fileData ? (fileData.content || '') : 'Loading...';
+    // 左側で同じファイルを開いているなら同期
+    if (globalEditorView && globalEditorView.filePath === targetPath) {
+        content = globalEditorView.state.doc.toString();
+    }
+
+    if (!splitEditorView) {
+        const state = createEditorState(content, targetPath);
+        splitEditorView = new EditorView({
+            state: state,
+            parent: splitEditorDiv
+        });
+
+        splitEditorView.contentDOM.addEventListener('focus', () => {
+            activePane = 'right';
+            setActiveEditor(splitEditorView);
+        });
+        splitEditorView.contentDOM.addEventListener('click', () => {
+            activePane = 'right';
+            setActiveEditor(splitEditorView);
+        });
+    } else {
+        const newState = createEditorState(content, targetPath);
+        splitEditorView.setState(newState);
+    }
+
+    splitEditorView.filePath = targetPath;
+    activePane = 'right';
+    setActiveEditor(splitEditorView);
+
+    const editorEl = document.getElementById('editor-split');
+    const settingsEl = document.getElementById('content-settings');
+    if (editorEl) editorEl.style.display = 'block';
+
+    if (settingsEl && settingsEl.parentElement === document.getElementById('editor-wrapper') && settingsEl.nextElementSibling === null) {
+        detachSettingsView();
+    }
+
+    // showSplitLayout(); // 上ですでに ensureSplitLayout を呼んでいるので不要だが念のため
+    showSplitLayout();
+}
+
+// タブを切り替える関数 (Ctrl+Tab等での重複防止修正版)
+function switchTab(direction) {
+    const tabs = Array.from(document.querySelectorAll('.editor-tabs .tab'));
+    if (tabs.length <= 1) return;
+
+    const activeTab = document.querySelector('.editor-tabs .tab.active');
+    // アクティブなタブがない場合は先頭を選択
+    if (!activeTab) {
+        const target = tabs[0];
+        if (target.id === 'tab-settings') openSettingsTab();
+        else if (target.dataset.filepath) switchToFile(target.dataset.filepath, activePane);
+        return;
+    }
+
+    const currentIndex = tabs.indexOf(activeTab);
+    // 循環するようにインデックスを計算
+    let nextIndex = (currentIndex + direction) % tabs.length;
+    if (nextIndex < 0) nextIndex = tabs.length - 1;
+
+    const targetTab = tabs[nextIndex];
+
+    if (targetTab.id === 'tab-settings') {
+        openSettingsTab();
+    } else if (targetTab.dataset.filepath) {
+        const path = targetTab.dataset.filepath;
+
+        // 重複防止ロジック
+        // 1. 左側のエディタで開かれているか判定
+        const isOpenedInLeft = globalEditorView && globalEditorView.filePath === path;
+
+        // 2. 右側のエディタで開かれているか判定
+        const isOpenedInRight = isSplitView && splitEditorView && splitEditorView.filePath === path;
+
+        // 【修正の核心】
+        // 冗長なチェックを削除し、常に switchToFile を呼び出すことで、
+        // ファイルがスプリットグループのメンバーであればレイアウト復元 (showSplitLayout)
+        // が switchToFile 内で実行されるようにする。
+        switchToFile(path, activePane);
+    }
+}
+
+// editorTabsContainer のクリックイベントリスナーを修正:
 if (editorTabsContainer) {
     editorTabsContainer.addEventListener('click', (e) => {
         const closeBtn = e.target.closest('.close-tab');
@@ -8166,10 +8908,37 @@ if (editorTabsContainer) {
                 closeTab(tabElement, false);
             }
         } else if (tabElement && !e.target.classList.contains('close-tab')) {
-            if (tabElement.id === 'tab-settings') {
-                openSettingsTab();
-            } else if (tabElement.dataset.filepath) {
-                switchToFile(tabElement.dataset.filepath);
+            // 【修正】設定タブかどうかにかかわらず、パスベースで共通の処理を行う
+            // これにより設定タブでも分割グループ判定が効くようになる
+
+            let path = tabElement.dataset.filepath;
+
+            // datasetがない場合（古い実装等）のフォールバック
+            if (!path && tabElement.id === 'tab-settings') {
+                path = 'settings://view';
+            }
+
+            if (path) {
+                // --- Split Group Check ---
+                const isLeftSplitFile = path === splitGroup.leftPath;
+                const isRightSplitFile = path === splitGroup.rightPath;
+
+                if (isLeftSplitFile || isRightSplitFile) {
+                    // 分割グループのメンバーなら、対応するペインで表示（switchToFile内でレイアウト復元される）
+                    switchToFile(path, isRightSplitFile ? 'right' : 'left');
+                } else {
+                    // それ以外なら、左ペイン（全画面）で表示
+                    // 設定画面の場合もここで switchToFile が呼ばれ、openSettingsTab 経由でなくても正しく開く
+                    if (path === 'settings://view') {
+                        // openSettingsTabを通すことで初期化漏れを防ぐ（念のため）
+                        openSettingsTab();
+                    } else {
+                        switchToFile(path, 'left');
+                    }
+                }
+
+                updateTabVisuals();
+                updateOutline();
             }
         }
     });
@@ -9418,33 +10187,44 @@ async function checkExternalFileChange(filePath) {
 
 /**
  * ディスクからファイルを再読み込みし、カーソル位置を維持する (修正版)
+ * 修正: 左右のエディタそれぞれのfilePathを確認し、一致する場合のみ更新するように変更
  */
 async function reloadFileFromDisk(filePath) {
-    if (!globalEditorView) return;
-
     try {
         // 1. ディスクから最新の内容を読み込む
         const newContent = await window.electronAPI.loadFile(filePath);
 
-        // 現在のエディタの内容と比較し、同じなら何もしない (自分の保存による検知を無視)
-        const currentContent = globalEditorView.state.doc.toString();
-        if (newContent === currentContent) {
-            console.log('Content match, skipping reload.');
-            return;
+        // --- 左側 (Main) エディタの更新チェック ---
+        if (globalEditorView && globalEditorView.filePath === filePath) {
+            const currentContent = globalEditorView.state.doc.toString();
+            // 内容が異なる場合のみ更新
+            if (newContent !== currentContent) {
+                const currentSelection = globalEditorView.state.selection;
+                const transaction = {
+                    changes: { from: 0, to: globalEditorView.state.doc.length, insert: newContent },
+                    selection: currentSelection,
+                    scrollIntoView: true,
+                    annotations: ExternalChange.of(true)
+                };
+                globalEditorView.dispatch(transaction);
+            }
         }
 
-        // 2. 現在のカーソル位置を保存
-        const currentSelection = globalEditorView.state.selection;
-
-        // 3. エディタの内容を更新
-        const transaction = {
-            changes: { from: 0, to: globalEditorView.state.doc.length, insert: newContent },
-            selection: currentSelection, // カーソル位置の復元
-            scrollIntoView: true,
-            annotations: ExternalChange.of(true) // 外部変更としてマーク
-        };
-
-        globalEditorView.dispatch(transaction);
+        // --- 右側 (Split) エディタの更新チェック ---
+        if (splitEditorView && splitEditorView.filePath === filePath) {
+            const currentContent = splitEditorView.state.doc.toString();
+            // 内容が異なる場合のみ更新
+            if (newContent !== currentContent) {
+                const currentSelection = splitEditorView.state.selection;
+                const transaction = {
+                    changes: { from: 0, to: splitEditorView.state.doc.length, insert: newContent },
+                    selection: currentSelection,
+                    scrollIntoView: true,
+                    annotations: ExternalChange.of(true)
+                };
+                splitEditorView.dispatch(transaction);
+            }
+        }
 
         // 内部データの更新
         const fileData = openedFiles.get(filePath);
@@ -9455,7 +10235,7 @@ async function reloadFileFromDisk(filePath) {
         updateFileStats();
 
         // 本当に外部からの変更があった場合のみ通知
-        showNotification('ファイルを再読み込みしました', 'info');
+        // showNotification('ファイルを再読み込みしました', 'info');
 
     } catch (e) {
         console.error('Auto-reload failed:', e);
@@ -9661,6 +10441,355 @@ class CommandPalette {
             }, 50);
         }
     }
+}
+
+// ========== 画面分割機能 (CodeMirror版) ==========
+
+let splitEditorView = null; // 2つ目のエディタ
+let isSplitView = false;    // 分割状態
+let splitGroup = { leftPath: null, rightPath: null };
+let isSplitLayoutVisible = false;
+
+// ========== レイアウト管理ヘルパー (新規追加) ==========
+
+/**
+ * 分割レイアウト（左右2ペイン）をDOMに適用し、表示状態を更新する
+ */
+function showSplitLayout() {
+    if (isSplitLayoutVisible) return;
+
+    const mainEditorDiv = document.getElementById('editor');
+    const splitEditorDiv = document.getElementById('editor-split');
+    const mainTitleBar = document.getElementById('file-title-bar');
+    const splitTitleBar = document.getElementById('file-title-bar-split');
+
+    // レイアウトを分割状態に設定
+    mainEditorDiv.style.width = 'calc(50% - 3px)';
+    splitEditorDiv.style.display = 'block';
+    splitEditorDiv.style.width = 'calc(50% - 3px)';
+
+    // リサイザーを表示
+    if (resizerEditorSplit) {
+        resizerEditorSplit.classList.remove('hidden');
+    }
+    splitEditorDiv.style.borderLeft = 'none';
+
+    // タイトルバーを分割状態に設定
+    if (mainTitleBar) {
+        mainTitleBar.style.flex = 'none';
+        mainTitleBar.style.width = '50%';
+        mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
+        mainTitleBar.classList.remove('hidden');
+    }
+    if (splitTitleBar) {
+        splitTitleBar.style.display = 'flex';
+        splitTitleBar.style.width = '50%';
+        splitTitleBar.classList.remove('hidden');
+    }
+
+    isSplitLayoutVisible = true;
+    isSplitView = true; // 分割状態フラグを確実にONにする
+}
+
+/**
+ * 分割レイアウトを解除し、メインエディタを全画面表示にする
+ */
+function hideSplitLayout() {
+    if (!isSplitLayoutVisible) return;
+
+    const mainEditorDiv = document.getElementById('editor');
+    const splitEditorDiv = document.getElementById('editor-split');
+    const mainTitleBar = document.getElementById('file-title-bar');
+    const splitTitleBar = document.getElementById('file-title-bar-split');
+
+    // メインエディタを全幅に
+    mainEditorDiv.style.width = '100%';
+    splitEditorDiv.style.display = 'none';
+    splitEditorDiv.style.width = '0%';
+
+    // リサイザーを非表示
+    if (resizerEditorSplit) {
+        resizerEditorSplit.classList.add('hidden');
+    }
+
+    // タイトルバーを全幅に
+    if (mainTitleBar) {
+        mainTitleBar.style.width = '100%';
+        mainTitleBar.style.borderRight = 'none';
+        mainTitleBar.style.flex = '1';
+    }
+    if (splitTitleBar) {
+        splitTitleBar.style.display = 'none';
+    }
+
+    isSplitLayoutVisible = false;
+    isSplitView = false; // 分割状態フラグを確実にOFFにする
+}
+
+// 分割を閉じる関数
+function closeSplitView() {
+    if (!isSplitView) return;
+
+    isSplitView = false; // 【修正】永続的な分割状態を完全に解除する
+
+    const mainEditorDiv = document.getElementById('editor');
+    const splitEditorDiv = document.getElementById('editor-split');
+    const mainTitleBar = document.getElementById('file-title-bar');
+    const splitTitleBar = document.getElementById('file-title-bar-split');
+
+    // レイアウトを元に戻す
+    mainEditorDiv.style.width = '100%';
+    splitEditorDiv.style.display = 'none';
+    splitEditorDiv.style.width = '0%';
+
+    // リサイザーを非表示
+    if (resizerEditorSplit) {
+        resizerEditorSplit.classList.add('hidden');
+    }
+
+    // タイトルバーを元に戻す
+    if (mainTitleBar) {
+        mainTitleBar.style.width = '100%';
+        mainTitleBar.style.borderRight = 'none';
+    }
+    if (splitTitleBar) {
+        splitTitleBar.style.display = 'none';
+    }
+
+    // 分割ビューのファイルパス情報をリセットする
+    if (splitEditorView) {
+        splitEditorView.filePath = null;
+    }
+
+    // 分割グループをリセット
+    splitGroup.leftPath = null;
+    splitGroup.rightPath = null;
+
+    // activePane と activeEditor を左に戻す
+    activePane = 'left';
+    setActiveEditor(globalEditorView);
+
+    // 隠されていた README を再表示するかも
+    if (openedFiles.size === 0) {
+        showWelcomeReadme();
+    }
+}
+
+// --- エディタ分割リサイザーのイベント ---
+
+if (resizerEditorSplit) {
+    resizerEditorSplit.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // テキスト選択などを防止
+        isResizingEditorSplit = true;
+        resizerEditorSplit.classList.add('resizing');
+        // ドラッグ中は他の要素（iframeなど）がマウスイベントを奪わないようにする
+        document.body.classList.add('is-resizing-col'); // カーソル固定用クラス
+    });
+}
+
+// 既存の mousemove イベント内に追加、または新規に追加
+document.addEventListener('mousemove', (e) => {
+
+    if (isResizingLeft && resizerLeft) {
+        const activityBarWidth = 50; // CSS変数の値と合わせる
+        // マウス位置からアクティビティバーの幅を引いてサイドバーの幅を算出
+        let newWidth = e.clientX - activityBarWidth;
+
+        // 最小幅・最大幅の制限 (例: 150px ~ 600px)
+        if (newWidth < 160) newWidth = 160;
+        if (newWidth > 600) newWidth = 600;
+
+        const widthStr = newWidth + 'px';
+
+        // CSS変数を更新して幅を変更
+        document.documentElement.style.setProperty('--leftpane-width', widthStr);
+        // トップバーの左側コントロール幅も同期させる
+        document.documentElement.style.setProperty('--current-left-pane-width', widthStr);
+    }
+
+    if (isResizingRight && resizerRight) {
+        const rightActivityBarWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--activitybar-width')) || 50;
+        const newWidth = window.innerWidth - e.clientX - rightActivityBarWidth;
+
+        if (newWidth > 100 && newWidth < 800) {
+            rightPane.style.width = newWidth + 'px';
+            resizerRight.style.right = (newWidth + rightActivityBarWidth) + 'px';
+            document.documentElement.style.setProperty('--right-pane-width', newWidth + 'px');
+            const mainContent = centerPane.parentElement;
+            mainContent.style.marginRight = (newWidth + rightActivityBarWidth) + 'px';
+
+            if (activeTerminalId) {
+                requestAnimationFrame(() => fitTerminal(activeTerminalId));
+            }
+        }
+    }
+
+    if (isResizingBottom && resizerBottom) {
+        const newHeight = window.innerHeight - e.clientY - 24;
+
+        if (newHeight > 50 && newHeight < window.innerHeight - 200) {
+            bottomPane.style.height = newHeight + 'px';
+            resizerBottom.style.top = (window.innerHeight - newHeight - 24) + 'px';
+
+            centerPane.style.marginBottom = newHeight + 'px';
+
+            if (activeTerminalId) {
+                requestAnimationFrame(() => fitTerminal(activeTerminalId));
+            }
+        }
+    }
+
+    // エディタ分割のリサイズ処理
+    if (isResizingEditorSplit && isSplitView) {
+        const wrapper = document.getElementById('editor-wrapper');
+        const mainEditorDiv = document.getElementById('editor');
+        const splitEditorDiv = document.getElementById('editor-split');
+        const mainTitleBar = document.getElementById('file-title-bar');
+        const splitTitleBar = document.getElementById('file-title-bar-split');
+
+        if (!wrapper) return;
+
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const wrapperWidth = wrapperRect.width;
+
+        // マウス位置の相対座標（ラッパー左端からの距離）
+        let newLeftWidth = e.clientX - wrapperRect.left;
+
+        // リサイザーの幅（CSSで6pxに設定されている想定）
+        const resizerWidth = 6;
+
+        // 最小幅制限 (例えば 100px)
+        if (newLeftWidth < 100) newLeftWidth = 100;
+        if (newLeftWidth > wrapperWidth - 100) newLeftWidth = wrapperWidth - 100;
+
+        // リサイザーの幅を考慮してパーセント計算
+        // 左側の幅ピクセルを直接スタイルに適用（計算精度のためpx指定を推奨）
+        const leftWidthPx = newLeftWidth;
+        const rightWidthPx = wrapperWidth - newLeftWidth - resizerWidth;
+
+        // エディタ幅の適用 (px指定の方が計算ズレが少ないです)
+        mainEditorDiv.style.width = `${leftWidthPx}px`;
+        splitEditorDiv.style.width = `${rightWidthPx}px`;
+
+        // タイトルバー幅の適用（同期させる）
+        // タイトルバーにはリサイザーがないため、純粋な比率で分割するか、上記と同じpx幅を適用
+        if (mainTitleBar) mainTitleBar.style.width = `${leftWidthPx}px`;
+        // 右側タイトルバーは残り幅全部を使うように flex: 1 にするか、計算して適用
+        if (splitTitleBar) splitTitleBar.style.width = `${rightWidthPx + resizerWidth}px`; // タイトルバー側は隙間を埋めるため少し広めに
+    }
+});
+
+// 既存の mouseup イベント内に追加、または新規に追加
+document.addEventListener('mouseup', () => {
+
+    if (isResizingLeft) {
+        isResizingLeft = false;
+        if (resizerLeft) resizerLeft.classList.remove('resizing');
+        document.body.classList.remove('is-resizing-col');
+    }
+    if (isResizingRight) {
+        isResizingRight = false;
+        if (resizerRight) resizerRight.classList.remove('resizing');
+        document.body.classList.remove('is-resizing-col');
+        if (activeTerminalId) setTimeout(() => fitTerminal(activeTerminalId), 50);
+    }
+    if (isResizingBottom) {
+        isResizingBottom = false;
+        if (resizerBottom) resizerBottom.classList.remove('resizing');
+        document.body.classList.remove('is-resizing-row');
+        if (activeTerminalId) setTimeout(() => fitTerminal(activeTerminalId), 50);
+    }
+    if (isResizingEditorSplit) {
+        isResizingEditorSplit = false;
+        if (resizerEditorSplit) resizerEditorSplit.classList.remove('resizing');
+        document.body.classList.remove('is-resizing-col');
+
+        // CodeMirrorの表示崩れを防ぐためにリフレッシュ
+        if (globalEditorView) globalEditorView.requestMeasure();
+        if (splitEditorView) splitEditorView.requestMeasure();
+    }
+});
+
+// 3. 各タブにドラッグ機能を有効化する関数（これを後で呼び出します）
+function enableTabDragging(tabElement) {
+    tabElement.setAttribute('draggable', 'true');
+
+    tabElement.addEventListener('dragstart', (e) => {
+        tabElement.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+
+        // 【修正】ここを 'text/plain' から変更しました
+        // これでエディタに文字として貼り付けられるのを防ぎます
+        e.dataTransfer.setData('application/x-markdown-tab', tabElement.dataset.filepath || '');
+    });
+
+    tabElement.addEventListener('dragend', () => {
+        tabElement.classList.remove('dragging');
+    });
+}
+
+// ========== タブ並べ替え機能 (新規追加) ==========
+function setupTabReordering() {
+    if (!editorTabsContainer) return;
+
+    editorTabsContainer.addEventListener('dragover', (e) => {
+        e.preventDefault(); // ドロップを許可
+        const draggingTab = document.querySelector('.tab.dragging');
+        // タブ同士の並べ替え以外（ファイルツリーからのドロップなど）は無視
+        if (!draggingTab) return;
+
+        const afterElement = getTabAfterElement(editorTabsContainer, e.clientX);
+        if (afterElement == null) {
+            editorTabsContainer.appendChild(draggingTab);
+        } else {
+            editorTabsContainer.insertBefore(draggingTab, afterElement);
+        }
+    });
+}
+
+function getTabAfterElement(container, x) {
+    const draggableElements = [...container.querySelectorAll('.tab:not(.dragging)')];
+
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        // 要素の中心点
+        const boxCenter = box.left + box.width / 2;
+        const offset = x - boxCenter;
+
+        // カーソルが中心より左 (offset < 0) かつ、これまでの候補の中で一番近い (offsetが大きい)
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+// 現在アクティブなエディタを取得する関数（ツールバーなどで使用）
+function getActiveView() {
+    return activeEditorView || globalEditorView;
+}
+
+/**
+ * 設定画面をクリックした際に、その配置場所に応じてアクティブ状態にするハンドラ
+ */
+function setupSettingsActivationHandler() {
+    const settingsEl = document.getElementById('content-settings');
+    if (!settingsEl) return;
+
+    settingsEl.addEventListener('mousedown', (e) => {
+        // 親へのイベント伝播を止める（誤作動防止）
+        e.stopPropagation();
+
+        // 分割表示中で、右側に設定画面がある場合
+        if (isSplitLayoutVisible && splitGroup.rightPath === 'settings://view') {
+            if (splitEditorView) setActiveEditor(splitEditorView);
+        }
+        // それ以外（左側、または全画面）の場合
+        else {
+            if (globalEditorView) setActiveEditor(globalEditorView);
+        }
+    });
 }
 
 // インスタンス作成
