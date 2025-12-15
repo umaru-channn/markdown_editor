@@ -414,6 +414,8 @@ let fileModificationState = new Map();
 let currentSortOrder = 'asc';
 let currentFilePath = null;
 let recentFiles = []; // 最近開いたファイルのリスト
+// 各ファイルの最終保存時刻を記録するマップ (誤検知防止用)
+const lastSaveTimeMap = new Map();
 
 // PDFのズームレベルを管理するグローバル変数 (初期値: 1.5倍)
 let pdfCurrentScale = 1.5;
@@ -1109,7 +1111,7 @@ function setupSettingsListeners() {
     document.getElementById('pdf-page-ranges')?.addEventListener('input', updatePdfSettings); // inputイベントでリアルタイム反映
 }
 
-// 設定タブを開く処理（修正版：ファイルとして扱う・分割対応）
+// 設定タブを開く処理（：ファイルとして扱う・分割対応）
 function openSettingsTab() {
 
     // READMEが開いている場合は閉じる
@@ -2342,7 +2344,7 @@ const dropHandler = EditorView.domEventHandlers({
     }
 });
 
-// ========== アクティブな画面（左右）の判定処理（修正版） ==========
+// ========== アクティブな画面（左右）の判定処理 ==========
 let activePane = 'left'; // 初期値
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -3107,7 +3109,7 @@ async function handleWikiLinkClick(linkText) {
     openFile(fullPath, targetFileName);
 }
 
-// getCombinedKeymapにfilePathを渡すように修正
+// getCombinedKeymapにfilePathを渡すためのエディタ状態作成関数
 function createEditorState(content, filePath) {
     const initialTheme = appSettings.theme === 'dark' ? oneDark : [];
     const initialStyle = EditorView.theme({
@@ -3524,7 +3526,7 @@ function setupHotkeySearch() {
     }
 }
 
-// 設定画面へのドラッグ＆ドロップ対応（新規追加）
+// 設定画面へのドラッグ＆ドロップ対応
 function setupSettingsDropHandler() {
     const settingsEl = document.getElementById('content-settings');
     if (!settingsEl) return;
@@ -3549,7 +3551,34 @@ function setupSettingsDropHandler() {
         if (tabPath) {
             e.preventDefault();
             e.stopPropagation();
-            openInSplitView(tabPath);
+
+            // 分割表示中かどうかで処理を分岐
+            if (typeof isSplitLayoutVisible !== 'undefined' && isSplitLayoutVisible) {
+                // --- A. 分割表示中 ---
+                // 設定画面が表示されている側（左or右）を特定し、そのペインを上書きする
+
+                let targetSide = 'left'; // デフォルト(左)
+
+                if (splitGroup.rightPath === 'settings://view') {
+                    targetSide = 'right';
+                }
+
+                // パス情報を直接更新 (Swap防止のためopenInSplitViewは使わない)
+                if (targetSide === 'left') {
+                    splitGroup.leftPath = tabPath;
+                } else {
+                    splitGroup.rightPath = tabPath;
+                }
+
+                // 上書き表示
+                switchToFile(tabPath, targetSide);
+
+            } else {
+                // --- B. 全画面表示中 ---
+                // 右側に分割して開く (設定画面を残したままファイルを表示)
+                // これにより「設定画面のタブ分割」が可能になります
+                openInSplitView(tabPath, 'right');
+            }
         }
     });
 }
@@ -3885,7 +3914,7 @@ function setTextAlignment(view, alignment) {
     view.focus();
 }
 
-// ========== ツールバー ボタン イベントリスナー (修正版) ==========
+// ========== ツールバー ボタン イベントリスナー ==========
 
 // 保存はアクティブなファイルを対象にするよう saveCurrentFile 内で処理されます
 document.getElementById('btn-save')?.addEventListener('click', () => saveCurrentFile(false));
@@ -3922,7 +3951,7 @@ document.getElementById('highlight-btn')?.addEventListener('click', () => toggle
 document.getElementById('link-btn')?.addEventListener('click', () => insertLink(getActiveView()));
 document.getElementById('image-btn')?.addEventListener('click', () => insertImage(getActiveView()));
 
-// ローカル画像挿入ボタン (修正)
+// ローカル画像挿入ボタン
 document.getElementById('local-image-btn')?.addEventListener('click', async () => {
     const view = getActiveView(); // アクティブなビューを取得
     if (!view) return;
@@ -4789,7 +4818,7 @@ if (btnZen) {
     });
 }
 
-if (btnPdfPreview) { // togglePdfPreview関数を直接呼んでいる既存コードを修正
+if (btnPdfPreview) { // togglePdfPreview関数を直接呼んでいる既存コードを置き換え
     btnPdfPreview.addEventListener('click', () => {
         if (isPdfPreviewVisible) {
             isPdfPreviewVisible = false;
@@ -7449,7 +7478,7 @@ window.addEventListener('load', async () => {
     // ファイルシステムの変更を監視
     if (typeof window.electronAPI?.onFileSystemChanged === 'function') {
         window.electronAPI.onFileSystemChanged((payload) => {
-            // 1. ファイルツリーの更新 (既存ロジック)
+            // 1. ファイルツリーの更新
             if (window.fileTreeUpdateTimeout) clearTimeout(window.fileTreeUpdateTimeout);
             window.fileTreeUpdateTimeout = setTimeout(() => {
                 initializeFileTreeWithState();
@@ -7459,30 +7488,28 @@ window.addEventListener('load', async () => {
             }, 500);
 
             // 2. 現在開いているファイルの自動再読み込み判定
-            // (renameイベントはファイル消失の可能性があるため、changeイベントのみ対象とするのが安全ですが、
-            //  エディタによっては保存時に rename -> change の順で走ることもあるため、
-            //  ここではファイルが存在するか確認してから処理します)
             if (currentFilePath && payload.filename) {
-                // パスの正規化と判定
-                // fs.watchのfilenameは、監視ルートからの相対パスの場合が多い
                 let changedFullPath = payload.filename;
 
-                // 絶対パスでない場合、カレントディレクトリと結合して絶対パス化を試みる
                 if (!path.isAbsolute(payload.filename) && currentDirectoryPath) {
                     changedFullPath = path.join(currentDirectoryPath, payload.filename);
                 }
 
-                // パス区切り文字の正規化 (Windows対策)
                 const normalizedCurrent = currentFilePath.replace(/\\/g, '/');
                 const normalizedChanged = changedFullPath.replace(/\\/g, '/');
 
-                // 現在開いているファイルと一致する場合
                 if (normalizedCurrent === normalizedChanged) {
-                    // デバウンス処理 (短時間の連続発火を防ぐ)
+                    // 直近（2秒以内）に自分が保存したファイルなら無視する
+                    const lastSave = lastSaveTimeMap.get(normalizedCurrent);
+                    if (lastSave && (Date.now() - lastSave) < 2000) {
+                        console.log('Ignored self-change event for:', normalizedCurrent);
+                        return;
+                    }
+
                     if (window.activeFileReloadTimeout) clearTimeout(window.activeFileReloadTimeout);
                     window.activeFileReloadTimeout = setTimeout(() => {
                         checkExternalFileChange(currentFilePath);
-                    }, 600); // ツリー更新より少し遅らせて実行
+                    }, 600);
                 }
             }
         });
@@ -7877,7 +7904,7 @@ async function renderMediaContent(filePath, type) {
     }
 }
 
-// ========== コンフリクト解消機能の実装 (修正版) ==========
+// ========== コンフリクト解消機能の実装 ==========
 
 // 1. ボタンを表示するためのウィジェット
 class ConflictWidget extends WidgetType {
@@ -8111,7 +8138,7 @@ async function openDiffView(filePath) {
 }
 
 /**
- * ファイルを開く関数 (修正版)
+ * ファイルを開く関数
  * 'external' タイプの場合は外部アプリで起動する処理を追加
  */
 async function openFile(filePath, fileName) {
@@ -8364,31 +8391,37 @@ function switchToFile(filePath, targetPane = 'left') {
         // 分割ビューの内容が古い場合に強制的に更新する
         if (splitGroup.leftPath && globalEditorView.filePath !== splitGroup.leftPath) {
             const leftData = openedFiles.get(splitGroup.leftPath);
-            if (leftData && leftData.type !== 'settings') { // 設定以外
-                document.getElementById('editor').style.display = 'block';
-                document.getElementById('media-view').classList.add('hidden');
+            if (leftData) {
+                if (leftData.type !== 'settings') { // 設定以外
+                    document.getElementById('editor').style.display = 'block';
+                    document.getElementById('media-view').classList.add('hidden');
 
-                if (leftData.editorState) {
-                    globalEditorView.setState(leftData.editorState);
-                } else {
-                    const newState = createEditorState(leftData.content || '', splitGroup.leftPath);
-                    globalEditorView.setState(newState);
+                    if (leftData.editorState) {
+                        globalEditorView.setState(leftData.editorState);
+                    } else {
+                        const newState = createEditorState(leftData.content || '', splitGroup.leftPath);
+                        globalEditorView.setState(newState);
+                    }
                 }
+                // 設定画面の場合でもパス情報は更新しておく (タイトルバー同期のため)
                 globalEditorView.filePath = splitGroup.leftPath;
             }
         }
 
         if (splitGroup.rightPath && splitEditorView && splitEditorView.filePath !== splitGroup.rightPath) {
             const rightData = openedFiles.get(splitGroup.rightPath);
-            if (rightData && rightData.type !== 'settings') { // 設定以外
-                document.getElementById('editor-split').style.display = 'block';
+            if (rightData) {
+                if (rightData.type !== 'settings') { // 設定以外
+                    document.getElementById('editor-split').style.display = 'block';
 
-                if (rightData.editorState) {
-                    splitEditorView.setState(rightData.editorState);
-                } else {
-                    const newState = createEditorState(rightData.content || '', splitGroup.rightPath);
-                    splitEditorView.setState(newState);
+                    if (rightData.editorState) {
+                        splitEditorView.setState(rightData.editorState);
+                    } else {
+                        const newState = createEditorState(rightData.content || '', splitGroup.rightPath);
+                        splitEditorView.setState(newState);
+                    }
                 }
+                // 設定画面の場合でもパス情報は更新しておく
                 splitEditorView.filePath = splitGroup.rightPath;
             }
         }
@@ -8853,6 +8886,10 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
             if (typeof window.electronAPI?.saveFile === 'function') {
                 await window.electronAPI.saveFile(savePath, content);
 
+                // 保存時刻を記録 (現在時刻 + 猶予を持たせるため少し未来の時間にするのが安全ですが、今回は現在時刻で管理します)
+                const mapKey = savePath.replace(/\\/g, '/');
+                lastSaveTimeMap.set(mapKey, Date.now());
+
                 if (fileData) {
                     fileData.content = content;
                 }
@@ -8954,7 +8991,7 @@ function setActiveEditor(view) {
     }
 }
 
-// 指定したファイルを分割エディタで開く関数 (左分割対応・同一ファイル許可・修正版)
+// 指定したファイルを分割エディタで開く関数 (左分割対応・同一ファイル許可)
 function openInSplitView(filePath, side = 'right') {
     let targetPath = filePath;
 
@@ -9165,7 +9202,7 @@ function openInSplitView(filePath, side = 'right') {
     showSplitLayout();
 }
 
-// タブを切り替える関数 (Ctrl+Tab等での重複防止修正版)
+// タブを切り替える関数 (Ctrl+Tab等での重複防止)
 function switchTab(direction) {
     const tabs = Array.from(document.querySelectorAll('.editor-tabs .tab'));
     if (tabs.length <= 1) return;
@@ -10498,7 +10535,7 @@ async function checkExternalFileChange(filePath) {
 }
 
 /**
- * ディスクからファイルを再読み込みし、カーソル位置を維持する (修正版)
+ * ディスクからファイルを再読み込みし、カーソル位置を維持する
  * 修正: 左右のエディタそれぞれのfilePathを確認し、一致する場合のみ更新するように変更
  */
 async function reloadFileFromDisk(filePath) {
@@ -11179,3 +11216,296 @@ COMMANDS_REGISTRY.push({
 document.addEventListener('click', () => {
     ContextMenu.close();
 });
+
+// サポートされている実行言語リスト (main.jsと同期)
+const SUPPORTED_RUN_LANGUAGES = new Set([
+    'js', 'javascript', 'ts', 'typescript', 'py', 'python',
+    'php', 'rb', 'ruby', 'pl', 'perl', 'lua', 'r', 'dart',
+    'go', 'rs', 'rust', 'c', 'cpp', 'java', 'kt', 'kotlin',
+    'scala', 'swift', 'cs', 'csharp', 'sh', 'bash', 'zsh', 'shell',
+    'bf', 'brainfuck', 'ws', 'whitespace', 'sql',
+    'ps1', 'powershell', 'bat', 'cmd', 'batch'
+]);
+
+const btnRunCode = document.getElementById('btn-run-code');
+
+// ボタンの表示/非表示を切り替える関数
+function updateRunButtonVisibility() {
+    if (!btnRunCode) return;
+
+    // ファイルが開かれていない場合は非表示
+    if (!currentFilePath) {
+        btnRunCode.style.display = 'none';
+        return;
+    }
+
+    // 拡張子または言語IDから判定
+    const ext = currentFilePath.split('.').pop().toLowerCase();
+
+    // 設定ファイルなどは除外
+    if (currentFilePath.startsWith('settings:')) {
+        btnRunCode.style.display = 'none';
+        return;
+    }
+
+    if (SUPPORTED_RUN_LANGUAGES.has(ext)) {
+        btnRunCode.style.display = 'flex';
+    } else {
+        btnRunCode.style.display = 'none';
+    }
+}
+
+// 3. setActiveEditor をフックしてタブ切り替え時にボタン表示を更新
+const originalSetActiveEditor = typeof setActiveEditor === 'function' ? setActiveEditor : null;
+
+setActiveEditor = function (view) {
+    if (originalSetActiveEditor) {
+        originalSetActiveEditor(view);
+    }
+    updateRunButtonVisibility();
+};
+
+// ヘルパー: コマンドが存在するか非同期でチェック
+function checkCommandExistsAsync(command) {
+    return new Promise(resolve => {
+        // --version を付けて実行し、エラーが出なければ存在するとみなす
+        const testCmd = process.platform === 'win32' ? `where ${command}` : `which ${command}`;
+        require('child_process').exec(testCmd, (error) => {
+            resolve(!error);
+        });
+    });
+}
+
+if (btnRunCode) {
+    btnRunCode.addEventListener('click', async (e) => {
+        const activePath = currentFilePath;
+        if (!activePath) return;
+
+        // 未保存なら保存
+        if (fileModificationState.get(activePath)) {
+            await saveCurrentFile(false);
+        }
+
+        // 言語判定と正規化
+        let ext = activePath.split('.').pop().toLowerCase();
+        let langLower = ext;
+
+        if (langLower === 'js') langLower = 'javascript';
+        if (langLower === 'ts') langLower = 'typescript';
+        if (langLower === 'py') langLower = 'python';
+        if (langLower === 'rb') langLower = 'ruby';
+        if (langLower === 'pl') langLower = 'perl';
+        if (langLower === 'rs') langLower = 'rust';
+        if (langLower === 'kt') langLower = 'kotlin';
+        if (langLower === 'cs') langLower = 'csharp';
+        if (langLower === 'sh' || langLower === 'zsh') langLower = 'bash';
+        if (langLower === 'bf') langLower = 'brainfuck';
+        if (langLower === 'ws') langLower = 'whitespace';
+        if (langLower === 'ps1') langLower = 'powershell';
+        if (langLower === 'bat' || langLower === 'cmd') langLower = 'batch';
+
+        // 実際に実行処理を行う関数
+        const executeWithCommand = async (customExecPath = null) => {
+
+            // ターミナル表示 & 初期化待ち
+            if (!isTerminalVisible) {
+                isTerminalVisible = true;
+                updateTerminalVisibility();
+                if (terminals.size === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+
+            const fileNameNoExt = path.parse(activePath).name;
+            const isWin = process.platform === 'win32';
+            const safePath = `"${activePath}"`; // パスをクォート
+
+            let command = '';
+
+            switch (langLower) {
+                case 'javascript':
+                    command = `node ${safePath}`;
+                    break;
+                case 'typescript':
+                    command = `tsc ${safePath} && node "${path.join(path.dirname(activePath), fileNameNoExt + '.js')}"`;
+                    break;
+                case 'python':
+                    // 指定があればそれを使う、なければOSごとのデフォルト
+                    if (customExecPath) {
+                        command = `"${customExecPath}" ${safePath}`;
+                    } else {
+                        command = isWin ? `py ${safePath}` : `python3 ${safePath}`;
+                    }
+                    break;
+                case 'php':
+                    command = `php ${safePath}`;
+                    break;
+                case 'ruby':
+                    command = `ruby ${safePath}`;
+                    break;
+                case 'perl':
+                    command = `perl ${safePath}`;
+                    break;
+                case 'lua':
+                    command = `lua ${safePath}`;
+                    break;
+                case 'r':
+                    command = `Rscript ${safePath}`;
+                    break;
+                case 'dart':
+                    command = `dart ${safePath}`;
+                    break;
+                case 'go':
+                    command = `go run ${safePath}`;
+                    break;
+                case 'rust':
+                    const rustOut = isWin ? `${fileNameNoExt}.exe` : fileNameNoExt;
+                    const rustRun = isWin ? `.\\${rustOut}` : `./${rustOut}`;
+                    command = `rustc ${safePath} -o "${rustOut}" && ${rustRun}`;
+                    break;
+                case 'c':
+                    const cOut = isWin ? `${fileNameNoExt}.exe` : fileNameNoExt;
+                    const cRun = isWin ? `.\\${cOut}` : `./${cOut}`;
+                    command = `gcc ${safePath} -o "${cOut}" && ${cRun}`;
+                    break;
+                case 'cpp':
+                    const cppOut = isWin ? `${fileNameNoExt}.exe` : fileNameNoExt;
+                    const cppRun = isWin ? `.\\${cppOut}` : `./${cppOut}`;
+                    command = `g++ ${safePath} -o "${cppOut}" && ${cppRun}`;
+                    break;
+                case 'csharp':
+                    command = `dotnet run`;
+                    break;
+                case 'swift':
+                    command = `swift ${safePath}`;
+                    break;
+                case 'scala':
+                    // scala-cli または scala の使える方を採用
+                    let scalaCmd = 'scala';
+                    // まず scala-cli の存在チェック
+                    const hasScalaCli = await checkCommandExistsAsync('scala-cli');
+                    if (hasScalaCli) {
+                        scalaCmd = 'scala-cli';
+                    }
+                    command = `${scalaCmd} ${safePath}`;
+                    break;
+                case 'bash':
+                    // WSLが選択された場合の特別処理
+                    if (customExecPath === 'wsl') {
+                        // WindowsパスをWSLパス(/mnt/ドライブ/...)に変換するヘルパー
+                        const toWslPath = (p) => p.replace(/^([a-zA-Z]):/, (m, d) => `/mnt/${d.toLowerCase()}`).replace(/\\/g, '/');
+                        const wslPath = toWslPath(activePath);
+                        // wslコマンド経由でbashを実行
+                        command = `wsl bash "${wslPath}"`;
+                    } else {
+                        // 通常のBash (Git Bashなど)
+                        let bashExec = 'bash';
+                        if (customExecPath) {
+                            bashExec = `"${customExecPath}"`;
+                        } else if (isWin) {
+                            // Windowsの場合のデフォルトフォールバック (Git Bash自動検出)
+                            try {
+                                const fs = require('fs');
+                                const os = require('os');
+                                const candidates = [
+                                    'C:\\Program Files\\Git\\bin\\bash.exe',
+                                    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+                                    path.join(os.homedir(), 'AppData\\Local\\Programs\\Git\\bin\\bash.exe')
+                                ];
+                                for (const p of candidates) {
+                                    if (fs.existsSync(p)) {
+                                        bashExec = `"${p}"`;
+                                        break;
+                                    }
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+                        command = `${bashExec} ${safePath}`;
+                    }
+                    break;
+                case 'batch':
+                    command = `cmd /c ${safePath}`;
+                    break;
+                case 'sql':
+                    command = `sqlite3 :memory: < ${safePath}`;
+                    break;
+                case 'kotlin':
+                    command = `kotlinc ${safePath} -include-runtime -d "${fileNameNoExt}.jar" && java -jar "${fileNameNoExt}.jar"`;
+                    break;
+                case 'java':
+                    let javaClassName = fileNameNoExt;
+                    if (globalEditorView && globalEditorView.filePath === activePath) {
+                        const content = globalEditorView.state.doc.toString();
+                        const match = content.match(/public\s+class\s+(\w+)/);
+                        if (match) {
+                            javaClassName = match[1];
+                        }
+                    }
+                    command = `javac ${safePath} && java ${javaClassName}`;
+                    break;
+                case 'brainfuck':
+                case 'whitespace':
+                    console.log(`Delegating ${langLower} execution to main process...`);
+                    const code = globalEditorView ? globalEditorView.state.doc.toString() : "";
+                    const result = await window.electronAPI.executeCode(code, langLower, null, path.dirname(activePath));
+
+                    if (activeTerminalId) {
+                        if (result.stdout) window.electronAPI.writeToTerminal(activeTerminalId, result.stdout.replace(/\n/g, '\r\n'));
+                        if (result.stderr) window.electronAPI.writeToTerminal(activeTerminalId, `\r\nError:\r\n${result.stderr.replace(/\n/g, '\r\n')}`);
+                    }
+                    return;
+
+                default:
+                    showNotification(`言語 '${langLower}' の実行コマンドは未定義です`, 'error');
+                    return;
+            }
+
+            // ターミナルへ送信
+            const targetTermId = activeTerminalId || (terminals.size > 0 ? terminals.keys().next().value : null);
+            if (targetTermId) {
+                console.log(`Executing: ${command}`);
+                window.electronAPI.writeToTerminal(targetTermId, command + '\r');
+            } else {
+                await createTerminalSession();
+                setTimeout(() => {
+                    if (activeTerminalId) {
+                        window.electronAPI.writeToTerminal(activeTerminalId, command + '\r');
+                    }
+                }, 500);
+            }
+        };
+
+        // --- 実行環境の選択が必要な言語の場合 ---
+        if (['python', 'bash'].includes(langLower)) {
+            try {
+                // 利用可能なバージョン/シェルを取得
+                const versions = await window.electronAPI.getLangVersions(langLower);
+
+                // 選択肢が複数ある場合はメニューを表示
+                if (versions && versions.length > 1) {
+                    const menuItems = versions.map(v => ({
+                        label: v.label, // 例: "Python 3.12" or "Git Bash"
+                        click: () => executeWithCommand(v.path)
+                    }));
+
+                    // 先頭に「デフォルトで実行」を追加（オプション）
+                    menuItems.unshift({
+                        label: 'デフォルトで実行',
+                        click: () => executeWithCommand(null) // nullならデフォルトロジック
+                    });
+
+                    menuItems.push({ type: 'separator' });
+
+                    // マウス位置にメニューを表示
+                    ContextMenu.show(e.pageX, e.pageY, menuItems);
+                    return; // メニュー選択待ちのためここで処理を中断
+                }
+            } catch (err) {
+                console.warn('Failed to get lang versions:', err);
+            }
+        }
+
+        // 選択肢がない、または不要な場合は即座に実行
+        await executeWithCommand(null);
+    });
+}
