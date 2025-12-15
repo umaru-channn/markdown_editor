@@ -7762,17 +7762,66 @@ function showBranchMenu(targetElement, branches, currentBranch) {
 
 /**
  * ファイルパスからファイルタイプを判定するヘルパー
+ * テキスト、画像、PDF以外は 'external' を返すように変更
  */
 function getFileType(filePath) {
     if (!filePath) return 'text';
+
+    const fileName = path.basename(filePath).toLowerCase();
     const ext = path.extname(filePath).toLowerCase();
+
+    // 1. 画像ファイル
     if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico'].includes(ext)) {
         return 'image';
     }
+
+    // 2. PDFファイル
     if (ext === '.pdf') {
         return 'pdf';
     }
-    return 'text';
+
+    // 3. テキストエディタで開くべき拡張子リスト
+    const textExtensions = [
+        // ドキュメント・データ
+        '.md', '.markdown', '.txt', '.text', '.log', '.csv', '.tsv',
+        // Web / Script
+        '.js', '.ts', '.jsx', '.tsx', '.json',
+        '.html', '.htm', '.xml',
+        '.css', '.scss', '.sass', '.less',
+        // プログラミング言語
+        '.py', '.rb', '.php', '.java', '.c', '.cpp', '.h', '.hpp', '.cs',
+        '.go', '.rs', '.kt', '.swift', '.dart', '.lua', '.pl', '.pm',
+        '.sh', '.bash', '.zsh', '.bat', '.ps1', '.cmd',
+        '.sql', '.r', '.scala', '.bf', '.ws',
+        // 設定ファイル等
+        '.yaml', '.yml', '.toml', '.ini', '.conf', '.cfg', '.properties',
+        '.gradle', '.vbs', '.asm', '.s', '.vue', '.svelte', '.astro',
+        '.dockerfile'
+    ];
+
+    if (textExtensions.includes(ext)) {
+        return 'text';
+    }
+
+    // 4. ファイル名で判定 (拡張子がない、またはドットファイル)
+    // (path.extname('.gitignore') は空文字を返すため、ファイル名でチェック)
+    const textFileNames = [
+        'makefile', 'license', 'changelog', 'readme', 'notice',
+        '.gitignore', '.gitattributes', '.editorconfig', '.env',
+        '.bashrc', '.zshrc', '.profile', 'dockerfile'
+    ];
+
+    if (textFileNames.includes(fileName) || fileName.startsWith('.env')) {
+        return 'text';
+    }
+
+    // 5. ドットで始まるファイル（拡張子なし）は設定ファイルとみなしてテキスト扱い（安全策）
+    if (fileName.startsWith('.') && ext === '') {
+        return 'text';
+    }
+
+    // 上記以外（Officeファイル、exe、zipなど）は外部アプリで開く
+    return 'external';
 }
 
 /**
@@ -8049,11 +8098,30 @@ async function openDiffView(filePath) {
     }
 }
 
+/**
+ * ファイルを開く関数 (修正版)
+ * 'external' タイプの場合は外部アプリで起動する処理を追加
+ */
 async function openFile(filePath, fileName) {
     // パスを正規化して統一
     const normalizedPath = path.resolve(filePath);
 
-    // 履歴に追加
+    // ファイルタイプ判定
+    const fileType = getFileType(normalizedPath);
+
+    // ★追加: 対応していない形式は外部アプリで開く
+    if (fileType === 'external') {
+        try {
+            await window.electronAPI.openPath(normalizedPath);
+            showNotification('外部アプリでファイルを開きました', 'success');
+        } catch (e) {
+            console.error(e);
+            showNotification(`外部アプリでのオープンに失敗: ${e.message}`, 'error');
+        }
+        return; // エディタでは開かない
+    }
+
+    // 履歴に追加 (外部ファイルの場合は履歴に残すかどうかは好みですが、ここではエディタで開いたもののみ残します)
     addToRecentFiles(normalizedPath);
 
     try {
@@ -8083,13 +8151,10 @@ async function openFile(filePath, fileName) {
         // 既存のタブが存在するかチェック（非アクティブなタブの場合）
         let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
 
-        // ファイルタイプ判定
-        const fileType = getFileType(normalizedPath);
         let fileContent = '';
 
         // テキストファイルの場合のみ内容を読み込む
         if (fileType === 'text') {
-            // ★変更: 一括読み込み(loadFile)ではなく、分割読み込み(readFileChunk)を使用
             try {
                 // 状態のリセット
                 currentFileLoadState = {
@@ -8121,6 +8186,7 @@ async function openFile(filePath, fileName) {
                 fileContent = `エラー: ${error.message}`;
             }
         } else {
+            // 画像やPDFの場合はコンテンツ読み込み不要
             fileContent = null;
         }
 
