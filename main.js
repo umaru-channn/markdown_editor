@@ -1562,6 +1562,47 @@ function createWindow() {
   });
 }
 
+// ファイルの分割読み込み (Infinite Scroll用)
+ipcMain.handle('read-file-chunk', async (event, filePath, offset = 0, chunkSize = 64 * 1024) => { // デフォルト64KB
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const stats = fs.statSync(filePath);
+    const buffer = Buffer.alloc(chunkSize);
+    let bytesRead = fs.readSync(fd, buffer, 0, chunkSize, offset);
+    fs.closeSync(fd);
+
+    if (bytesRead === 0) return { success: true, content: '', bytesRead: 0, total: stats.size, eof: true };
+
+    // ファイルの末尾でなければ、行の途中で切れないように「最後の改行」を探してそこで区切る
+    let effectiveBytes = bytesRead;
+    if (offset + bytesRead < stats.size) {
+      let lastNewline = -1;
+      // 後ろから改行コード(\n: 10)を探す
+      for (let i = bytesRead - 1; i >= 0; i--) {
+        if (buffer[i] === 10) {
+          lastNewline = i;
+          break;
+        }
+      }
+      // 改行が見つかれば、そこまでを今回のチャンクとする
+      if (lastNewline !== -1) {
+        effectiveBytes = lastNewline + 1;
+      }
+    }
+
+    const content = buffer.slice(0, effectiveBytes).toString('utf8');
+    return { 
+      success: true, 
+      content, 
+      bytesRead: effectiveBytes, 
+      total: stats.size, 
+      eof: (offset + effectiveBytes) >= stats.size 
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // 名前を付けて保存ダイアログ
 ipcMain.handle('show-save-dialog', async (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);

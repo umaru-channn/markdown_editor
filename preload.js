@@ -73,6 +73,7 @@ window.electronAPI = {
 
   // File operations
   saveFile: (filepath, content) => ipcRenderer.invoke('save-file', filepath, content),
+  readFileChunk: (filePath, offset, size) => ipcRenderer.invoke('read-file-chunk', filePath, offset, size),
   saveClipboardImage: (buffer, targetDir) => ipcRenderer.invoke('save-clipboard-image', buffer, targetDir),
   downloadImage: (url, targetDir) => ipcRenderer.invoke('download-image', url, targetDir),
   loadFile: (filepath) => ipcRenderer.invoke('load-file', filepath),

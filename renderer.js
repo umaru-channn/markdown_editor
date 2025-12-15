@@ -231,6 +231,15 @@ let appSettings = {
     }
 };
 
+// 分割読み込みの状態管理
+let currentFileLoadState = {
+    path: null,
+    offset: 0,
+    totalSize: 0,
+    isLoading: false,
+    isComplete: false
+};
+
 // スニペットの動的置換処理
 function getDynamicReplacement(text) {
     const now = new Date();
@@ -7905,18 +7914,38 @@ async function openFile(filePath, fileName) {
 
         // テキストファイルの場合のみ内容を読み込む
         if (fileType === 'text') {
-            if (typeof window.electronAPI?.loadFile === 'function') {
-                try {
-                    fileContent = await window.electronAPI.loadFile(normalizedPath);
-                } catch (error) {
-                    console.error('Failed to load file content:', error);
-                    fileContent = `ファイルを読み込めません: ${error.message}`;
+            // ★変更: 一括読み込み(loadFile)ではなく、分割読み込み(readFileChunk)を使用
+            try {
+                // 状態のリセット
+                currentFileLoadState = {
+                    path: normalizedPath,
+                    offset: 0,
+                    totalSize: 0,
+                    isLoading: true,
+                    isComplete: false
+                };
+
+                // 初回読み込み (64KB)
+                const result = await window.electronAPI.readFileChunk(normalizedPath, 0);
+
+                if (result.success) {
+                    fileContent = result.content;
+
+                    // 状態更新
+                    currentFileLoadState.offset = result.bytesRead;
+                    currentFileLoadState.totalSize = result.total;
+                    currentFileLoadState.isComplete = result.eof;
+                    currentFileLoadState.isLoading = false;
+
+                    console.log(`Initial load: ${result.bytesRead} / ${result.total} bytes`);
+                } else {
+                    fileContent = `読み込みエラー: ${result.error}`;
                 }
-            } else {
-                fileContent = `ファイル: ${fileName}\n(内容は読み込めません)`;
+            } catch (error) {
+                console.error('Failed to load file chunk:', error);
+                fileContent = `エラー: ${error.message}`;
             }
         } else {
-            // 画像やPDFの場合は内容は空でOK
             fileContent = null;
         }
 
@@ -7944,6 +7973,11 @@ async function openFile(filePath, fileName) {
 
         // 指定されたペイン（左または右）でファイルを開く
         switchToFile(normalizedPath, targetPane);
+
+        // スクロール監視のセットアップ (エディタ作成後に実行)
+        if (fileType === 'text' && !currentFileLoadState.isComplete) {
+            setupInfiniteScroll();
+        }
 
     } catch (error) {
         console.error('Failed to open file:', error);
@@ -10790,6 +10824,61 @@ function setupSettingsActivationHandler() {
             if (globalEditorView) setActiveEditor(globalEditorView);
         }
     });
+}
+
+function setupInfiniteScroll() {
+    if (!globalEditorView) return;
+
+    // 既存のリスナーがあれば重複しないように注意（今回はDOM要素自体が再生成される前提ならOK）
+    const scrollDOM = globalEditorView.scrollDOM;
+
+    const handleScroll = async () => {
+        // まだ読み込むべきデータがあり、かつロード中でない場合
+        if (!currentFileLoadState.isComplete && !currentFileLoadState.isLoading && currentFileLoadState.path === currentFilePath) {
+
+            // 下端までの距離
+            const scrollBottom = scrollDOM.scrollHeight - scrollDOM.scrollTop - scrollDOM.clientHeight;
+
+            // 下端から 500px 以内に近づいたら次を読み込む
+            if (scrollBottom < 500) {
+                currentFileLoadState.isLoading = true;
+                console.log('Loading more content...');
+
+                try {
+                    const result = await window.electronAPI.readFileChunk(
+                        currentFileLoadState.path,
+                        currentFileLoadState.offset
+                    );
+
+                    if (result.success && result.bytesRead > 0) {
+                        // エディタの末尾に追記
+                        const currentDocLen = globalEditorView.state.doc.length;
+
+                        globalEditorView.dispatch({
+                            changes: { from: currentDocLen, insert: result.content },
+                            annotations: ExternalChange.of(true) // 履歴(Undo)に残さない、または外部変更扱いにする
+                        });
+
+                        // 状態更新
+                        currentFileLoadState.offset += result.bytesRead;
+                        currentFileLoadState.isComplete = result.eof;
+
+                        console.log(`Loaded: ${currentFileLoadState.offset} / ${currentFileLoadState.totalSize}`);
+                    } else {
+                        // 読み込めなかった場合は完了扱いにする（無限ループ防止）
+                        currentFileLoadState.isComplete = true;
+                    }
+                } catch (e) {
+                    console.error('Infinite scroll error:', e);
+                } finally {
+                    currentFileLoadState.isLoading = false;
+                }
+            }
+        }
+    };
+
+    // イベント登録
+    scrollDOM.addEventListener('scroll', handleScroll);
 }
 
 // インスタンス作成
