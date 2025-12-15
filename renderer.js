@@ -181,10 +181,11 @@ function getPrismLanguageFromPath(filePath) {
         'css': 'css', 'json': 'json', 'yaml': 'yaml', 'yml': 'yaml',
         'java': 'java', 'php': 'php', 'sql': 'sql', 'pl': 'perl',
         'lua': 'lua', 'r': 'r', 'dart': 'dart', 'swift': 'swift',
-        'scala': 'scala', 'bf': 'brainfuck', 'ws': 'whitespace'
+        'scala': 'scala', 'bf': 'brainfuck', 'ws': 'whitespace',
+        'txt': 'markdown'
     };
 
-    return langMap[ext] || 'markdown';
+    return langMap[ext] || 'text';
 }
 
 // スニペットの初期値を定数として定義
@@ -723,40 +724,58 @@ function applySettingsToUI() {
     // 行間設定の反映とCSS変数の更新
     if (lineHeightInput) {
         let val = appSettings.lineHeight || "1.4";
-        // もし数値の 1 や 2 だった場合、"1.0", "2.0" に変換してHTMLのoptionと合わせる
         if (val === 1) val = "1.0";
         if (val === 2) val = "2.0";
-
         lineHeightInput.value = val;
     }
     document.documentElement.style.setProperty('--line-height', (appSettings.lineHeight || 1.4) + 'em');
 
-    // ツールバーの表示/非表示制御 (設定画面では表示しないように条件を追加)
+    // ツールバーの表示制御
     const toolbar = document.querySelector('.toolbar');
-    const readmeContent = document.getElementById('content-readme');
-    const fileTitleBarEl = document.getElementById('file-title-bar');
 
-    if (toolbar && readmeContent) {
-        // 現在エディタ画面(content-readme)が表示されているかチェック
-        const isEditorViewActive = !readmeContent.classList.contains('content-hidden');
-        // 現在テキストモード(エディタ)かチェック(メディア表示でないか)
-        const isTextMode = document.getElementById('editor').style.display !== 'none';
+    if (toolbar) {
+        // Markdown判定用ヘルパー
+        const isMarkdown = (filePath) => {
+            if (!filePath) return false;
+            if (filePath === 'README.md') return true;
+            if (filePath === 'settings://view') return false;
+            const ext = path.extname(filePath).toLowerCase();
+            // 許可する拡張子リスト: .md, .markdown, .txt
+            return ['.md', '.markdown', '.txt'].includes(ext);
+        };
 
-        // 「設定がON」かつ「エディタ画面が表示中」かつ「テキストモード」の場合のみ表示
-        if (appSettings.showToolbar && isEditorViewActive && isTextMode) {
+        // 現在のビューの状態から判定
+        const leftIsMd = globalEditorView && isMarkdown(globalEditorView.filePath);
+        const rightIsMd = isSplitLayoutVisible && splitEditorView && isMarkdown(splitEditorView.filePath);
+
+        // 設定ON かつ (どちらかが対象ファイル) なら表示
+        const shouldShow = appSettings.showToolbar && (leftIsMd || rightIsMd);
+
+        // 設定ON かつ (どちらかがMarkdown) なら表示
+        if (shouldShow) {
             toolbar.classList.remove('hidden');
+
+            // アクティブなファイルがMarkdownでなければ無効化
+            if (!isMarkdown(currentFilePath)) {
+                toolbar.classList.add('disabled');
+            } else {
+                toolbar.classList.remove('disabled');
+            }
         } else {
             toolbar.classList.add('hidden');
+            toolbar.classList.remove('disabled');
         }
+    }
 
-        // ファイルタイトルバーの即時反映
-        if (fileTitleBarEl) {
-            // 設定ON かつ エディタ表示中 かつ README以外なら表示
-            if (appSettings.showFileTitleBar && isEditorViewActive && currentFilePath !== 'README.md') {
-                fileTitleBarEl.classList.remove('hidden');
-            } else {
-                fileTitleBarEl.classList.add('hidden');
-            }
+    // ファイルタイトルバーの制御
+    const fileTitleBarEl = document.getElementById('file-title-bar');
+    const readmeContent = document.getElementById('content-readme');
+    if (fileTitleBarEl && readmeContent) {
+        const isEditorViewActive = !readmeContent.classList.contains('content-hidden');
+        if (appSettings.showFileTitleBar && isEditorViewActive && currentFilePath !== 'README.md' && currentFilePath !== 'settings://view') {
+            fileTitleBarEl.classList.remove('hidden');
+        } else {
+            fileTitleBarEl.classList.add('hidden');
         }
     }
 
@@ -764,7 +783,6 @@ function applySettingsToUI() {
     const opacityInput = document.getElementById('window-opacity');
     const opacityValue = document.getElementById('window-opacity-value');
     if (opacityInput && opacityValue) {
-        // 設定値があれば使用、なければ0
         const val = appSettings.windowTransparency !== undefined ? appSettings.windowTransparency : 0;
         opacityInput.value = val;
         opacityValue.textContent = `${val}%`;
@@ -773,25 +791,19 @@ function applySettingsToUI() {
     // ステータスバーの表示制御
     if (statusBar) {
         statusBar.classList.toggle('hidden', !appSettings.showStatusBar);
-        // ステータスバーを非表示にするときは、下ペイン/リサイザーの bottom を 0 にする必要がある
         const bottomOffset = appSettings.showStatusBar ? '24px' : '0px';
         document.documentElement.style.setProperty('--status-bar-height', bottomOffset);
 
-        // bottom-paneの位置を調整
         if (bottomPane) {
             bottomPane.style.bottom = bottomOffset;
-
-            // 下ペインが隠れている状態でも、centerPane のマージンを適切に設定する
             if (bottomPane.classList.contains('hidden') || !isTerminalVisible) {
                 centerPane.style.marginBottom = '0px';
             }
         }
 
-        // リサイザー位置も調整（bottom-paneの高さが0になるため、リサイザーも隠す）
         const resizerBottom = document.getElementById('resizer-bottom');
         if (resizerBottom) {
             resizerBottom.style.bottom = `calc(${parseInt(bottomPane?.style.height || '200px')}px + ${bottomOffset})`;
-            // ステータスバー非表示、またはターミナルが非表示の場合にリサイザーを隠す
             const hideResizer = !appSettings.showStatusBar || bottomPane.classList.contains('hidden');
             resizerBottom.classList.toggle('hidden', hideResizer);
         }
@@ -831,7 +843,7 @@ function applySettingsToUI() {
         if (pdfPageRanges) pdfPageRanges.value = appSettings.pdfOptions.pageRanges || '';
     }
 
-    // CSS変数の更新 (エディタ以外のフォント等)
+    // CSS変数の更新
     document.documentElement.style.setProperty('--editor-font-size', appSettings.fontSize);
     document.documentElement.style.setProperty('--editor-font-family', appSettings.fontFamily);
 }
@@ -8905,18 +8917,38 @@ function setActiveEditor(view) {
         // タブの選択状態を同期
         updateTabVisuals();
 
-        // ツールバーの表示制御をここで行う
-        // 設定画面がアクティブな場合は隠し、それ以外は設定に従って表示
+        // ツールバーの表示制御
         const toolbar = document.querySelector('.toolbar');
         if (toolbar) {
-            if (currentFilePath === 'settings://view') {
-                toolbar.classList.add('hidden');
-            } else {
-                if (appSettings.showToolbar) {
-                    toolbar.classList.remove('hidden');
+            // Markdown判定用ヘルパー（ローカル関数）
+            const isMarkdown = (filePath) => {
+                if (!filePath) return false;
+                if (filePath === 'README.md') return true;
+                if (filePath === 'settings://view') return false;
+                const ext = path.extname(filePath).toLowerCase();
+                return ['.md', '.markdown', '.txt'].includes(ext);
+            };
+
+            // 1. 表示判定: 左右どちらかのエディタでMarkdownが開かれていれば表示する
+            //    (ツールバーが頻繁に点滅するのを防ぐため)
+            const leftIsMd = globalEditorView && isMarkdown(globalEditorView.filePath);
+            // 分割表示中かつ右側が存在する場合のみ右側もチェック
+            const rightIsMd = isSplitLayoutVisible && splitEditorView && isMarkdown(splitEditorView.filePath);
+
+            const shouldShow = appSettings.showToolbar && (leftIsMd || rightIsMd);
+
+            if (shouldShow) {
+                toolbar.classList.remove('hidden');
+
+                // 2. 有効/無効判定: 現在アクティブなファイルがMarkdownでなければグレーアウトする
+                if (!isMarkdown(currentFilePath)) {
+                    toolbar.classList.add('disabled');
                 } else {
-                    toolbar.classList.add('hidden');
+                    toolbar.classList.remove('disabled');
                 }
+            } else {
+                toolbar.classList.add('hidden');
+                toolbar.classList.remove('disabled');
             }
         }
     }

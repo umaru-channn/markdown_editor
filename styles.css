@@ -4422,16 +4422,19 @@ body[data-theme="dark"] .match-highlight {
     height: 100% !important;
     display: flex !important;
     border: none !important;
-    overflow: hidden !important; /* 外側は隠して、内部のエディタでスクロールさせる */
+    overflow: hidden !important;
+    /* 外側は隠して、内部のエディタでスクロールさせる */
 }
 
 /* 左右のエディタ領域 */
 .cm-merge-view {
     flex: 1;
-    min-width: 0; /* Flexboxの子要素が縮小できるようにする重要設定 */
+    min-width: 0;
+    /* Flexboxの子要素が縮小できるようにする重要設定 */
     display: flex;
     flex-direction: column;
-    overflow: hidden; /* 二重スクロール防止 */
+    overflow: hidden;
+    /* 二重スクロール防止 */
 }
 
 /* Diffビュー内のエディタ本体を強制的に高さ100%にする */
@@ -4450,7 +4453,8 @@ body[data-theme="dark"] .match-highlight {
 .cm-merge-view .cm-content {
     max-width: none !important;
     margin: 0 !important;
-    padding: 10px 5px !important; /* パディングを少し詰める */
+    padding: 10px 5px !important;
+    /* パディングを少し詰める */
 }
 
 /* 中央のガター（コネクタ部分） */
@@ -4461,16 +4465,38 @@ body[data-theme="dark"] .match-highlight {
 }
 
 /* 変更箇所のハイライト (Light Theme) */
-.cm-merge-a .cm-changedLine { background-color: rgba(255, 0, 0, 0.1); }
-.cm-merge-b .cm-changedLine { background-color: rgba(0, 255, 0, 0.1); }
-.cm-merge-a .cm-changedText { background-color: rgba(255, 200, 200, 0.5); }
-.cm-merge-b .cm-changedText { background-color: rgba(200, 255, 200, 0.5); }
+.cm-merge-a .cm-changedLine {
+    background-color: rgba(255, 0, 0, 0.1);
+}
+
+.cm-merge-b .cm-changedLine {
+    background-color: rgba(0, 255, 0, 0.1);
+}
+
+.cm-merge-a .cm-changedText {
+    background-color: rgba(255, 200, 200, 0.5);
+}
+
+.cm-merge-b .cm-changedText {
+    background-color: rgba(200, 255, 200, 0.5);
+}
 
 /* Dark Theme Overrides */
-body[data-theme="dark"] .cm-merge-a .cm-changedLine { background-color: rgba(160, 50, 50, 0.2); }
-body[data-theme="dark"] .cm-merge-b .cm-changedLine { background-color: rgba(50, 100, 50, 0.2); }
-body[data-theme="dark"] .cm-merge-a .cm-changedText { background-color: rgba(255, 100, 100, 0.3); }
-body[data-theme="dark"] .cm-merge-b .cm-changedText { background-color: rgba(100, 255, 100, 0.3); }
+body[data-theme="dark"] .cm-merge-a .cm-changedLine {
+    background-color: rgba(160, 50, 50, 0.2);
+}
+
+body[data-theme="dark"] .cm-merge-b .cm-changedLine {
+    background-color: rgba(50, 100, 50, 0.2);
+}
+
+body[data-theme="dark"] .cm-merge-a .cm-changedText {
+    background-color: rgba(255, 100, 100, 0.3);
+}
+
+body[data-theme="dark"] .cm-merge-b .cm-changedText {
+    background-color: rgba(100, 255, 100, 0.3);
+}
 
 /* 変更を元に戻すボタン */
 .cm-merge-revert {
@@ -4483,13 +4509,16 @@ body[data-theme="dark"] .cm-merge-b .cm-changedText { background-color: rgba(100
 
 /* コンフリクト領域全体の背景 */
 .cm-conflict-current-content {
-    background-color: rgba(64, 200, 174, 0.2); /* 緑系 (Current) */
-    display: inline-block; /* 行全体に適用するため */
+    background-color: rgba(64, 200, 174, 0.2);
+    /* 緑系 (Current) */
+    display: inline-block;
+    /* 行全体に適用するため */
     width: 100%;
 }
 
 .cm-conflict-incoming-content {
-    background-color: rgba(64, 166, 255, 0.2); /* 青系 (Incoming) */
+    background-color: rgba(64, 166, 255, 0.2);
+    /* 青系 (Incoming) */
     display: inline-block;
     width: 100%;
 }
@@ -4518,9 +4547,10 @@ body[data-theme="dark"] .cm-conflict-marker {
     gap: 8px;
     align-items: center;
     width: fit-content;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     z-index: 20;
-    pointer-events: auto; /* クリック可能にする */
+    pointer-events: auto;
+    /* クリック可能にする */
 }
 
 /* ボタンのスタイル */
@@ -4536,15 +4566,19 @@ body[data-theme="dark"] .cm-conflict-marker {
 }
 
 .conflict-btn.current {
-    color: #2da44e; /* GitHub Green */
+    color: #2da44e;
+    /* GitHub Green */
 }
+
 .conflict-btn.current:hover {
     background-color: rgba(45, 164, 78, 0.1);
 }
 
 .conflict-btn.incoming {
-    color: #007acc; /* VS Code Blue */
+    color: #007acc;
+    /* VS Code Blue */
 }
+
 .conflict-btn.incoming:hover {
     background-color: rgba(0, 122, 204, 0.1);
 }
@@ -4553,6 +4587,7 @@ body[data-theme="dark"] .cm-conflict-marker {
     color: var(--text-color);
     opacity: 0.8;
 }
+
 .conflict-btn.both:hover {
     background-color: rgba(128, 128, 128, 0.1);
 }
@@ -4587,7 +4622,8 @@ body[data-theme="dark"] .cm-conflict-marker {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    background-color: var(--sidebar-bg); /* 背景を控えめに */
+    background-color: var(--sidebar-bg);
+    /* 背景を控えめに */
     border: 1px solid var(--sidebar-border);
     color: var(--text-color);
     border-radius: 3px;
@@ -4607,7 +4643,8 @@ body[data-theme="dark"] .git-sync-btn:hover {
 }
 
 .git-sync-btn.icon-only {
-    flex: 0 0 auto; /* 幅を自動にしてアイコンのみサイズに */
+    flex: 0 0 auto;
+    /* 幅を自動にしてアイコンのみサイズに */
     padding: 4px 6px;
 }
 
@@ -4686,7 +4723,8 @@ body[data-theme="dark"] .git-sync-btn:hover {
     z-index: 10000;
     display: flex;
     justify-content: center;
-    padding-top: 100px; /* 上から少し離す */
+    padding-top: 100px;
+    /* 上から少し離す */
 }
 
 .command-palette-modal {
@@ -4695,7 +4733,7 @@ body[data-theme="dark"] .git-sync-btn:hover {
     background-color: var(--sidebar-bg);
     border: 1px solid var(--sidebar-border);
     border-radius: 6px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -4754,8 +4792,10 @@ body[data-theme="dark"] .command-palette-modal {
 
 /* 2. カーソルがある行、またはマウスを乗せた行では括弧を表示する */
 .cm-activeLine .cm-wiki-link-bracket {
-    font-size: inherit; /* 元のサイズに戻す */
-    color: inherit;     /* 文字色を周囲と同じにする */
+    font-size: inherit;
+    /* 元のサイズに戻す */
+    color: inherit;
+    /* 文字色を周囲と同じにする */
     /* もし括弧だけ色を薄くしたい場合は color: #ccc; などにしてください */
 }
 
@@ -4783,11 +4823,14 @@ body[data-theme="dark"] .cm-wiki-link-text {
 
 /* 右側（分割画面）のファイルタイトル用スタイル */
 #file-title-split-text {
-    font-size: 1.5em;       /* 左側と同じサイズ */
-    font-weight: bold;      /* 左側と同じ太さ */
+    font-size: 1.5em;
+    /* 左側と同じサイズ */
+    font-weight: bold;
+    /* 左側と同じ太さ */
     color: var(--text-color);
     width: 100%;
-    text-align: center;     /* 中央揃え */
+    text-align: center;
+    /* 中央揃え */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4796,18 +4839,23 @@ body[data-theme="dark"] .cm-wiki-link-text {
 
 /* エディタ分割用のリサイザー */
 #resizer-editor-split {
-    width: 6px; /* つかみやすい幅に設定 */
+    width: 6px;
+    /* つかみやすい幅に設定 */
     cursor: col-resize;
-    background-color: var(--main-bg); /* 通常時は背景色と同じ */
-    border-left: 1px solid var(--sidebar-border); /* 境界線を表示 */
+    background-color: var(--main-bg);
+    /* 通常時は背景色と同じ */
+    border-left: 1px solid var(--sidebar-border);
+    /* 境界線を表示 */
     z-index: 10;
-    flex-shrink: 0; /* 縮まないようにする */
+    flex-shrink: 0;
+    /* 縮まないようにする */
     transition: background-color 0.2s;
 }
 
 #resizer-editor-split:hover,
 #resizer-editor-split.resizing {
-    background-color: #007acc; /* ホバー時・ドラッグ時は青くする */
+    background-color: #007acc;
+    /* ホバー時・ドラッグ時は青くする */
 }
 
 /* 分割していないときは隠す */
@@ -4827,7 +4875,8 @@ body[data-theme="dark"] .cm-wiki-link-text {
 /* ドラッグ中のタブのスタイル（半透明にするなど） */
 .tab.dragging {
     opacity: 0.5;
-    background-color: #444; /* 暗めの色にして目立たせる */
+    background-color: #444;
+    /* 暗めの色にして目立たせる */
     border: 1px dashed #666;
 }
 
@@ -4848,13 +4897,16 @@ body[data-theme="dark"] .cm-wiki-link-text {
     content: "";
     position: absolute;
     top: 0;
-    right: 0; /* 右寄せ */
-    width: 50%; /* 幅50% */
+    right: 0;
+    /* 右寄せ */
+    width: 50%;
+    /* 幅50% */
     height: 100%;
     /* 好みの青色（薄め） */
     background-color: rgba(83, 156, 255, 0.2);
     border: 3px solid #539cff;
-    border-left: 2px dashed #539cff; /* 境界線を破線にしてみる */
+    border-left: 2px dashed #539cff;
+    /* 境界線を破線にしてみる */
     z-index: 500;
     pointer-events: none;
     box-sizing: border-box;
@@ -4873,4 +4925,157 @@ body[data-theme="dark"] .cm-wiki-link-text {
     z-index: 500;
     pointer-events: none;
     box-sizing: border-box;
+}
+
+/* ========== Live Preview Admonition Styles ========== */
+
+/* Admonition共通のコンテナ（各行に適用） */
+.cm-admonition-title,
+.cm-admonition-content-line {
+    /* ベースラインスタイル */
+    margin: 0;
+    padding: 0 16px;
+    /* 横幅を少し広げる */
+    display: block;
+    box-sizing: border-box;
+    line-height: 1.6em;
+    /* 行間を少し広げる */
+
+    /* ブロック枠線と背景 */
+    background-color: var(--admonition-bg-color);
+    color: var(--text-color);
+
+    /* 左のボーダーを太くしてアクセントにする */
+    border-left: 4px solid var(--admonition-border-color);
+    /* 右側の境界線も薄く表示してボックス感を出す */
+    border-right: 1px solid var(--cb-border-color);
+}
+
+/* Admonitionの最初の行 (タイトル行) */
+.cm-admonition-title {
+    /* 上枠 */
+    border-top: 1px solid var(--cb-border-color);
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+
+    font-weight: 600;
+    padding-top: 12px;
+    padding-bottom: 8px;
+
+    /* タイトル行のみ背景色を濃くする */
+    background-color: var(--admonition-title-bg-color);
+    color: var(--admonition-text-color);
+
+    display: flex;
+    align-items: center;
+}
+
+/* コンテンツ行 */
+.cm-admonition-content-line {
+    border-top: none;
+    /* コンテンツの上下パディング調整 */
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+/* Admonition内の最後の行に下枠と角丸を付ける */
+.cm-admonition-content-line:last-of-type {
+    border-bottom: 1px solid var(--cb-border-color);
+    border-bottom-left-radius: 4px;
+    border-bottom-right-radius: 4px;
+    padding-bottom: 12px;
+    margin-bottom: 1em;
+}
+
+/* アイコン設定 (SVG maskを使用することで文字色に追従) */
+.cm-admonition-title::before {
+    content: "";
+    display: inline-block;
+    width: 1.2em;
+    height: 1.2em;
+    margin-right: 8px;
+    background-color: currentColor;
+    /* 現在の文字色(タイトル色)を適用 */
+
+    /* SVGマスクの適用 */
+    -webkit-mask-image: var(--admonition-icon);
+    mask-image: var(--admonition-icon);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+}
+
+/* Live Preview用 Type-specific Colors & Icons */
+
+/* NOTE (青) - Icon: Edit/Pencil */
+.cm-admonition-note {
+    --admonition-border-color: #007acc;
+    --admonition-text-color: #007acc;
+    --admonition-title-bg-color: rgba(0, 122, 204, 0.1);
+    --admonition-bg-color: rgba(0, 122, 204, 0.03);
+    --admonition-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>');
+}
+
+/* TIP (緑) - Icon: Flame (Checking) */
+.cm-admonition-tip {
+    --admonition-border-color: #2da44e;
+    --admonition-text-color: #2da44e;
+    --admonition-title-bg-color: rgba(45, 164, 78, 0.1);
+    --admonition-bg-color: rgba(45, 164, 78, 0.03);
+    --admonition-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>');
+}
+
+/* WARNING (オレンジ) - Icon: Alert Triangle */
+.cm-admonition-warning,
+.cm-admonition-caution {
+    --admonition-border-color: #e2c08d;
+    --admonition-text-color: #e2c08d;
+    --admonition-title-bg-color: rgba(226, 192, 141, 0.15);
+    --admonition-bg-color: rgba(226, 192, 141, 0.05);
+    --admonition-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>');
+}
+
+/* DANGER (赤) - Icon: Alert Octagon */
+.cm-admonition-danger,
+.cm-admonition-important {
+    --admonition-border-color: #cf222e;
+    --admonition-text-color: #cf222e;
+    --admonition-title-bg-color: rgba(207, 34, 46, 0.15);
+    --admonition-bg-color: rgba(207, 34, 46, 0.05);
+    --admonition-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>');
+}
+
+/* INFO (水色) - Icon: Info */
+.cm-admonition-info {
+    --admonition-border-color: #38a169;
+    --admonition-text-color: #38a169;
+    --admonition-title-bg-color: rgba(56, 161, 105, 0.1);
+    --admonition-bg-color: rgba(56, 161, 105, 0.03);
+    --admonition-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>');
+}
+
+/* ダークテーマ調整 */
+body[data-theme="dark"] .cm-admonition-title,
+body[data-theme="dark"] .cm-admonition-content-line {
+    border-right-color: #30363d;
+    /* --cb-border-color for dark */
+}
+
+body[data-theme="dark"] .cm-admonition-title {
+    border-top-color: #30363d;
+}
+
+body[data-theme="dark"] .cm-admonition-content-line:last-of-type {
+    border-bottom-color: #30363d;
+}
+
+/* ツールバーが無効化（Markdown以外のファイル操作中）されたときのスタイル */
+.toolbar.disabled {
+    opacity: 0.4;
+    pointer-events: none; /* クリック無効化 */
+    filter: grayscale(100%);
+    transition: opacity 0.2s;
 }

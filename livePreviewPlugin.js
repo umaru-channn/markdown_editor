@@ -947,6 +947,26 @@ class CheckboxWidget extends WidgetType {
     ignoreEvent() { return true; }
 }
 
+/* --- PlaceholderTextWidget --- */
+class PlaceholderTextWidget extends WidgetType {
+    constructor(text) {
+        super();
+        this.text = text;
+    }
+    eq(other) {
+        return other.text === this.text;
+    }
+    toDOM() {
+        const span = document.createElement("span");
+        span.textContent = this.text;
+        // Admonitionのタイトルが空であることを示すスタイルを適用
+        span.style.opacity = "0.6";
+        span.style.fontStyle = "italic";
+        return span;
+    }
+    ignoreEvent() { return true; }
+}
+
 /* ========== Execution Result Logic ========== */
 
 // 実行結果を追加・削除するためのStateEffect
@@ -1958,6 +1978,14 @@ function buildDecorations(view) {
                 else if (node.name === "Blockquote") {
                     const lineStart = state.doc.lineAt(node.from);
                     const lineEnd = state.doc.lineAt(node.to);
+                    const firstLineText = lineStart.text;
+
+                    // Admonitionの検出: 引用ブロックの1行目が > [!TYPE] 形式かチェック
+                    // match[1]: TYPE, match[2]: Title Content (後ろの改行やスペースは含まない)
+                    const admonitionMatch = firstLineText.match(/^\s*>\s*\[!(\w+)\]\s*(.*)/i);
+                    const isAdmonition = !!admonitionMatch;
+                    const admonitionType = isAdmonition ? admonitionMatch[1].toLowerCase() : null;
+
                     for (let l = lineStart.number; l <= lineEnd.number; l++) {
                         const lineObj = state.doc.line(l);
                         if (processedLines.has(lineObj.from)) continue;
@@ -1965,12 +1993,67 @@ function buildDecorations(view) {
                             processedLines.add(lineObj.from);
                             continue;
                         }
-                        collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: "cm-live-quote" }) });
+
                         const lineText = state.doc.sliceString(lineObj.from, lineObj.to);
+                        // 行頭の引用マーカー（とそれに続く空白）を取得
                         const markerMatch = lineText.match(/^\s*>\s?/);
-                        if (markerMatch) {
-                            collectedDecos.push({ from: lineObj.from, to: lineObj.from + markerMatch[0].length, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+
+                        if (isAdmonition) {
+                            // Admonition の処理
+                            const isTitleLine = (l === lineStart.number);
+                            const className = isTitleLine ? `cm-admonition-title cm-admonition-${admonitionType}` : `cm-admonition-content-line cm-admonition-${admonitionType}`;
+
+                            // 1. 行全体の装飾を適用 (背景色、枠線など)
+                            collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: className }) });
+
+                            if (isTitleLine) {
+                                // 【修正A: マーカーとそれに続くスペースを非表示】
+                                // > [!TYPE] とそれに続く全てのスペース (タイトルテキストの手前まで) をマッチ
+                                const markerAndSpacesMatch = lineText.match(/^(\s*>\s*\[!\w+\]\s*)/i);
+
+                                if (markerAndSpacesMatch) {
+                                    const hideStart = lineObj.from;
+                                    const hideLength = markerAndSpacesMatch[0].length;
+                                    const markerEndPos = hideStart + hideLength;
+
+                                    // 1. マーカー部分を非表示マークで置換
+                                    // 注意: Decoration.markは文字を非表示にするだけで、DOM構造には影響を与えません。
+                                    collectedDecos.push({
+                                        from: hideStart,
+                                        to: markerEndPos,
+                                        side: 0,
+                                        deco: Decoration.mark({ class: "cm-hide-marker" })
+                                    });
+
+                                    // 2. タイトルが空の場合 (AdmonitionMatchの第2グループが空かチェック)
+                                    const isTitleEmpty = admonitionMatch[2].trim().length === 0;
+
+                                    if (isTitleEmpty) {
+                                        // 非表示領域の末尾にウィジェットを挿入
+                                        collectedDecos.push({
+                                            from: markerEndPos,
+                                            to: markerEndPos,
+                                            side: 1,
+                                            deco: Decoration.widget({
+                                                widget: new PlaceholderTextWidget("サンプル"),
+                                                side: 1
+                                            })
+                                        });
+                                    }
+                                }
+
+                            } else if (markerMatch) {
+                                // コンテンツ行の場合: > の部分のみを非表示にする
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.from + markerMatch[0].length, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                            }
+                        } else {
+                            // 通常の引用ブロックの処理 (既存ロジックを維持)
+                            collectedDecos.push({ from: lineObj.from, to: lineObj.from, side: -1, deco: Decoration.line({ class: "cm-live-quote" }) });
+                            if (markerMatch) {
+                                collectedDecos.push({ from: lineObj.from, to: lineObj.from + markerMatch[0].length, side: 0, deco: Decoration.mark({ class: "cm-hide-marker" }) });
+                            }
                         }
+
                         processedLines.add(lineObj.from);
                     }
                     return true;
@@ -2301,7 +2384,7 @@ const codeBlockRunKeymap = keymap.of([
                     // Electron API経由で実行
                     const currentFileDir = document.body.dataset.activeFileDir || null;
                     const result = await window.electronAPI.executeCode(code, lang, null, currentFileDir);
-                    
+
                     const output = result.success ? result.stdout : result.stderr;
                     const isError = !result.success || (result.stderr && result.stderr.trim().length > 0);
                     const finalText = output || (result.success ? "(No output)" : "(Unknown error)");
