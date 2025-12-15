@@ -2,7 +2,7 @@
 const path = require('path');
 const { ViewPlugin, Decoration, WidgetType, keymap } = require("@codemirror/view");
 const { syntaxTree } = require("@codemirror/language");
-const { RangeSetBuilder, StateField, StateEffect } = require("@codemirror/state");
+const { RangeSetBuilder, StateField, StateEffect, Prec } = require("@codemirror/state");
 const katex = require('katex');
 
 // --- Mermaid Mode State Management ---
@@ -1109,40 +1109,40 @@ class MermaidWidget extends WidgetType {
     ignoreEvent() { return true; }
 }
 
-/* CodeBlockLanguageWidget (修正版) */
+/* CodeBlockLanguageWidget (修正版: 検索機能の復活とMermaid/実行機能の維持) */
 class CodeBlockLanguageWidget extends WidgetType {
-    // コンストラクタに codeContent を追加
+    // コンストラクタ: Mermaid対応のため mode, codeContent を維持
     constructor(lang, mode = 'code', codeContent = '') {
         super();
         this.lang = lang;
         this.mode = mode; // mermaid用のモード
-        this.codeContent = codeContent; // ★追加: 保存用にコードを保持
+        this.codeContent = codeContent; // 保存用にコードを保持
         this.selectedPath = null;
         this.selectedLabel = "Default";
     }
 
     eq(other) {
-        // 同値判定に codeContent も含める
+        // 同値判定
         return other.lang === this.lang &&
             other.mode === this.mode &&
             other.codeContent === this.codeContent;
     }
 
-    // CodeBlockLanguageWidgetクラス内
     toDOM(view) {
         const container = document.createElement("div");
         container.className = "cm-language-widget-container";
 
         const normLang = (this.lang || "").toLowerCase();
 
-        // 1. 言語選択
+        // 1. 言語選択ボタン
         const selectBtn = document.createElement("button");
         selectBtn.className = "cm-language-select-btn";
         selectBtn.innerHTML = `<span>${formatLanguageName(this.lang)}</span> <span class="arrow">▼</span>`;
+        // ここで検索機能付きの showDropdown を呼び出す
         selectBtn.onmousedown = (e) => { e.preventDefault(); this.showDropdown(view, selectBtn); };
         container.appendChild(selectBtn);
 
-        // 2. Mermaid用モード切替
+        // 2. Mermaid用モード切替 (既存機能を維持)
         if (normLang === 'mermaid') {
             const btnGroup = document.createElement("div");
             btnGroup.className = "cm-mermaid-mode-group";
@@ -1173,23 +1173,18 @@ class CodeBlockLanguageWidget extends WidgetType {
                 };
                 btnGroup.appendChild(btn);
             });
-            // ★変更点1: 先にグループをコンテナに追加する
             container.appendChild(btnGroup);
 
-            // ★変更点2: 画像保存ボタンをグループの「外」に作成する
+            // 画像保存ボタン
             const saveBtn = document.createElement("button");
             saveBtn.className = "cm-mermaid-mode-btn";
-
-            // カメラアイコンのSVG (サイズ調整済み)
             saveBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`;
             saveBtn.title = "Save as PNG";
-
-            // スタイル調整
-            saveBtn.style.marginLeft = "6px"; // グループと少し離す
+            saveBtn.style.marginLeft = "6px";
             saveBtn.style.display = "inline-flex";
             saveBtn.style.alignItems = "center";
             saveBtn.style.justifyContent = "center";
-            saveBtn.style.padding = "3px 6px"; // 高さを合わせるための微調整
+            saveBtn.style.padding = "3px 6px";
             saveBtn.style.borderRadius = "3px";
 
             saveBtn.onmousedown = (e) => {
@@ -1197,8 +1192,6 @@ class CodeBlockLanguageWidget extends WidgetType {
                 e.stopPropagation();
                 this.saveMermaidImage();
             };
-
-            // コンテナに直接追加（これで背景色がグレーにならなくなります）
             container.appendChild(saveBtn);
         }
 
@@ -1249,7 +1242,91 @@ class CodeBlockLanguageWidget extends WidgetType {
         return container;
     }
 
-    // ★修正: Mermaid画像保存処理 (サイズ計算を強化)
+    // ★修正: 検索機能付きのドロップダウンメニュー (参照コードより適用)
+    showDropdown(view, targetBtn) {
+        const existing = document.querySelector(".cm-language-dropdown-portal");
+        if (existing) existing.remove();
+
+        const dropdown = document.createElement("div");
+        dropdown.className = "cm-language-dropdown-portal";
+
+        // 検索ボックスの追加
+        const input = document.createElement("input");
+        input.className = "cm-language-search";
+        input.placeholder = "言語を検索...";
+
+        const list = document.createElement("div");
+        list.className = "cm-language-list";
+
+        const performChange = (newLang) => {
+            const pos = view.posAtDOM(targetBtn);
+            if (pos === null) return;
+            let node = syntaxTree(view.state).resolveInner(pos, 1);
+            while (node && node.name !== "FencedCode") node = node.parent;
+            if (node) {
+                const line = view.state.doc.lineAt(node.from);
+                const match = line.text.match(/^(\s*`{3,})([\w-]*)/);
+                if (match) {
+                    view.dispatch({ changes: { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length, insert: newLang } });
+                }
+            }
+        };
+
+        const renderList = (filter = "") => {
+            list.innerHTML = "";
+            const lower = filter.toLowerCase();
+            LANGUAGE_LIST.forEach(item => {
+                if (filter && !item.label.toLowerCase().includes(lower) && !item.value.toLowerCase().includes(lower)) return;
+
+                const div = document.createElement("div");
+                div.className = "cm-language-item";
+                if ((this.lang || "") === item.value) div.classList.add("selected");
+                div.innerHTML = `<span class="label">${item.label}</span>${div.classList.contains("selected") ? '<span class="check">✓</span>' : ''}`;
+
+                div.onmousedown = (e) => {
+                    e.preventDefault();
+                    performChange(item.value);
+                    dropdown.remove();
+                    document.removeEventListener("mousedown", closer);
+                };
+                list.appendChild(div);
+            });
+            if (list.children.length === 0) list.innerHTML = `<div class="cm-language-item empty">見つかりません</div>`;
+        };
+
+        renderList();
+        input.oninput = (e) => renderList(e.target.value);
+        input.onkeydown = (e) => {
+            if (e.key === "Enter") {
+                const first = list.querySelector(".cm-language-item:not(.empty)");
+                if (first) {
+                    const evt = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+                    first.dispatchEvent(evt);
+                }
+            }
+        };
+
+        dropdown.append(input, list);
+        document.body.appendChild(dropdown);
+        const rect = targetBtn.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 4}px`;
+
+        // 画面右端からはみ出さないように調整
+        const dw = 220; // CSSで指定されている幅と合わせる
+        dropdown.style.left = (rect.left + dw > window.innerWidth - 20) ? `${rect.right - dw}px` : `${rect.left}px`;
+
+        input.focus();
+
+        const closer = (e) => {
+            if (!dropdown.contains(e.target) && e.target !== targetBtn && !targetBtn.contains(e.target)) {
+                dropdown.remove();
+                document.removeEventListener("mousedown", closer);
+            }
+        };
+        setTimeout(() => document.addEventListener("mousedown", closer), 0);
+    }
+
+    // Mermaid画像保存処理 (既存のまま)
     async saveMermaidImage() {
         if (!window.mermaid || !this.codeContent.trim()) return;
 
@@ -1257,17 +1334,14 @@ class CodeBlockLanguageWidget extends WidgetType {
             const id = 'mermaid-save-' + Math.random().toString(36).substr(2, 9);
             const { svg } = await window.mermaid.render(id, this.codeContent);
 
-            // SVGをパースして正確なサイズ(viewBox)を取得する
             const parser = new DOMParser();
             const svgDoc = parser.parseFromString(svg, "image/svg+xml");
             const svgEl = svgDoc.documentElement;
 
-            // viewBox属性 ("min-x min-y width height") を取得
             const viewBox = svgEl.getAttribute("viewBox");
             let width, height;
 
             if (viewBox) {
-                // 空白またはカンマで分割
                 const parts = viewBox.split(/[\s,]+/).filter(v => v).map(parseFloat);
                 if (parts.length >= 4) {
                     width = parts[2];
@@ -1275,23 +1349,18 @@ class CodeBlockLanguageWidget extends WidgetType {
                 }
             }
 
-            // viewBoxがない、または取得失敗時のフォールバック
             if (!width || !height) {
                 width = parseFloat(svgEl.getAttribute("width")) || 800;
                 height = parseFloat(svgEl.getAttribute("height")) || 600;
             }
 
-            // Imageオブジェクトにロードさせるため、SVG自体にピクセル単位のサイズを明示
             svgEl.setAttribute("width", width);
             svgEl.setAttribute("height", height);
-            // 背景を白にする（透過だとPNGで見づらい場合があるため）
             svgEl.style.backgroundColor = "white";
 
-            // 修正したSVGを文字列に戻す
             const serializer = new XMLSerializer();
             const newSvg = serializer.serializeToString(svgEl);
 
-            // Base64化
             const svg64 = btoa(unescape(encodeURIComponent(newSvg)));
             const imageSrc = 'data:image/svg+xml;base64,' + svg64;
 
@@ -1300,18 +1369,13 @@ class CodeBlockLanguageWidget extends WidgetType {
 
             img.onload = async () => {
                 const canvas = document.createElement("canvas");
-                // 解像度を上げて綺麗に保存 (2倍)
                 const scale = 2;
                 canvas.width = width * scale;
                 canvas.height = height * scale;
 
                 const ctx = canvas.getContext("2d");
-
-                // 背景を白で塗りつぶす
                 ctx.fillStyle = "white";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                // スケール適用して描画
                 ctx.scale(scale, scale);
                 ctx.drawImage(img, 0, 0, width, height);
 
@@ -1332,7 +1396,7 @@ class CodeBlockLanguageWidget extends WidgetType {
                     }
                 } catch (err) {
                     console.error("Canvas Export Error:", err);
-                    alert("画像の生成に失敗しました。\nMermaidの設定(index.html)で htmlLabels: false が有効になっているか確認してください。");
+                    alert("画像の生成に失敗しました。");
                 }
             };
 
@@ -1349,18 +1413,26 @@ class CodeBlockLanguageWidget extends WidgetType {
         }
     }
 
-    // 既存メソッド群（変更なし）
-    async showVersionDropdown(view, targetBtn) { /* ...省略(変更なし)... */
-        /* ...元のコードを維持... */
+    // 実行環境バージョン選択ドロップダウン (既存のまま)
+    async showVersionDropdown(view, targetBtn) {
         const existing = document.querySelector(".cm-language-dropdown-portal");
         if (existing) existing.remove();
-        const items = [{ label: "Default (System)", path: null }, ...[]]; // 簡略化していますが元のロジックがあればそれを
-        try { const v = await window.electronAPI.getLangVersions(this.lang); if (v) items.push(...v); } catch (e) { }
+
+        // 読み込み中表示
+        const originalLabel = targetBtn.textContent;
+        // targetBtn.querySelector('span').textContent = "Loading..."; // UIがちらつく場合はコメントアウト
+
+        let items = [{ label: "Default (System)", path: null }];
+        try {
+            const v = await window.electronAPI.getLangVersions(this.lang);
+            if (v && v.length > 0) items.push(...v);
+        } catch (e) { }
 
         const dropdown = document.createElement("div");
         dropdown.className = "cm-language-dropdown-portal";
         const list = document.createElement("div");
         list.className = "cm-language-list";
+
         items.forEach(item => {
             const div = document.createElement("div");
             div.className = "cm-language-item";
@@ -1383,8 +1455,8 @@ class CodeBlockLanguageWidget extends WidgetType {
         setTimeout(() => document.addEventListener("mousedown", closer), 0);
     }
 
-    async runCode(view, container, btn) { /* ...省略(変更なし)... */
-        /* ...元のコードを維持... */
+    // コード実行処理 (既存のまま)
+    async runCode(view, container, btn) {
         const pos = view.posAtDOM(container);
         if (pos === null) return;
         let node = syntaxTree(view.state).resolveInner(pos, 1);
@@ -1394,23 +1466,39 @@ class CodeBlockLanguageWidget extends WidgetType {
             const endLine = view.state.doc.lineAt(node.to);
             const code = view.state.sliceDoc(startLine.to + 1, endLine.from);
 
+            const originalText = btn.textContent;
             btn.textContent = "⏳";
             btn.disabled = true;
             try {
-                const result = await window.electronAPI.executeCode(code, this.lang, this.selectedPath, document.body.dataset.activeFileDir);
+                // ディレクトリパスを取得して実行
+                const currentFileDir = document.body.dataset.activeFileDir || null;
+                const result = await window.electronAPI.executeCode(code, this.lang, this.selectedPath, currentFileDir);
                 const output = result.success ? result.stdout : result.stderr;
-                view.dispatch({ effects: setExecutionResult.of({ pos: endLine.to, output: output || "(No output)", isError: !result.success }) });
+
+                view.dispatch({
+                    effects: setExecutionResult.of({
+                        pos: endLine.to,
+                        output: output || "(No output)",
+                        isError: !result.success
+                    })
+                });
             } catch (e) {
-                view.dispatch({ effects: setExecutionResult.of({ pos: endLine.to, output: e.message, isError: true }) });
+                view.dispatch({
+                    effects: setExecutionResult.of({
+                        pos: endLine.to,
+                        output: e.message,
+                        isError: true
+                    })
+                });
             } finally {
-                btn.textContent = "▶ Run";
+                btn.textContent = originalText;
                 btn.disabled = false;
             }
         }
     }
 
-    copyCode(view, container, btn) { /* ...省略(変更なし)... */
-        /* ...元のコードを維持... */
+    // コードコピー処理 (既存のまま)
+    copyCode(view, container, btn) {
         const pos = view.posAtDOM(container);
         if (pos === null) return;
         let node = syntaxTree(view.state).resolveInner(pos, 1);
@@ -1425,41 +1513,6 @@ class CodeBlockLanguageWidget extends WidgetType {
                 setTimeout(() => btn.textContent = original, 2000);
             });
         }
-    }
-
-    showDropdown(view, targetBtn) { /* ...省略(変更なし)... */
-        /* ...元のコードを維持... */
-        const existing = document.querySelector(".cm-language-dropdown-portal");
-        if (existing) existing.remove();
-        const dropdown = document.createElement("div");
-        dropdown.className = "cm-language-dropdown-portal";
-        const list = document.createElement("div");
-        list.className = "cm-language-list";
-        LANGUAGE_LIST.forEach(item => {
-            const div = document.createElement("div");
-            div.className = "cm-language-item";
-            div.textContent = item.label;
-            div.onmousedown = (e) => {
-                e.preventDefault();
-                const pos = view.posAtDOM(targetBtn);
-                if (pos !== null) {
-                    const line = view.state.doc.lineAt(pos);
-                    const match = line.text.match(/^(\s*`{3,})([\w-]*)/);
-                    if (match) {
-                        view.dispatch({ changes: { from: line.from + match[1].length, to: line.from + match[1].length + match[2].length, insert: item.value } });
-                    }
-                }
-                dropdown.remove();
-            };
-            list.appendChild(div);
-        });
-        dropdown.appendChild(list);
-        document.body.appendChild(dropdown);
-        const rect = targetBtn.getBoundingClientRect();
-        dropdown.style.top = `${rect.bottom + 4}px`;
-        dropdown.style.left = `${rect.left}px`;
-        const closer = (e) => { if (!dropdown.contains(e.target) && e.target !== targetBtn) { dropdown.remove(); document.removeEventListener("mousedown", closer); } };
-        setTimeout(() => document.addEventListener("mousedown", closer), 0);
     }
 
     ignoreEvent() { return true; }
@@ -2199,6 +2252,85 @@ const codeBlockAutoClose = keymap.of([{
     }
 }]);
 
+// ショートカットキー(Ctrl+Enter)によるコード実行機能
+const codeBlockRunKeymap = keymap.of([
+    {
+        key: "Mod-Enter",
+        run: (view) => {
+            const state = view.state;
+            const selection = state.selection.main;
+            const pos = selection.head;
+
+            // カーソル位置のノードを取得
+            let node = syntaxTree(state).resolveInner(pos, 1);
+            while (node && node.name !== "FencedCode") {
+                node = node.parent;
+            }
+
+            // コードブロック内にいない場合は何もしない
+            if (!node || node.name !== "FencedCode") return false;
+
+            // 言語を取得
+            const startLine = state.doc.lineAt(node.from);
+            const endLine = state.doc.lineAt(node.to);
+            const match = startLine.text.match(/^(\s*`{3,})([\w-]*)/);
+            const lang = match && match[2] ? match[2].toLowerCase() : "";
+
+            // 実行可能な言語でなければ何もしない
+            if (!EXECUTABLE_LANGUAGES.has(lang)) return false;
+
+            // コード本文を取得
+            const codeStart = startLine.to + 1;
+            const codeEnd = endLine.from;
+            if (codeStart >= codeEnd) return false;
+
+            const code = state.sliceDoc(codeStart, codeEnd);
+
+            // 実行処理 (非同期)
+            (async () => {
+                try {
+                    // "Running..." 表示
+                    view.dispatch({
+                        effects: setExecutionResult.of({
+                            pos: endLine.to,
+                            output: "Running...",
+                            isError: false
+                        })
+                    });
+
+                    // Electron API経由で実行
+                    const currentFileDir = document.body.dataset.activeFileDir || null;
+                    const result = await window.electronAPI.executeCode(code, lang, null, currentFileDir);
+                    
+                    const output = result.success ? result.stdout : result.stderr;
+                    const isError = !result.success || (result.stderr && result.stderr.trim().length > 0);
+                    const finalText = output || (result.success ? "(No output)" : "(Unknown error)");
+
+                    // 結果を表示
+                    view.dispatch({
+                        effects: setExecutionResult.of({
+                            pos: endLine.to,
+                            output: finalText,
+                            isError: isError
+                        })
+                    });
+
+                } catch (e) {
+                    view.dispatch({
+                        effects: setExecutionResult.of({
+                            pos: endLine.to,
+                            output: `Execution Error: ${e.message}`,
+                            isError: true
+                        })
+                    });
+                }
+            })();
+
+            return true;
+        }
+    }
+]);
+
 const plugin = ViewPlugin.define(
     (view) => ({
         decorations: buildDecorations(view),
@@ -2262,4 +2394,4 @@ const plugin = ViewPlugin.define(
     }
 );
 
-exports.livePreviewPlugin = [plugin, codeBlockAutoClose, executionResultField, mermaidModeField, mermaidPreviewField, latexPreviewField, Prec.highest(latexKeymap)];
+exports.livePreviewPlugin = [plugin, codeBlockAutoClose, Prec.highest(codeBlockRunKeymap), executionResultField, mermaidModeField, mermaidPreviewField, latexPreviewField, Prec.highest(latexKeymap)];

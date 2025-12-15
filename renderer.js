@@ -14,7 +14,7 @@ const { webFrame } = require('electron');
 const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder, StateField } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration, WidgetType } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
-const { syntaxHighlighting, defaultHighlightStyle, indentUnit } = require("@codemirror/language");
+const { syntaxHighlighting, defaultHighlightStyle, indentUnit, syntaxTree } = require("@codemirror/language");
 const { oneDark } = require("@codemirror/theme-one-dark");
 const { closeBrackets, autocompletion } = require("@codemirror/autocomplete");
 const { livePreviewPlugin } = require("./livePreviewPlugin.js");
@@ -2827,8 +2827,9 @@ function getCombinedKeymap(filePath = null) {
                 dynamicKeymap.push({
                     key: key,
                     run: (view) => {
-                        cmd.run(view);
-                        return true; // イベント伝播を停止
+                        const result = cmd.run(view);
+                        // falseが返ってきたら、次のハンドラ(コード実行)へパスする
+                        return result !== false;
                     }
                 });
             }
@@ -3772,8 +3773,19 @@ function insertPageBreak(view) {
     if (!view) return;
     const { state, dispatch } = view;
     const { from } = state.selection.main;
-    const line = state.doc.lineAt(from);
 
+    // コードブロック内判定
+    const tree = syntaxTree(state);
+    let node = tree.resolveInner(from, 1);
+    while (node) {
+        // カーソルがコードブロック(FencedCode)内にある場合
+        if (node.name === "FencedCode" || node.name === "CodeBlock") {
+            return false; // 何もしない（イベントを他のハンドラ=実行機能へ流す）
+        }
+        node = node.parent;
+    }
+
+    const line = state.doc.lineAt(from);
     const insert = `\n<div class="page-break"></div>\n`;
     const newPos = line.to + insert.length;
 
@@ -8438,6 +8450,11 @@ function switchToFile(filePath, targetPane = 'left') {
                 renderMediaContent(filePath, fileType);
                 if (leftEditorDiv) leftEditorDiv.style.display = 'none';
                 if (mediaViewEl) mediaViewEl.classList.remove('hidden');
+            }
+            // メディアファイルの場合も、エディタインスタンスにパスを紐付けておく
+            // これにより setActiveEditor() で currentFilePath が更新され、タブがアクティブになります
+            if (targetView) {
+                targetView.filePath = filePath;
             }
         }
     }
