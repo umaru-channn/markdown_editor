@@ -2374,6 +2374,15 @@ let searchState = {
 
 let searchWidgetControl = null;
 
+// ストリーミング検索結果の管理用
+let streamSearchResults = {
+    active: false,
+    matches: [],     // 行番号の配列 [5, 12, 100, ...]
+    currentIndex: -1,
+    query: ""
+};
+
+// 検索ウィジェットのセットアップ関数（全文）
 function setupSearchWidget(view) {
     const widget = document.getElementById('custom-search-widget');
     const searchInput = document.getElementById('search-input');
@@ -2400,21 +2409,59 @@ function setupSearchWidget(view) {
     let debounceTimer = null;
     let lastQueryString = ""; // 最後に実行したクエリを保存
 
-    const performSearch = () => {
+    // ★変更: 非同期関数(async)に変更し、ストリーミング検索の分岐を追加
+    const performSearch = async () => {
+        const queryStr = searchInput.value;
+
         // 空クエリの場合は検索状態をクリアして終了
-        if (!searchInput.value) {
+        if (!queryStr) {
             view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "", replace: "" })) });
             searchCount.textContent = "No results";
             lastQueryString = "";
+            streamSearchResults.active = false;
             return;
         }
 
         try {
             // 現在の入力値を保存
-            lastQueryString = searchInput.value;
+            lastQueryString = queryStr;
+
+            // ★分岐: ファイルが現在開いているもので、かつ完全に読み込まれていない場合は「ストリーミング検索」を使用
+            if (currentFileLoadState.path === currentFilePath && !currentFileLoadState.isComplete) {
+
+                searchCount.textContent = "Searching...";
+                streamSearchResults.active = true;
+                streamSearchResults.query = queryStr;
+
+                // メインプロセスでファイル全体をストリーム検索
+                const result = await window.electronAPI.searchFileStream(currentFilePath, queryStr);
+
+                if (result.success) {
+                    streamSearchResults.matches = result.matches;
+                    streamSearchResults.currentIndex = -1;
+
+                    const count = result.matches.length;
+                    searchCount.textContent = count >= 10000 ? "10000+ results" : `${count} results`;
+
+                    // CodeMirror側にもハイライト用としてクエリだけは渡しておく
+                    // (現在読み込まれている範囲だけでもハイライトさせるため)
+                    const cmQuery = new SearchQuery({
+                        search: queryStr,
+                        caseSensitive: searchState.caseSensitive
+                    });
+                    view.dispatch({ effects: setSearchQuery.of(cmQuery) });
+
+                } else {
+                    searchCount.textContent = "Error";
+                }
+                return; // CodeMirror標準のカウント処理はスキップして終了
+            }
+
+            // --- 以下、通常ファイル（全読み込み済み）の場合のロジック ---
+            streamSearchResults.active = false;
 
             const query = new SearchQuery({
-                search: searchInput.value,
+                search: queryStr,
                 caseSensitive: searchState.caseSensitive,
                 regexp: searchState.regexp,
                 wholeWord: searchState.wholeWord,
@@ -2427,16 +2474,12 @@ function setupSearchWidget(view) {
             // 件数カウント (負荷対策: 上限1000件で打ち切り)
             let count = 0;
             const cursor = query.getCursor(view.state);
-            // 無限ループ防止のため最大1000件まで
             const MAX_SEARCH_COUNT = 1000;
 
-            // next()の結果オブジェクトを確認してループ
             let item = cursor.next();
             while (!item.done) {
                 count++;
-                if (count >= MAX_SEARCH_COUNT) {
-                    break;
-                }
+                if (count >= MAX_SEARCH_COUNT) break;
                 item = cursor.next();
             }
 
@@ -2446,7 +2489,6 @@ function setupSearchWidget(view) {
                 searchCount.textContent = "No results";
             }
         } catch (e) {
-            // 正規表現エラーなどはここでキャッチ
             console.warn("Search Error:", e);
             searchCount.textContent = "Invalid Regex";
         }
@@ -2473,21 +2515,59 @@ function setupSearchWidget(view) {
     btnWord.addEventListener('click', () => toggleOption(btnWord, 'wholeWord'));
     btnRegex.addEventListener('click', () => toggleOption(btnRegex, 'regexp'));
 
-    // Navigation
+    // ★変更: Navigation (Next)
     btnNext.addEventListener('click', () => {
         // 現在のクエリが古い場合のみ実行
         if (searchInput.value !== lastQueryString) {
             performSearch();
         }
-        findNext(view);
-        view.focus();
+
+        if (streamSearchResults.active) {
+            // ストリーミングモード
+            if (streamSearchResults.matches.length === 0) return;
+
+            // インデックスを進める
+            streamSearchResults.currentIndex++;
+            if (streamSearchResults.currentIndex >= streamSearchResults.matches.length) {
+                streamSearchResults.currentIndex = 0; // ループ
+            }
+
+            const targetLine = streamSearchResults.matches[streamSearchResults.currentIndex];
+            // 指定行まで読み込んでジャンプする関数（後述）を呼び出し
+            jumpToLineWithAutoLoad(view, targetLine);
+
+            searchCount.textContent = `${streamSearchResults.currentIndex + 1}/${streamSearchResults.matches.length}`;
+        } else {
+            // 通常モード
+            findNext(view);
+            view.focus();
+        }
     });
+
+    // ★変更: Navigation (Prev)
     btnPrev.addEventListener('click', () => {
         if (searchInput.value !== lastQueryString) {
             performSearch();
         }
-        findPrevious(view);
-        view.focus();
+
+        if (streamSearchResults.active) {
+            // ストリーミングモード
+            if (streamSearchResults.matches.length === 0) return;
+
+            streamSearchResults.currentIndex--;
+            if (streamSearchResults.currentIndex < 0) {
+                streamSearchResults.currentIndex = streamSearchResults.matches.length - 1;
+            }
+
+            const targetLine = streamSearchResults.matches[streamSearchResults.currentIndex];
+            jumpToLineWithAutoLoad(view, targetLine);
+
+            searchCount.textContent = `${streamSearchResults.currentIndex + 1}/${streamSearchResults.matches.length}`;
+        } else {
+            // 通常モード
+            findPrevious(view);
+            view.focus();
+        }
     });
 
     // Replace functions
@@ -2527,13 +2607,21 @@ function setupSearchWidget(view) {
                 performSearch();
             }
 
-            // その後で移動処理
-            if (e.shiftKey) findPrevious(view);
-            else if (e.ctrlKey && e.altKey) replaceAll(view);
-            else findNext(view);
+            // 移動処理の分岐
+            if (streamSearchResults.active) {
+                // ストリーミングモードの移動
+                if (e.shiftKey) {
+                    btnPrev.click();
+                } else {
+                    btnNext.click();
+                }
+            } else {
+                // 通常モードの移動
+                if (e.shiftKey) findPrevious(view);
+                else if (e.ctrlKey && e.altKey) replaceAll(view);
+                else findNext(view);
+            }
 
-            // Note: Enterキーの場合は入力欄にフォーカスを残したままにする
-            // drawSelection拡張により、フォーカスがなくても選択範囲（青色）が表示されるようになる
         } else if (e.key === 'Escape') {
             e.preventDefault();
             closeWidget();
@@ -2546,6 +2634,7 @@ function setupSearchWidget(view) {
             if (searchInput.value !== lastQueryString) {
                 performSearch();
             }
+            // 置換は通常モードのみのサポートとする（ストリーミング中の置換は複雑なため）
             replaceNext(view);
         } else {
             handleKeydown(e);
@@ -2579,6 +2668,80 @@ function setupSearchWidget(view) {
             replaceInput.focus();
         }
     };
+}
+
+// 指定行までデータを読み込んでジャンプする関数
+async function jumpToLineWithAutoLoad(view, targetLineNumber) {
+    if (!view) return;
+
+    // 1. 現在の読み込み済み行数をチェック
+    let currentLines = view.state.doc.lines;
+
+    // 2. ターゲット行がまだ読み込まれていない場合
+    if (targetLineNumber > currentLines) {
+        // 読み込み中の表示などを出すと親切（今回はコンソールログのみ）
+        console.log(`Target line ${targetLineNumber} is not loaded (Current: ${currentLines}). Loading...`);
+
+        // ターゲット行に到達するか、ファイル末尾になるまで読み込み続ける
+        while (currentLines < targetLineNumber && !currentFileLoadState.isComplete) {
+            try {
+                // チャンク読み込み (同期的に待つ)
+                const result = await window.electronAPI.readFileChunk(
+                    currentFileLoadState.path,
+                    currentFileLoadState.offset
+                );
+
+                if (result.success && result.bytesRead > 0) {
+                    // エディタに追記
+                    const currentDocLen = view.state.doc.length;
+                    view.dispatch({
+                        changes: { from: currentDocLen, insert: result.content },
+                        annotations: ExternalChange.of(true)
+                    });
+
+                    // 状態更新
+                    currentFileLoadState.offset += result.bytesRead;
+                    currentFileLoadState.isComplete = result.eof;
+
+                    // 行数を更新して再チェック
+                    currentLines = view.state.doc.lines;
+                } else {
+                    break; // 読み込めなくなったら中断
+                }
+            } catch (e) {
+                console.error("Auto-load error:", e);
+                break;
+            }
+        }
+    }
+
+    // 3. ジャンプ処理 (ターゲット行へスクロール)
+    // 読み込み後、行が存在すればジャンプ
+    if (targetLineNumber <= view.state.doc.lines) {
+        const line = view.state.doc.line(targetLineNumber);
+
+        // 検索ワードを選択状態にして強調
+        const query = streamSearchResults.query;
+        let selectionFrom = line.from;
+        let selectionTo = line.from;
+
+        if (query) {
+            const lineText = line.text.toLowerCase();
+            const qLower = query.toLowerCase();
+            const idx = lineText.indexOf(qLower);
+            if (idx !== -1) {
+                selectionFrom = line.from + idx;
+                selectionTo = selectionFrom + query.length;
+            }
+        }
+
+        view.dispatch({
+            selection: { anchor: selectionFrom, head: selectionTo },
+            scrollIntoView: true,
+            effects: EditorView.scrollIntoView(selectionFrom, { y: "center" }) // 中央に表示
+        });
+        view.focus();
+    }
 }
 
 // Wikiリンクのオートコンプリート機能

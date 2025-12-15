@@ -14,6 +14,7 @@ const got = require('got');
 const crypto = require('crypto');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+const readline = require('readline');
 
 // Cloud Sync Dependencies
 const { Dropbox } = require('dropbox');
@@ -1591,13 +1592,45 @@ ipcMain.handle('read-file-chunk', async (event, filePath, offset = 0, chunkSize 
     }
 
     const content = buffer.slice(0, effectiveBytes).toString('utf8');
-    return { 
-      success: true, 
-      content, 
-      bytesRead: effectiveBytes, 
-      total: stats.size, 
-      eof: (offset + effectiveBytes) >= stats.size 
+    return {
+      success: true,
+      content,
+      bytesRead: effectiveBytes,
+      total: stats.size,
+      eof: (offset + effectiveBytes) >= stats.size
     };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ストリーミング検索 (ファイル全体をメモリ展開せずに検索)
+ipcMain.handle('search-file-stream', async (event, filePath, query) => {
+  if (!filePath || !query) return { success: false, matches: [] };
+
+  const results = [];
+  const lowerQuery = query.toLowerCase();
+
+  try {
+    const fileStream = fs.createReadStream(filePath);
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
+
+    let lineNum = 1;
+
+    for await (const line of rl) {
+      // 大文字小文字を区別しない検索
+      if (line.toLowerCase().includes(lowerQuery)) {
+        results.push(lineNum);
+        // 上限を設ける場合 (例: 10000件)
+        if (results.length >= 10000) break;
+      }
+      lineNum++;
+    }
+
+    return { success: true, matches: results };
   } catch (e) {
     return { success: false, error: e.message };
   }
