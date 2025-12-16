@@ -5117,3 +5117,22 @@ body[data-theme="dark"] .cm-admonition-content-line:last-of-type {
 body[data-theme="dark"] .custom-webview-content {
     background-color: #1e1e1e;
 }
+
+/* Preview Toggle Button Style */
+.status-item.hover-effect:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.status-item.active {
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+/* 無効化状態のボタンスタイル */
+.status-item.disabled {
+    visibility: hidden;    /* 完全に透明にする（場所は確保される） */
+    pointer-events: none;  /* クリック無効 */
+    cursor: default;
+}

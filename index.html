@@ -710,13 +710,16 @@
                     <div id="editor-wrapper"
                         style="display: flex; flex: 1; height: 100%; width: 100%; overflow: hidden;">
                         <div id="editor" style="width: 100%; height: 100%;"></div>
+
+                        <div id="preview-pane" class="hidden"
+                            style="width: 0%; height: 100%; overflow-y: auto; background: var(--main-bg); border-left: 1px solid var(--sidebar-border);">
+                            <div class="markdown-rendered" style="padding: 30px; max-width: 900px; margin: 0 auto;">
+                            </div>
+                        </div>
                         <div id="resizer-editor-split" class="hidden"></div>
                         <div id="editor-split"
-                            style="width: 0%; height: 100%; display: none; border-left: 1px solid #444;"></div>
-                    </div>
-
-                    <div id="media-view" class="hidden"
-                        style="height: 100%; width: 100%; display: flex; flex-direction: column; overflow: hidden; background-color: var(--main-bg);">
+                            style="width: 0%; height: 100%; display: none; border-left: 1px solid var(--sidebar-border);">
+                        </div>
                     </div>
 
                     <div id="custom-search-widget" class="search-widget hidden">
@@ -836,16 +839,19 @@
                                     <label for="exclude-patterns">除外するファイル/フォルダ (Exclude Patterns)</label>
                                     <input type="text" id="exclude-patterns"
                                         placeholder="例: node_modules, .git, dist, build">
-                                    <div class="label-desc" style="margin-top: 4px;">ファイルツリーから隠す名前をカンマ区切りで指定します。</div>
+                                    <div class="label-desc" style="margin-top: 4px;">ファイルツリーから隠す名前をカンマ区切りで指定します。
+                                    </div>
                                 </div>
                                 <div class="setting-item">
-                                    <label for="default-image-location">画像のデフォルト保存場所 (Clipboard Image Location)</label>
+                                    <label for="default-image-location">画像のデフォルト保存場所 (Clipboard Image
+                                        Location)</label>
                                     <select id="default-image-location">
                                         <option value=".">現在のフォルダ (Current Folder)</option>
                                         <option value="./assets">./assets フォルダ</option>
                                         <option value="./images">./images フォルダ</option>
                                     </select>
-                                    <div class="label-desc" style="margin-top: 4px;">クリップボードから画像を貼り付けた際の保存先フォルダを指定します。
+                                    <div class="label-desc" style="margin-top: 4px;">
+                                        クリップボードから画像を貼り付けた際の保存先フォルダを指定します。
                                     </div>
                                 </div>
                             </div>
@@ -978,21 +984,27 @@
                                 <div class="setting-item">
                                     <label for="font-family">フォント (Font Family)</label>
                                     <select id="font-family">
-                                        <option value='"Segoe UI", "Meiryo", sans-serif' selected>標準 (Segoe UI / メイリオ)
+                                        <option value='"Segoe UI", "Meiryo", sans-serif' selected>標準 (Segoe UI /
+                                            メイリオ)
                                         </option>
 
-                                        <option value='"Meiryo", "Hiragino Kaku Gothic ProN", sans-serif'>メイリオ (Meiryo)
+                                        <option value='"Meiryo", "Hiragino Kaku Gothic ProN", sans-serif'>メイリオ
+                                            (Meiryo)
                                         </option>
-                                        <option value='"Yu Gothic", "YuGothic", sans-serif'>游ゴシック (Yu Gothic)</option>
+                                        <option value='"Yu Gothic", "YuGothic", sans-serif'>游ゴシック (Yu Gothic)
+                                        </option>
                                         <option value='"Yu Gothic UI", sans-serif'>Yu Gothic UI</option>
-                                        <option value='"BIZ UDGothic", "BIZ UDPGothic", sans-serif'>BIZ UDゴシック (Windows
+                                        <option value='"BIZ UDGothic", "BIZ UDPGothic", sans-serif'>BIZ UDゴシック
+                                            (Windows
                                             10以降)
                                         </option>
-                                        <option value='"MS Gothic", "MS PGothic", sans-serif'>MS ゴシック (レトロ/互換性)</option>
+                                        <option value='"MS Gothic", "MS PGothic", sans-serif'>MS ゴシック (レトロ/互換性)
+                                        </option>
 
                                         <option value='"Yu Mincho", "YuMincho", serif'>游明朝 (Yu Mincho)</option>
                                         <option value='"MS Mincho", "MS PMincho", serif'>MS 明朝 (MS Mincho)</option>
-                                        <option value='"BIZ UDMincho", "BIZ UDPMincho", serif'>BIZ UD明朝 (Windows 10以降)
+                                        <option value='"BIZ UDMincho", "BIZ UDPMincho", serif'>BIZ UD明朝 (Windows
+                                            10以降)
                                         </option>
 
                                         <option value='"Consolas", "Courier New", monospace'>Consolas (Windows標準等幅)
@@ -1033,7 +1045,8 @@
                                         <span id="window-opacity-value"
                                             style="font-weight: bold; width: 40px;">0%</span>
                                     </div>
-                                    <div class="label-desc" style="margin-top: 4px;">ウィンドウの透過率を設定します（0% = 不透明）。</div>
+                                    <div class="label-desc" style="margin-top: 4px;">ウィンドウの透過率を設定します（0% = 不透明）。
+                                    </div>
                                 </div>
 
                                 <div class="setting-item"
@@ -1317,7 +1330,8 @@
                                 <div id="sync-settings-gdrive" class="sync-provider-settings hidden">
                                     <h3>Google Drive 設定</h3>
                                     <p class="setting-note">ボタンを押してブラウザで認証を行ってください。</p>
-                                    <button id="btn-auth-gdrive" class="modal-btn primary">Google Driveと連携 (認証)</button>
+                                    <button id="btn-auth-gdrive" class="modal-btn primary">Google Driveと連携
+                                        (認証)</button>
                                     <span id="gdrive-status" class="auth-status">未連携</span>
                                 </div>
                             </div>
@@ -1428,7 +1442,24 @@
                 <span id="status-bar-branch" class="status-bar-item hidden" title="ブランチを作成・切り替え"></span>
                 <span id="sync-status-text" style="margin-left: 10px;"></span>
             </div>
-            <div class="status-right">
+            <div class="status-item hover-effect" id="btn-toggle-preview" title="プレビュー切り替え"
+                style="cursor: pointer; display: flex; align-items: center; margin-left: 15px; gap: 5px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <span>Preview</span>
+            </div>
+            <div class="status-right" style="display: flex; align-items: center; gap: 10px;">
+                <div class="status-item hover-effect disabled" id="btn-close-split" title="画面分割を解除 (Close Split)"
+                    style="cursor: pointer; display: flex; align-items: center; margin-right: 20px; gap: 5px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                    </svg>
+                    <span>Close Split</span>
+                </div>
                 <span id="status-font-size" style="margin-right: 15px; font-size: 11px;">Size: 16px</span>
                 <span id="file-stats" style="margin-right: 15px;">文字数: 0 | 行数: 0</span>
                 <span class="icon" id="btn-toggle-position" title="ターミナルの位置を切り替え"> ◧ </span>

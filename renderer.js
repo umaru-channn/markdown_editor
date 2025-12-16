@@ -11,7 +11,7 @@
 
 const path = require('path');
 const { webFrame } = require('electron');
-const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder, StateField } = require("@codemirror/state");
+const { EditorState, Prec, Compartment, Annotation, RangeSetBuilder, StateField, StateEffect } = require("@codemirror/state");
 const { EditorView, keymap, highlightActiveLine, lineNumbers, drawSelection, dropCursor, MatchDecorator, ViewPlugin, Decoration, WidgetType } = require("@codemirror/view");
 const { defaultKeymap, history, historyKeymap, undo, redo, indentMore, indentLess } = require("@codemirror/commands");
 const { syntaxHighlighting, defaultHighlightStyle, indentUnit, syntaxTree } = require("@codemirror/language");
@@ -160,6 +160,7 @@ let isBacklinksVisible = false; // バックリンクパネルの表示状態
 let isResizingEditorSplit = false;
 let activeEditorView = null;
 let activeCustomLinkId = null; // 現在表示中のカスタムリンクID
+let isPreviewMode = false; // プレビューモードの状態
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -3612,6 +3613,20 @@ function initEditor() {
 
     // 設定画面へのドラッグ＆ドロップを有効化
     setupSettingsDropHandler();
+
+    // プレビューボタンのイベントリスナー
+    const btnTogglePreview = document.getElementById('btn-toggle-preview');
+    if (btnTogglePreview) {
+        btnTogglePreview.addEventListener('click', togglePreviewMode);
+    }
+
+    // 分割解除ボタンのイベント
+    const btnCloseSplit = document.getElementById('btn-close-split');
+    if (btnCloseSplit) {
+        btnCloseSplit.addEventListener('click', () => {
+            closeSplitView();
+        });
+    }
 }
 
 // ========== エディタ操作ヘルパー ==========
@@ -4222,6 +4237,15 @@ function onEditorInput(markAsDirty = true) {
         if (tab && !tab.innerHTML.includes('●')) {
             tab.innerHTML = tab.innerHTML.replace('<span class="close-tab"', ' ● <span class="close-tab"');
         }
+    }
+
+    // プレビューモードなら内容を更新
+    if (isPreviewMode) {
+        // 負荷軽減のため少し遅延させる
+        if (window.previewUpdateTimeout) clearTimeout(window.previewUpdateTimeout);
+        window.previewUpdateTimeout = setTimeout(() => {
+            updatePreviewContent();
+        }, 300);
     }
 
     // 2. アウトラインとPDFプレビューの更新
@@ -8423,19 +8447,6 @@ function closeWelcomeReadme() {
 
 function switchToFile(filePath, targetPane = 'left') {
 
-    // // 設定画面の二重表示防止 & 自動フォーカス移動
-    // if (filePath === 'settings://view' && isSplitLayoutVisible) {
-    //     const isLeftSettings = (splitGroup.leftPath === 'settings://view');
-    //     const isRightSettings = (splitGroup.rightPath === 'settings://view');
-
-    //     // 既にどこかで設定画面が開かれている場合
-    //     if (isLeftSettings || isRightSettings) {
-    //         // 開かれている方のペインをターゲットに強制変更する
-    //         // これにより、二重に開こうとした場合も、既存の方にフォーカスが移動するだけになる
-    //         targetPane = isRightSettings ? 'right' : 'left';
-    //     }
-    // }
-
     const previouslyActivePath = currentFilePath;
 
     if (autoSaveTimer) {
@@ -8512,13 +8523,15 @@ function switchToFile(filePath, targetPane = 'left') {
             }
         }
 
-        // 分割ビューの内容が古い場合に強制的に更新する
+        // 分割ビューの内容更新（要素の存在確認を追加）
         if (splitGroup.leftPath && globalEditorView.filePath !== splitGroup.leftPath) {
             const leftData = openedFiles.get(splitGroup.leftPath);
             if (leftData) {
-                if (leftData.type !== 'settings') { // 設定以外
-                    document.getElementById('editor').style.display = 'block';
-                    document.getElementById('media-view').classList.add('hidden');
+                if (leftData.type !== 'settings') {
+                    const editorEl = document.getElementById('editor');
+                    const mediaView = document.getElementById('media-view');
+                    if (editorEl) editorEl.style.display = 'block';
+                    if (mediaView) mediaView.classList.add('hidden'); // 安全にアクセス
 
                     if (leftData.editorState) {
                         globalEditorView.setState(leftData.editorState);
@@ -8527,7 +8540,6 @@ function switchToFile(filePath, targetPane = 'left') {
                         globalEditorView.setState(newState);
                     }
                 }
-                // 設定画面の場合でもパス情報は更新しておく (タイトルバー同期のため)
                 globalEditorView.filePath = splitGroup.leftPath;
             }
         }
@@ -8782,6 +8794,41 @@ function switchToFile(filePath, targetPane = 'left') {
     onEditorInput(false);
 
     if (isBacklinksVisible) updateBacklinks();
+
+    // ★重要: 現在の画面状態に合わせてボタンとフラグを更新
+    const btnPreview = document.getElementById('btn-toggle-preview');
+    const btnCloseSplit = document.getElementById('btn-close-split');
+
+    if (isSplitLayoutVisible) {
+
+        // 分割中は必ずボタンを有効化 (disabled解除)
+        if (btnCloseSplit) btnCloseSplit.classList.remove('disabled');
+
+        // プレビューモード判定: 左右が同じファイルならプレビューモードとみなす
+        if (splitGroup.leftPath === splitGroup.rightPath) {
+            isPreviewMode = true;
+            if (btnPreview) btnPreview.classList.add('active');
+        } else {
+            isPreviewMode = false;
+            if (btnPreview) btnPreview.classList.remove('active');
+        }
+    } else {
+        // 分割していないなら全てオフ
+        if (btnCloseSplit) btnCloseSplit.classList.add('disabled');
+
+        isPreviewMode = false;
+        if (btnPreview) btnPreview.classList.remove('active');
+
+        // 言語設定がPlain Textのままかもしれないので念のため復元
+        if (targetView && fileType === 'text') {
+            // 少し遅延させて確実に適用
+            setTimeout(() => {
+                targetView.dispatch({
+                    effects: languageCompartment.reconfigure(getLanguageExtensions(filePath))
+                });
+            }, 10);
+        }
+    }
 }
 
 /**
@@ -9140,6 +9187,10 @@ function openInSplitView(filePath, side = 'right') {
             return; // ここで処理を終了（分割しない）
         }
     }
+
+    // 分割解除ボタンを表示
+    const btnCloseSplit = document.getElementById('btn-close-split');
+    if (btnCloseSplit) btnCloseSplit.classList.remove('disabled');
 
     const splitEditorDiv = document.getElementById('editor-split');
     const mainTitleBar = document.getElementById('file-title-bar');
@@ -11003,17 +11054,39 @@ function hideSplitLayout() {
 function closeSplitView() {
     if (!isSplitView) return;
 
-    isSplitView = false; // 【修正】永続的な分割状態を完全に解除する
+    // プレビューモード中なら、その終了処理（エディタ設定の復元など）もここで行う
+    if (isPreviewMode) {
+        isPreviewMode = false;
+
+        // プレビューボタンの見た目を戻す
+        const btnPreview = document.getElementById('btn-toggle-preview');
+        if (btnPreview) btnPreview.classList.remove('active');
+
+        // 左側エディタを「原文モード」から「元の言語モード」に戻す
+        if (globalEditorView && currentFilePath) {
+            globalEditorView.dispatch({
+                effects: languageCompartment.reconfigure(getLanguageExtensions(currentFilePath))
+            });
+        }
+    }
+
+    isSplitView = false; // 永続的な分割状態を完全に解除する
+    isSplitLayoutVisible = false;
 
     const mainEditorDiv = document.getElementById('editor');
     const splitEditorDiv = document.getElementById('editor-split');
     const mainTitleBar = document.getElementById('file-title-bar');
     const splitTitleBar = document.getElementById('file-title-bar-split');
 
+    const btnCloseSplit = document.getElementById('btn-close-split');
+    if (btnCloseSplit) btnCloseSplit.classList.add('disabled');
+
     // レイアウトを元に戻す
-    mainEditorDiv.style.width = '100%';
-    splitEditorDiv.style.display = 'none';
-    splitEditorDiv.style.width = '0%';
+    if (mainEditorDiv) mainEditorDiv.style.width = '100%';
+    if (splitEditorDiv) {
+        splitEditorDiv.style.display = 'none';
+        splitEditorDiv.style.width = '0%';
+    }
 
     // リサイザーを非表示
     if (resizerEditorSplit) {
@@ -11410,6 +11483,92 @@ function toggleCustomLinkView(linkId) {
         }
     }
     updateTerminalVisibility();
+}
+
+// ========== プレビュー機能 ==========
+
+async function togglePreviewMode() {
+    const btn = document.getElementById('btn-toggle-preview');
+
+    if (isPreviewMode) {
+        // 分割表示を終了して全画面に戻す
+        closeSplitView();
+    } else {
+        // --- プレビューモード開始 ---
+
+        // 1. ファイルが開かれているかチェック
+        if (!currentFilePath) return;
+
+        // 2. 拡張子チェック (.md, .markdown, .txt, README)
+        const lowerPath = currentFilePath.toLowerCase();
+        const fileName = path.basename(lowerPath);
+        const ext = path.extname(lowerPath);
+        const allowedExts = ['.md', '.markdown', '.txt'];
+
+        // README.md などのファイル名、または許可された拡張子か
+        const isTargetFile = fileName.includes('readme') || allowedExts.includes(ext);
+
+        if (!isTargetFile) {
+            showNotification('プレビューはMarkdown/テキストファイルのみ利用可能です', 'error');
+            return;
+        }
+
+        // 3. 画面分割チェック (既に分割されている場合は実行しない)
+        if (isSplitLayoutVisible) {
+            showNotification('画面分割中はプレビューモードを利用できません', 'error');
+            return;
+        }
+
+        isPreviewMode = true;
+
+        // 4. 右側に「いつものプレビュー」を表示 (リサイザーも自動で有効になります)
+        openInSplitView(currentFilePath, 'right');
+
+        // 5. 左側を「原文（Plain Text）」に変更
+        if (globalEditorView) {
+            globalEditorView.dispatch({
+                effects: languageCompartment.reconfigure([])
+            });
+        }
+
+        // 6. 右側を「完全な読み取り専用」にする (カーソルも非表示)
+        setTimeout(() => {
+            if (splitEditorView) {
+                splitEditorView.dispatch({
+                    effects: [
+                        StateEffect.appendConfig.of(EditorState.readOnly.of(true)),
+                        StateEffect.appendConfig.of(EditorView.editable.of(false)) // カーソル非表示・編集無効化
+                    ]
+                });
+            }
+            // フォーカスは左側（入力用）に戻す
+            if (globalEditorView) {
+                setActiveEditor(globalEditorView);
+                globalEditorView.focus();
+            }
+        }, 100);
+
+        if (btn) btn.classList.add('active');
+    }
+}
+
+// プレビュー内容の更新
+async function updatePreviewContent() {
+    if (!isPreviewMode || !globalEditorView) return;
+
+    const previewContainer = document.querySelector('#preview-pane .markdown-rendered');
+    if (!previewContainer) return;
+
+    const markdown = globalEditorView.state.doc.toString();
+    const title = document.getElementById('file-title-input')?.value || 'Untitled';
+
+    // 既存のPDF用HTML変換関数を再利用してレンダリング
+    try {
+        const html = await convertMarkdownToHtml(markdown, appSettings.pdfOptions || {}, title);
+        previewContainer.innerHTML = html;
+    } catch (e) {
+        console.error("Preview render error:", e);
+    }
 }
 
 // サポートされている実行言語リスト (main.jsと同期)
