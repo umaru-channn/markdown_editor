@@ -159,6 +159,7 @@ let globalDiffView = null; // Diffビューのインスタンス保持用
 let isBacklinksVisible = false; // バックリンクパネルの表示状態
 let isResizingEditorSplit = false;
 let activeEditorView = null;
+let activeCustomLinkId = null; // 現在表示中のカスタムリンクID
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -219,6 +220,7 @@ let appSettings = {
     showWhitespace: false,
     textSnippets: [...DEFAULT_SNIPPETS],
     enabledSnippets: [],
+    customLinks: [], // { id, name, url, icon }
     // PDF設定のデフォルト値
     pdfOptions: {
         pageSize: 'A4',
@@ -848,6 +850,7 @@ function applySettingsToUI() {
     // CSS変数の更新
     document.documentElement.style.setProperty('--editor-font-size', appSettings.fontSize);
     document.documentElement.style.setProperty('--editor-font-family', appSettings.fontFamily);
+    renderRightSidebarIcons();
 }
 
 function updateEditorSettings() {
@@ -4535,6 +4538,9 @@ function updateTerminalVisibility() {
     const backlinksHeader = document.getElementById('backlinks-header');
     const backlinksContainer = document.getElementById('backlinks-container');
 
+    const customWebHeader = document.getElementById('custom-webview-header');
+    const customWebContainer = document.getElementById('custom-webview-container');
+
     const showCalendar = window.calendarAPI ? window.calendarAPI.getVisible() : false;
 
     if (rightActivityBar) {
@@ -4545,7 +4551,9 @@ function updateTerminalVisibility() {
     const showTerminalRight = isTerminalVisible && isPositionRight;
     const showBacklinks = isBacklinksVisible;
 
-    const needRightPane = (showPdf || showTerminalRight || showCalendar || showBacklinks) && isRightActivityBarVisible;
+    const showCustomWeb = !!activeCustomLinkId; // IDがあれば表示
+
+    const needRightPane = (showPdf || showTerminalRight || showCalendar || showBacklinks || showCustomWeb) && isRightActivityBarVisible;
 
     const barWidth = isRightActivityBarVisible ? rightActivityBarWidth : 0;
     document.documentElement.style.setProperty('--right-activity-offset,', barWidth + 'px');
@@ -4563,6 +4571,8 @@ function updateTerminalVisibility() {
         if (pdfPreviewContainer) pdfPreviewContainer.classList.add('hidden');
         if (backlinksHeader) backlinksHeader.classList.add('hidden');
         if (backlinksContainer) backlinksContainer.classList.add('hidden');
+        if (customWebHeader) customWebHeader.classList.add('hidden');
+        if (customWebContainer) customWebContainer.classList.add('hidden');
 
         // 必要なものだけ表示
         if (showCalendar) {
@@ -4576,6 +4586,9 @@ function updateTerminalVisibility() {
         } else if (showBacklinks) {
             if (backlinksHeader) backlinksHeader.classList.remove('hidden');
             if (backlinksContainer) backlinksContainer.classList.remove('hidden');
+        } else if (showCustomWeb) {
+            if (customWebHeader) customWebHeader.classList.remove('hidden');
+            if (customWebContainer) customWebContainer.classList.remove('hidden');
         }
 
         const rightPaneWidth = rightPane.style.width || '350px';
@@ -4653,6 +4666,10 @@ function updateTerminalVisibility() {
     // バックリンクボタンの状態更新
     if (btnBacklinks) btnBacklinks.classList.toggle('active', showBacklinks);
 
+    document.querySelectorAll('.custom-link-icon').forEach(icon => {
+        icon.classList.toggle('active', icon.dataset.id === activeCustomLinkId);
+    });
+
     document.body.classList.remove('is-layout-changing');
 
     requestAnimationFrame(() => {
@@ -4674,6 +4691,107 @@ function updateTerminalVisibility() {
             }
         }
     }
+}
+
+// カスタムリンク設定のイベントリスナー
+function setupCustomLinkSettingsEvents() {
+    const btnAdd = document.getElementById('btn-add-link');
+    const inputUrl = document.getElementById('link-url-input');
+    const inputName = document.getElementById('link-name-input');
+    const inputIcon = document.getElementById('link-icon-select');
+
+    // 外部ブラウザで開くボタンのイベント（右ペインヘッダー）
+    const btnOpenExternal = document.getElementById('btn-open-external');
+    if (btnOpenExternal) {
+        btnOpenExternal.addEventListener('click', () => {
+            const iframe = document.getElementById('custom-webview-frame');
+            if (iframe && iframe.src) {
+                window.electronAPI.openExternal(iframe.src);
+            }
+        });
+    }
+
+    // 設定画面のタブ切り替えイベント
+    const navItem = document.querySelector('.settings-nav-item[data-section="links"]');
+    if (navItem) {
+        navItem.addEventListener('click', renderCustomLinksSettingsList);
+    }
+
+    if (btnAdd) {
+        btnAdd.addEventListener('click', () => {
+            const url = inputUrl.value.trim();
+            const name = inputName.value.trim() || 'Link';
+            const icon = inputIcon.value;
+
+            if (!url) {
+                showNotification('URLを入力してください', 'error');
+                return;
+            }
+
+            if (!appSettings.customLinks) appSettings.customLinks = [];
+
+            // ID生成
+            const id = 'link-' + Date.now();
+            appSettings.customLinks.push({ id, name, url, icon });
+
+            saveSettings();
+
+            // UI更新
+            inputUrl.value = '';
+            inputName.value = '';
+            renderCustomLinksSettingsList();
+            renderRightSidebarIcons(); // サイドバー即時更新
+
+            showNotification('リンクを追加しました', 'success');
+        });
+    }
+}
+
+// 設定画面のリスト描画
+function renderCustomLinksSettingsList() {
+    const tbody = document.getElementById('custom-links-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    const links = appSettings.customLinks || [];
+
+    links.forEach((link, index) => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid var(--sidebar-border)';
+
+        const iconSvg = CUSTOM_LINK_ICONS[link.icon] || CUSTOM_LINK_ICONS['globe'];
+
+        tr.innerHTML = `
+            <td style="padding: 8px; text-align: center;">
+                <div style="width:20px; height:20px; margin:0 auto;">${iconSvg}</div>
+            </td>
+            <td style="padding: 8px;">${escapeHtml(link.name)}</td>
+            <td style="padding: 8px; color: #888; font-size: 11px; word-break: break-all;">${escapeHtml(link.url)}</td>
+            <td style="padding: 8px; text-align: center;">
+                <button class="btn-delete-link" data-index="${index}" style="background: none; border: none; cursor: pointer; color: #d9534f;">×</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    // 削除ボタンイベント
+    document.querySelectorAll('.btn-delete-link').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            const deletedId = appSettings.customLinks[index].id;
+
+            appSettings.customLinks.splice(index, 1);
+            saveSettings();
+
+            // もし削除したリンクが開かれていたら閉じる
+            if (activeCustomLinkId === deletedId) {
+                toggleCustomLinkView(deletedId); // 閉じる処理が走る
+            }
+
+            renderCustomLinksSettingsList();
+            renderRightSidebarIcons();
+        });
+    });
 }
 
 // ========== ヘッダーボタン切り替え ==========
@@ -4717,6 +4835,7 @@ if (btnTerminalRight) {
             isTerminalVisible = true;
             isPdfPreviewVisible = false;
             isBacklinksVisible = false;
+            activeCustomLinkId = null;
             if (window.calendarAPI) window.calendarAPI.hide();
         }
         updateTerminalVisibility();
@@ -4827,6 +4946,7 @@ if (btnPdfPreview) { // togglePdfPreview関数を直接呼んでいる既存コ�
             isPdfPreviewVisible = true;
             isTerminalVisible = false;
             isBacklinksVisible = false;
+            activeCustomLinkId = null;
             if (window.calendarAPI) window.calendarAPI.hide();
             generatePdfPreview(); // PDF生成
         }
@@ -4849,6 +4969,7 @@ if (btnCalendar) {
             isTerminalVisible = false;
             isPdfPreviewVisible = false;
             isBacklinksVisible = false;
+            activeCustomLinkId = null;
         }
         updateTerminalVisibility();
     });
@@ -6441,6 +6562,7 @@ if (btnBacklinks) {
             isBacklinksVisible = true;
             isTerminalVisible = false;
             isPdfPreviewVisible = false;
+            activeCustomLinkId = null;
             if (window.calendarAPI) window.calendarAPI.hide();
 
             // バックリンク更新
@@ -7419,6 +7541,8 @@ window.addEventListener('load', async () => {
 
     setupSnippetEvents();
     renderCssSnippetsList();
+
+    setupCustomLinkSettingsEvents();
 
     setupHotkeySearch();
 
@@ -11216,6 +11340,77 @@ COMMANDS_REGISTRY.push({
 document.addEventListener('click', () => {
     ContextMenu.close();
 });
+
+// カスタムリンク用アイコン定義
+const CUSTOM_LINK_ICONS = {
+    'globe': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>',
+    'file-text': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>',
+    'tool': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>',
+    'github': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>',
+    'message': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
+    'star': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>',
+    'link': '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
+};
+
+// 右サイドバーにカスタムリンクアイコンを描画
+function renderRightSidebarIcons() {
+    const activityBar = document.querySelector('.right-activity-bar');
+    if (!activityBar) return;
+
+    // 既存の動的追加アイコンをクリア（クラス 'custom-link-icon' を持つもの）
+    const existing = activityBar.querySelectorAll('.custom-link-icon');
+    existing.forEach(el => el.remove());
+
+    const links = appSettings.customLinks || [];
+
+    links.forEach(link => {
+        const div = document.createElement('div');
+        div.className = 'icon custom-link-icon';
+        div.title = link.name;
+        div.dataset.id = link.id;
+        div.innerHTML = CUSTOM_LINK_ICONS[link.icon] || CUSTOM_LINK_ICONS['globe'];
+
+        // クリックイベント
+        div.addEventListener('click', () => {
+            toggleCustomLinkView(link.id);
+        });
+
+        // アクティブ状態の反映
+        if (activeCustomLinkId === link.id) {
+            div.classList.add('active');
+        }
+
+        activityBar.appendChild(div);
+    });
+}
+
+// カスタムリンクの表示切り替え処理
+function toggleCustomLinkView(linkId) {
+    if (activeCustomLinkId === linkId) {
+        // 既に開いている場合は閉じる
+        activeCustomLinkId = null;
+        // iframeをクリア
+        const iframe = document.getElementById('custom-webview-frame');
+        if (iframe) iframe.src = '';
+    } else {
+        // 開く（他を閉じる）
+        activeCustomLinkId = linkId;
+        isTerminalVisible = false;
+        isPdfPreviewVisible = false;
+        isBacklinksVisible = false;
+        if (window.calendarAPI) window.calendarAPI.hide();
+
+        // リンク情報を取得して表示
+        const link = (appSettings.customLinks || []).find(l => l.id === linkId);
+        if (link) {
+            const iframe = document.getElementById('custom-webview-frame');
+            const title = document.getElementById('custom-webview-title');
+            if (iframe) iframe.src = link.url;
+            if (title) title.textContent = link.name;
+        }
+    }
+    updateTerminalVisibility();
+}
 
 // サポートされている実行言語リスト (main.jsと同期)
 const SUPPORTED_RUN_LANGUAGES = new Set([

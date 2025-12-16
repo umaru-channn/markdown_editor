@@ -1081,13 +1081,28 @@ function createWindow() {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; img-src 'self' https: data: file: blob:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https://calendar.google.com/ https://www.google.com/;"
+            // frame-src に https: を追加して、任意のHTTPSサイトを表示可能にします
+            "default-src 'self'; img-src 'self' https: data: file: blob:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https:;"
           ]
         }
       })
     } else {
-      // Googleカレンダーなどの外部URLには、アプリ側のCSPを強制しない（元のヘッダーをそのまま返す）
-      callback({ responseHeaders: details.responseHeaders })
+      // 外部URLの場合、X-Frame-OptionsやCSPによる埋め込み制限を解除する
+      const headers = { ...details.responseHeaders };
+
+      Object.keys(headers).forEach(key => {
+        const lowerKey = key.toLowerCase();
+        // X-Frame-Options ヘッダーを削除 (DENY / SAMEORIGIN を無効化)
+        if (lowerKey === 'x-frame-options') {
+          delete headers[key];
+        }
+        // Content-Security-Policy ヘッダーを削除 (frame-ancestors 制限などを無効化)
+        if (lowerKey === 'content-security-policy') {
+          delete headers[key];
+        }
+      });
+
+      callback({ responseHeaders: headers });
     }
   })
 

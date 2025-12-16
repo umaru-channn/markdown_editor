@@ -5075,7 +5075,45 @@ body[data-theme="dark"] .cm-admonition-content-line:last-of-type {
 /* ツールバーが無効化（Markdown以外のファイル操作中）されたときのスタイル */
 .toolbar.disabled {
     opacity: 0.4;
-    pointer-events: none; /* クリック無効化 */
+    pointer-events: none;
+    /* クリック無効化 */
     filter: grayscale(100%);
     transition: opacity 0.2s;
+}
+
+/* Custom Links Settings */
+.settings-input {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid var(--sidebar-border);
+    border-radius: 3px;
+    background-color: var(--main-bg);
+    color: var(--text-color);
+}
+
+/* Custom Web View in Right Pane */
+.custom-webview-header {
+    padding: 0 10px;
+    background: #252526;
+    border-bottom: 1px solid #333;
+    height: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #ccc;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.custom-webview-content {
+    flex: 1;
+    overflow: hidden;
+    background-color: #fff;
+    display: flex;
+    flex-direction: column;
+}
+
+body[data-theme="dark"] .custom-webview-content {
+    background-color: #1e1e1e;
 }
