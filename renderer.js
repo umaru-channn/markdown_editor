@@ -235,15 +235,6 @@ let appSettings = {
     }
 };
 
-// 分割読み込みの状態管理
-let currentFileLoadState = {
-    path: null,
-    offset: 0,
-    totalSize: 0,
-    isLoading: false,
-    isComplete: false
-};
-
 // スニペットの動的置換処理
 function getDynamicReplacement(text) {
     const now = new Date();
@@ -2392,15 +2383,7 @@ let searchState = {
 
 let searchWidgetControl = null;
 
-// ストリーミング検索結果の管理用
-let streamSearchResults = {
-    active: false,
-    matches: [],     // 行番号の配列 [5, 12, 100, ...]
-    currentIndex: -1,
-    query: ""
-};
-
-// 検索ウィジェットのセットアップ関数（全文）
+// 検索ウィジェットのセットアップ関数 (修正版: 通常検索のみ)
 function setupSearchWidget(view) {
     const widget = document.getElementById('custom-search-widget');
     const searchInput = document.getElementById('search-input');
@@ -2423,61 +2406,18 @@ function setupSearchWidget(view) {
 
     if (!widget) return;
 
-    // デバウンス用のタイマー
     let debounceTimer = null;
-    let lastQueryString = ""; // 最後に実行したクエリを保存
 
-    // ★変更: 非同期関数(async)に変更し、ストリーミング検索の分岐を追加
-    const performSearch = async () => {
+    const performSearch = () => {
         const queryStr = searchInput.value;
 
-        // 空クエリの場合は検索状態をクリアして終了
         if (!queryStr) {
             view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "", replace: "" })) });
             searchCount.textContent = "No results";
-            lastQueryString = "";
-            streamSearchResults.active = false;
             return;
         }
 
         try {
-            // 現在の入力値を保存
-            lastQueryString = queryStr;
-
-            // ★分岐: ファイルが現在開いているもので、かつ完全に読み込まれていない場合は「ストリーミング検索」を使用
-            if (currentFileLoadState.path === currentFilePath && !currentFileLoadState.isComplete) {
-
-                searchCount.textContent = "Searching...";
-                streamSearchResults.active = true;
-                streamSearchResults.query = queryStr;
-
-                // メインプロセスでファイル全体をストリーム検索
-                const result = await window.electronAPI.searchFileStream(currentFilePath, queryStr);
-
-                if (result.success) {
-                    streamSearchResults.matches = result.matches;
-                    streamSearchResults.currentIndex = -1;
-
-                    const count = result.matches.length;
-                    searchCount.textContent = count >= 10000 ? "10000+ results" : `${count} results`;
-
-                    // CodeMirror側にもハイライト用としてクエリだけは渡しておく
-                    // (現在読み込まれている範囲だけでもハイライトさせるため)
-                    const cmQuery = new SearchQuery({
-                        search: queryStr,
-                        caseSensitive: searchState.caseSensitive
-                    });
-                    view.dispatch({ effects: setSearchQuery.of(cmQuery) });
-
-                } else {
-                    searchCount.textContent = "Error";
-                }
-                return; // CodeMirror標準のカウント処理はスキップして終了
-            }
-
-            // --- 以下、通常ファイル（全読み込み済み）の場合のロジック ---
-            streamSearchResults.active = false;
-
             const query = new SearchQuery({
                 search: queryStr,
                 caseSensitive: searchState.caseSensitive,
@@ -2486,10 +2426,10 @@ function setupSearchWidget(view) {
                 replace: replaceInput.value
             });
 
-            // CodeMirrorに検索クエリをセット（ハイライト更新）
+            // CodeMirrorに検索クエリをセット
             view.dispatch({ effects: setSearchQuery.of(query) });
 
-            // 件数カウント (負荷対策: 上限1000件で打ち切り)
+            // 件数カウント (負荷対策: 上限1000件)
             let count = 0;
             const cursor = query.getCursor(view.state);
             const MAX_SEARCH_COUNT = 1000;
@@ -2513,84 +2453,37 @@ function setupSearchWidget(view) {
     };
 
     const updateSearch = () => {
-        // 入力ごとの即時実行を防ぐ（デバウンス）
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(performSearch, 300); // 300ms待機
+        debounceTimer = setTimeout(performSearch, 300);
     };
 
     // Event Listeners
     searchInput.addEventListener('input', updateSearch);
     replaceInput.addEventListener('input', updateSearch);
 
-    // Options
     const toggleOption = (btn, key) => {
         searchState[key] = !searchState[key];
         btn.classList.toggle('active', searchState[key]);
-        performSearch(); // オプション変更は即時実行
+        performSearch();
     };
 
     btnCase.addEventListener('click', () => toggleOption(btnCase, 'caseSensitive'));
     btnWord.addEventListener('click', () => toggleOption(btnWord, 'wholeWord'));
     btnRegex.addEventListener('click', () => toggleOption(btnRegex, 'regexp'));
 
-    // ★変更: Navigation (Next)
+    // Navigation
     btnNext.addEventListener('click', () => {
-        // 現在のクエリが古い場合のみ実行
-        if (searchInput.value !== lastQueryString) {
-            performSearch();
-        }
-
-        if (streamSearchResults.active) {
-            // ストリーミングモード
-            if (streamSearchResults.matches.length === 0) return;
-
-            // インデックスを進める
-            streamSearchResults.currentIndex++;
-            if (streamSearchResults.currentIndex >= streamSearchResults.matches.length) {
-                streamSearchResults.currentIndex = 0; // ループ
-            }
-
-            const targetLine = streamSearchResults.matches[streamSearchResults.currentIndex];
-            // 指定行まで読み込んでジャンプする関数（後述）を呼び出し
-            jumpToLineWithAutoLoad(view, targetLine);
-
-            searchCount.textContent = `${streamSearchResults.currentIndex + 1}/${streamSearchResults.matches.length}`;
-        } else {
-            // 通常モード
-            findNext(view);
-            view.focus();
-        }
+        findNext(view);
+        view.focus();
     });
 
-    // ★変更: Navigation (Prev)
     btnPrev.addEventListener('click', () => {
-        if (searchInput.value !== lastQueryString) {
-            performSearch();
-        }
-
-        if (streamSearchResults.active) {
-            // ストリーミングモード
-            if (streamSearchResults.matches.length === 0) return;
-
-            streamSearchResults.currentIndex--;
-            if (streamSearchResults.currentIndex < 0) {
-                streamSearchResults.currentIndex = streamSearchResults.matches.length - 1;
-            }
-
-            const targetLine = streamSearchResults.matches[streamSearchResults.currentIndex];
-            jumpToLineWithAutoLoad(view, targetLine);
-
-            searchCount.textContent = `${streamSearchResults.currentIndex + 1}/${streamSearchResults.matches.length}`;
-        } else {
-            // 通常モード
-            findPrevious(view);
-            view.focus();
-        }
+        findPrevious(view);
+        view.focus();
     });
 
-    // Replace functions
     const executeReplace = (all = false) => {
-        performSearch(); // 置換前に最新のクエリ状態を保証
+        performSearch();
         if (all) replaceAll(view);
         else replaceNext(view);
     };
@@ -2615,31 +2508,12 @@ function setupSearchWidget(view) {
     };
     btnCloseSearch.addEventListener('click', closeWidget);
 
-    // キーボード操作
     const handleKeydown = (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-
-            // Enterキーが押された際、検索クエリが未反映なら実行する
-            if (searchInput.value !== lastQueryString) {
-                performSearch();
-            }
-
-            // 移動処理の分岐
-            if (streamSearchResults.active) {
-                // ストリーミングモードの移動
-                if (e.shiftKey) {
-                    btnPrev.click();
-                } else {
-                    btnNext.click();
-                }
-            } else {
-                // 通常モードの移動
-                if (e.shiftKey) findPrevious(view);
-                else if (e.ctrlKey && e.altKey) replaceAll(view);
-                else findNext(view);
-            }
-
+            if (e.shiftKey) findPrevious(view);
+            else if (e.ctrlKey && e.altKey) replaceAll(view);
+            else findNext(view);
         } else if (e.key === 'Escape') {
             e.preventDefault();
             closeWidget();
@@ -2649,10 +2523,6 @@ function setupSearchWidget(view) {
     replaceInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
             e.preventDefault();
-            if (searchInput.value !== lastQueryString) {
-                performSearch();
-            }
-            // 置換は通常モードのみのサポートとする（ストリーミング中の置換は複雑なため）
             replaceNext(view);
         } else {
             handleKeydown(e);
@@ -2663,8 +2533,6 @@ function setupSearchWidget(view) {
         open: () => {
             widget.classList.remove('hidden');
             searchInput.select();
-
-            // 選択テキストがあれば検索ワードにセット
             const { from, to } = view.state.selection.main;
             if (from !== to) {
                 const text = view.state.sliceDoc(from, to);
@@ -2676,7 +2544,6 @@ function setupSearchWidget(view) {
             widget.classList.remove('hidden');
             replaceRow.classList.remove('hidden');
             btnToggleReplace.classList.add('expanded');
-
             const { from, to } = view.state.selection.main;
             if (from !== to) {
                 const text = view.state.sliceDoc(from, to);
@@ -2686,80 +2553,6 @@ function setupSearchWidget(view) {
             replaceInput.focus();
         }
     };
-}
-
-// 指定行までデータを読み込んでジャンプする関数
-async function jumpToLineWithAutoLoad(view, targetLineNumber) {
-    if (!view) return;
-
-    // 1. 現在の読み込み済み行数をチェック
-    let currentLines = view.state.doc.lines;
-
-    // 2. ターゲット行がまだ読み込まれていない場合
-    if (targetLineNumber > currentLines) {
-        // 読み込み中の表示などを出すと親切（今回はコンソールログのみ）
-        console.log(`Target line ${targetLineNumber} is not loaded (Current: ${currentLines}). Loading...`);
-
-        // ターゲット行に到達するか、ファイル末尾になるまで読み込み続ける
-        while (currentLines < targetLineNumber && !currentFileLoadState.isComplete) {
-            try {
-                // チャンク読み込み (同期的に待つ)
-                const result = await window.electronAPI.readFileChunk(
-                    currentFileLoadState.path,
-                    currentFileLoadState.offset
-                );
-
-                if (result.success && result.bytesRead > 0) {
-                    // エディタに追記
-                    const currentDocLen = view.state.doc.length;
-                    view.dispatch({
-                        changes: { from: currentDocLen, insert: result.content },
-                        annotations: ExternalChange.of(true)
-                    });
-
-                    // 状態更新
-                    currentFileLoadState.offset += result.bytesRead;
-                    currentFileLoadState.isComplete = result.eof;
-
-                    // 行数を更新して再チェック
-                    currentLines = view.state.doc.lines;
-                } else {
-                    break; // 読み込めなくなったら中断
-                }
-            } catch (e) {
-                console.error("Auto-load error:", e);
-                break;
-            }
-        }
-    }
-
-    // 3. ジャンプ処理 (ターゲット行へスクロール)
-    // 読み込み後、行が存在すればジャンプ
-    if (targetLineNumber <= view.state.doc.lines) {
-        const line = view.state.doc.line(targetLineNumber);
-
-        // 検索ワードを選択状態にして強調
-        const query = streamSearchResults.query;
-        let selectionFrom = line.from;
-        let selectionTo = line.from;
-
-        if (query) {
-            const lineText = line.text.toLowerCase();
-            const qLower = query.toLowerCase();
-            const idx = lineText.indexOf(qLower);
-            if (idx !== -1) {
-                selectionFrom = line.from + idx;
-                selectionTo = selectionFrom + query.length;
-            }
-        }
-
-        view.dispatch({
-            selection: { anchor: selectionFrom, head: selectionTo },
-            scrollIntoView: true,
-            effects: EditorView.scrollIntoView(selectionFrom, { y: "center" }) // 中央に表示
-        });
-        view.focus();
-    }
 }
 
 // Wikiリンクのオートコンプリート機能
@@ -2918,31 +2711,36 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
                 return builder.finish();
             }
 
-            const text = doc.toString();
-            // 全体をトークン化
-            const tokens = Prism.tokenize(text, grammar);
+            // ファイル全体ではなく、可視範囲(visibleRanges)のみをハイライト処理する
+            // これにより、ファイルサイズが大きくても入力時のパフォーマンスが低下しない
+            for (const { from, to } of view.visibleRanges) {
+                // 範囲内のテキストのみ取得
+                const text = doc.sliceString(from, to);
+                const tokens = Prism.tokenize(text, grammar);
 
-            let pos = 0;
-            const processToken = (token) => {
-                if (typeof token === "string") {
-                    pos += token.length;
-                } else {
-                    const content = token.content;
-                    if (Array.isArray(content)) {
-                        content.forEach(processToken);
+                let pos = from; // トークンの位置を可視範囲の開始位置でオフセット
+
+                const processToken = (token) => {
+                    if (typeof token === "string") {
+                        pos += token.length;
                     } else {
-                        const type = token.type;
-                        const alias = token.alias || "";
-                        const className = `token ${type} ${alias}`;
-                        const len = token.length;
-                        builder.add(pos, pos + len, Decoration.mark({ class: className }));
-                        pos += len;
+                        const content = token.content;
+                        if (Array.isArray(content)) {
+                            content.forEach(processToken);
+                        } else {
+                            const type = token.type;
+                            const alias = token.alias || "";
+                            const className = `token ${type} ${alias}`;
+                            const len = token.length;
+                            builder.add(pos, pos + len, Decoration.mark({ class: className }));
+                            pos += len;
+                        }
                     }
-                }
-            };
+                };
 
-            if (Array.isArray(tokens)) {
-                tokens.forEach(processToken);
+                if (Array.isArray(tokens)) {
+                    tokens.forEach(processToken);
+                }
             }
 
             return builder.finish();
@@ -2997,6 +2795,15 @@ const prismHighlightPlugin = ViewPlugin.fromClass(class {
 
                         const bodyStart = doc.line(startLine + 1).from;
                         const bodyEnd = doc.line(endLine - 1).to;
+
+                        // ここが修正ポイント:
+                        // ブロック全体ではなく、「現在見えている範囲(from, to) と ブロック(bodyStart, bodyEnd) の交差部分」だけを取得する
+                        const clipStart = Math.max(bodyStart, from);
+                        const clipEnd = Math.min(bodyEnd, to);
+
+                        // 交差部分がなければ（＝画面外なら）処理しない
+                        if (clipStart >= clipEnd) return;
+
                         const code = doc.sliceString(bodyStart, bodyEnd);
                         const tokens = Prism.tokenize(code, grammar);
 
@@ -8290,13 +8097,10 @@ async function openDiffView(filePath) {
  * 'external' タイプの場合は外部アプリで起動する処理を追加
  */
 async function openFile(filePath, fileName) {
-    // パスを正規化して統一
     const normalizedPath = path.resolve(filePath);
-
-    // ファイルタイプ判定
     const fileType = getFileType(normalizedPath);
 
-    // ★追加: 対応していない形式は外部アプリで開く
+    // 外部アプリで開くファイルの場合
     if (fileType === 'external') {
         try {
             await window.electronAPI.openPath(normalizedPath);
@@ -8305,10 +8109,9 @@ async function openFile(filePath, fileName) {
             console.error(e);
             showNotification(`外部アプリでのオープンに失敗: ${e.message}`, 'error');
         }
-        return; // エディタでは開かない
+        return;
     }
 
-    // 履歴に追加 (外部ファイルの場合は履歴に残すかどうかは好みですが、ここではエディタで開いたもののみ残します)
     addToRecentFiles(normalizedPath);
 
     try {
@@ -8316,8 +8119,7 @@ async function openFile(filePath, fileName) {
             closeWelcomeReadme();
         }
 
-        // --- 重複オープン防止チェック (ファイルが既に開かれている場合) ---
-
+        // 既に開いている場合のチェック
         const isLeftFile = globalEditorView && globalEditorView.filePath === normalizedPath;
         const isRightFile = isSplitView && splitEditorView && splitEditorView.filePath === normalizedPath;
 
@@ -8326,54 +8128,24 @@ async function openFile(filePath, fileName) {
             activePane = 'left';
             return;
         }
-
         if (isRightFile) {
             setActiveEditor(splitEditorView);
             activePane = 'right';
             return;
         }
 
-        // --- 以降は新規オープン処理 (分割されていない場合のみ) ---
-
-        // 既存のタブが存在するかチェック（非アクティブなタブの場合）
         let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
-
         let fileContent = '';
 
-        // テキストファイルの場合のみ内容を読み込む
+        // ★修正点: テキストファイルなら一括で読み込む
         if (fileType === 'text') {
             try {
-                // 状態のリセット
-                currentFileLoadState = {
-                    path: normalizedPath,
-                    offset: 0,
-                    totalSize: 0,
-                    isLoading: true,
-                    isComplete: false
-                };
-
-                // 初回読み込み (64KB)
-                const result = await window.electronAPI.readFileChunk(normalizedPath, 0);
-
-                if (result.success) {
-                    fileContent = result.content;
-
-                    // 状態更新
-                    currentFileLoadState.offset = result.bytesRead;
-                    currentFileLoadState.totalSize = result.total;
-                    currentFileLoadState.isComplete = result.eof;
-                    currentFileLoadState.isLoading = false;
-
-                    console.log(`Initial load: ${result.bytesRead} / ${result.total} bytes`);
-                } else {
-                    fileContent = `読み込みエラー: ${result.error}`;
-                }
+                fileContent = await window.electronAPI.loadFile(normalizedPath);
             } catch (error) {
-                console.error('Failed to load file chunk:', error);
+                console.error('Failed to load file:', error);
                 fileContent = `エラー: ${error.message}`;
             }
         } else {
-            // 画像やPDFの場合はコンテンツ読み込み不要
             fileContent = null;
         }
 
@@ -8382,13 +8154,9 @@ async function openFile(filePath, fileName) {
             tab.className = 'tab';
             tab.dataset.filepath = normalizedPath;
             tab.innerHTML = `<span class="tab-filename">${fileName}</span> <span class="close-tab" data-filepath="${normalizedPath}">×</span>`;
-
             enableTabDragging(tab);
-
-            // 現在はタブバーが1つなのでそこに追加
             editorTabsContainer.appendChild(tab);
 
-            // type情報を保存
             openedFiles.set(normalizedPath, {
                 content: fileContent,
                 fileName: fileName,
@@ -8396,16 +8164,9 @@ async function openFile(filePath, fileName) {
             });
         }
 
-        // 新しいファイルは常にメインペインで開く (activePane は現在 left に戻っているはず)
+        // 新しいファイルは常にメインペイン(左)で開く
         const targetPane = 'left';
-
-        // 指定されたペイン（左または右）でファイルを開く
         switchToFile(normalizedPath, targetPane);
-
-        // スクロール監視のセットアップ (エディタ作成後に実行)
-        if (fileType === 'text' && !currentFileLoadState.isComplete) {
-            setupInfiniteScroll();
-        }
 
     } catch (error) {
         console.error('Failed to open file:', error);
@@ -11336,61 +11097,6 @@ function setupSettingsActivationHandler() {
             if (globalEditorView) setActiveEditor(globalEditorView);
         }
     });
-}
-
-function setupInfiniteScroll() {
-    if (!globalEditorView) return;
-
-    // 既存のリスナーがあれば重複しないように注意（今回はDOM要素自体が再生成される前提ならOK）
-    const scrollDOM = globalEditorView.scrollDOM;
-
-    const handleScroll = async () => {
-        // まだ読み込むべきデータがあり、かつロード中でない場合
-        if (!currentFileLoadState.isComplete && !currentFileLoadState.isLoading && currentFileLoadState.path === currentFilePath) {
-
-            // 下端までの距離
-            const scrollBottom = scrollDOM.scrollHeight - scrollDOM.scrollTop - scrollDOM.clientHeight;
-
-            // 下端から 500px 以内に近づいたら次を読み込む
-            if (scrollBottom < 500) {
-                currentFileLoadState.isLoading = true;
-                console.log('Loading more content...');
-
-                try {
-                    const result = await window.electronAPI.readFileChunk(
-                        currentFileLoadState.path,
-                        currentFileLoadState.offset
-                    );
-
-                    if (result.success && result.bytesRead > 0) {
-                        // エディタの末尾に追記
-                        const currentDocLen = globalEditorView.state.doc.length;
-
-                        globalEditorView.dispatch({
-                            changes: { from: currentDocLen, insert: result.content },
-                            annotations: ExternalChange.of(true) // 履歴(Undo)に残さない、または外部変更扱いにする
-                        });
-
-                        // 状態更新
-                        currentFileLoadState.offset += result.bytesRead;
-                        currentFileLoadState.isComplete = result.eof;
-
-                        console.log(`Loaded: ${currentFileLoadState.offset} / ${currentFileLoadState.totalSize}`);
-                    } else {
-                        // 読み込めなかった場合は完了扱いにする（無限ループ防止）
-                        currentFileLoadState.isComplete = true;
-                    }
-                } catch (e) {
-                    console.error('Infinite scroll error:', e);
-                } finally {
-                    currentFileLoadState.isLoading = false;
-                }
-            }
-        }
-    };
-
-    // イベント登録
-    scrollDOM.addEventListener('scroll', handleScroll);
 }
 
 // インスタンス作成
