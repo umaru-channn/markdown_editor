@@ -4025,10 +4025,16 @@ body[data-theme="dark"] .snippet-slider {
 }
 
 .cm-content .cm-highlightSpace {
-    background-image: radial-gradient(circle at 50% 55%, #aaa 15%, transparent 5%);
-    background-size: 100% 100%;
-    background-position: center;
-    background-repeat: no-repeat;
+    /* 修正: ドットのサイズを固定値(1.5px)にし、要素の幅で引き伸ばされないように変更 */
+    background-image: radial-gradient(circle at 50% 55%, #aaa 1.5px, transparent 2px);
+
+    /* 修正: スペース1文字分(1ch)の幅を設定し、横方向に繰り返す */
+    background-size: 1ch 100%;
+    background-position: left center;
+    /* 左詰めで配置 */
+    background-repeat: repeat-x;
+    /* 横に繰り返す */
+
     /* 必要に応じて透明度などを調整 */
     opacity: 0.5;
 }
@@ -5144,4 +5150,19 @@ body[data-theme="dark"] .custom-webview-content {
     pointer-events: none;
     /* クリック無効 */
     cursor: default;
+}
+
+/* --- タブの可視化スタイル（一直線） --- */
+.cm-content .cm-highlightTab {
+    /* ドットではなく、中央に一本の横線を表示 */
+    /* transparent(透明) -> 線色(#999) -> transparent(透明) で線を表現 */
+    background-image: linear-gradient(to bottom, transparent 48%, #999 48%, #999 52%, transparent 52%);
+    
+    /* 修正: "1ch"単位ではなく、タブ文字全体の幅(100%)に合わせて背景を表示 */
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+    
+    /* 線の濃さを調整 */
+    opacity: 0.4;
 }

@@ -46,12 +46,32 @@ const spaceMatcher = new MatchDecorator({
     })
 });
 
+// --- タブ可視化用のカスタムプラグイン ---
+const tabMatcher = new MatchDecorator({
+    regexp: /\t/g, // タブ文字にマッチ
+    decoration: (match) => Decoration.mark({
+        class: "cm-highlightTab"
+    })
+});
+
 const customHighlightWhitespace = ViewPlugin.fromClass(class {
     constructor(view) {
         this.decorations = spaceMatcher.createDeco(view);
     }
     update(update) {
         this.decorations = spaceMatcher.updateDeco(update, this.decorations);
+    }
+}, {
+    decorations: v => v.decorations
+});
+
+// --- タブ可視化用のViewPlugin ---
+const customHighlightTab = ViewPlugin.fromClass(class {
+    constructor(view) {
+        this.decorations = tabMatcher.createDeco(view);
+    }
+    update(update) {
+        this.decorations = tabMatcher.updateDeco(update, this.decorations);
     }
 }, {
     decorations: v => v.decorations
@@ -474,22 +494,34 @@ async function renderAllPdfPages(pdf, container, filePath) {
     pageInfo.style.fontSize = '13px';
     controlsContainer.appendChild(pageInfo);
 
-    // 3. ズームイン/アウトボタン
-    const createZoomBtn = (text, onClick) => {
+    // 3. ズームイン/アウトボタン (SVGアイコン化)
+    const createZoomBtn = (iconSvg, title, onClick) => {
         const btn = document.createElement('button');
-        btn.textContent = text;
+        btn.innerHTML = iconSvg; // SVGを挿入
+        btn.title = title;
         btn.onclick = onClick;
-        btn.style.cssText = 'background:transparent; border:1px solid var(--sidebar-border); color:var(--text-color); border-radius:3px; padding:2px 8px; cursor:pointer; margin:0 2px;';
+        // スタイル調整: flexで中央揃え、padding調整
+        btn.style.cssText = 'background:transparent; border:1px solid var(--sidebar-border); color:var(--text-color); border-radius:3px; padding:4px; cursor:pointer; margin:0 2px; display:flex; align-items:center; justify-content:center; width: 28px; height: 28px;';
+
+        // ホバー効果（任意）
+        btn.onmouseover = () => btn.style.backgroundColor = 'rgba(0,0,0,0.1)';
+        btn.onmouseout = () => btn.style.backgroundColor = 'transparent';
+
         return btn;
     };
 
-    const zoomOutBtn = createZoomBtn('🔍 -', () => {
+    // 虫眼鏡(-) アイコン
+    const iconZoomOut = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
+    // 虫眼鏡(+) アイコン
+    const iconZoomIn = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
+
+    const zoomOutBtn = createZoomBtn(iconZoomOut, '縮小', () => {
         pdfCurrentScale = Math.max(0.5, pdfCurrentScale - 0.25);
         renderAllPdfPages(pdf, container, filePath);
     });
     controlsContainer.appendChild(zoomOutBtn);
 
-    const zoomInBtn = createZoomBtn('🔍 +', () => {
+    const zoomInBtn = createZoomBtn(iconZoomIn, '拡大', () => {
         pdfCurrentScale = Math.min(3.0, pdfCurrentScale + 0.25);
         renderAllPdfPages(pdf, container, filePath);
     });
@@ -941,7 +973,7 @@ function setupSettingsListeners() {
         if (globalEditorView) {
             globalEditorView.dispatch({
                 effects: whitespaceCompartment.reconfigure(
-                    appSettings.showWhitespace ? customHighlightWhitespace : []
+                    appSettings.showWhitespace ? [customHighlightWhitespace, customHighlightTab] : []
                 )
             });
         }
@@ -2654,6 +2686,38 @@ function getCombinedKeymap(filePath = null) {
         }
     });
 
+    // --- Backspaceでインデントを一括削除せず、スペース1個分ずつ削除する設定 ---
+    dynamicKeymap.push({
+        key: "Backspace",
+        run: (view) => {
+            const { state, dispatch } = view;
+            const selection = state.selection.main;
+
+            // 範囲選択されている場合はデフォルトの挙動（選択範囲削除）に任せる
+            if (!selection.empty) return false;
+
+            const pos = selection.head;
+            // 文頭なら何もしない（デフォルト動作で行結合などさせる）
+            if (pos === 0) return false;
+
+            // 直前の文字を確認
+            const prevChar = state.doc.sliceString(pos - 1, pos);
+
+            // スペースの場合、強制的に1文字削除を行う
+            if (prevChar === " ") {
+                dispatch({
+                    changes: { from: pos - 1, to: pos, insert: "" },
+                    scrollIntoView: true,
+                    userEvent: "delete.backward"
+                });
+                return true; // デフォルトの動作（Hungry Backspace）をキャンセル
+            }
+
+            // スペース以外ならデフォルト動作
+            return false;
+        }
+    });
+
     // Markdownの場合のみ、リスト操作(Enter/Tab等)のキーマップを結合
     if (isMarkdown) {
         return [
@@ -2958,7 +3022,7 @@ function createEditorState(content, filePath) {
             activeLineCompartment.of(appSettings.highlightActiveLine ? highlightActiveLine() : []),
             autoCloseBracketsCompartment.of(appSettings.autoCloseBrackets ? closeBrackets() : []),
             lineNumbersCompartment.of(appSettings.showLineNumbers ? lineNumbers() : []),
-            whitespaceCompartment.of(appSettings.showWhitespace ? customHighlightWhitespace : []),
+            whitespaceCompartment.of(appSettings.showWhitespace ? [customHighlightWhitespace, customHighlightTab] : []),
 
             conflictField,
             wikiLinkPlugin,
@@ -5525,146 +5589,191 @@ function renderGitInitUI(container) {
 }
 
 /**
- * Gitファイルリストを描画するヘルパー関数
+ * Gitファイルリストを描画するヘルパー関数（ちらつき防止・Diff更新版）
+ * 修正: 初期化ボタンなどが残らないようにクリーンアップ処理を追加
  */
 function renderGitList(container, files, type) {
-    container.innerHTML = '';
-    if (!files || files.length === 0) {
-        // container.innerHTML = '<div class="git-empty-msg">変更なし</div>';
-        return;
-    }
+    if (!files) files = [];
+
+    // 0. 【修正点】ファイルリスト以外の要素（初期化ボタンやエラーメッセージ等）があれば削除
+    // これを行わないと、Git管理下になってもInitボタンが残り続けます
+    Array.from(container.children).forEach(child => {
+        // git-file-itemクラスを持たない、またはpathデータがない要素は削除
+        if (!child.classList.contains('git-file-item') || !child.dataset.path) {
+            child.remove();
+        }
+    });
+
+    // 1. 現在表示されている要素をマップ化（再利用のため）
+    const existingItems = new Map();
+    Array.from(container.children).forEach(child => {
+        if (child.dataset.path) {
+            existingItems.set(child.dataset.path, child);
+        }
+    });
+
+    // 今回の更新で処理したパスを記録するセット
+    const processedPaths = new Set();
 
     files.forEach(file => {
-        const item = document.createElement('div');
-        item.className = 'git-file-item';
-        item.dataset.path = file.filepath;
+        processedPaths.add(file.filepath);
 
-        // ステータスアイコンの決定
-        let statusChar = 'M';
-        let statusClass = 'modified';
-        if (file.status === 'new' || file.status === 'added') {
-            statusChar = 'A';
-            statusClass = 'added';
-        } else if (file.status === 'deleted') {
-            statusChar = 'D';
-            statusClass = 'deleted';
-        } else if (file.status === 'modified') {
-            statusChar = 'M';
-            statusClass = 'modified';
-        }
+        let item = existingItems.get(file.filepath);
+        let needsRender = false;
 
-        // パス操作 (簡易版)
-        const fileName = file.filepath.split(/[/\\]/).pop();
-        const dirName = file.filepath.substring(0, file.filepath.length - fileName.length);
-        const displayPath = dirName === '' ? '' : dirName;
-
-        // ボタンのHTML生成
-        let actionButtonsHtml = '';
-        if (type === 'unstaged') {
-            // 変更の破棄ボタン (左側)
-            actionButtonsHtml += `<button class="git-action-btn-small btn-discard" title="変更を破棄" style="margin-right: 2px;">↺</button>`;
-            // ステージングボタン
-            actionButtonsHtml += `<button class="git-action-btn-small btn-stage" title="ステージする">+</button>`;
+        // 新規作成か、既存の再利用か判定
+        if (!item) {
+            item = document.createElement('div');
+            item.className = 'git-file-item';
+            item.dataset.path = file.filepath;
+            needsRender = true; // 新規なので中身の描画が必要
         } else {
-            // アンステージングボタン
-            actionButtonsHtml += `<button class="git-action-btn-small btn-unstage" title="ステージを取り消す">−</button>`;
-        }
-
-        item.innerHTML = `
-            <div class="git-file-left">
-                <span class="git-file-name">${fileName} <span class="git-file-dir">${displayPath}</span></span>
-            </div>
-            <div class="git-file-right">
-                <span class="git-status-badge ${statusClass}">${statusChar}</span>
-                <div class="git-actions">
-                    ${actionButtonsHtml}
-                </div>
-            </div>
-        `;
-
-        // ファイルクリックで開く
-        item.addEventListener('click', (e) => {
-            if (e.target.closest('.git-action-btn-small')) return;
-
-            // Unstaged（変更）の場合はDiffビューを開く
-            if (type === 'unstaged' && file.status === 'modified') {
-                openDiffView(file.filepath);
-            } else {
-                const separator = currentDirectoryPath.includes('\\') ? '\\' : '/';
-                const fullPath = currentDirectoryPath + (currentDirectoryPath.endsWith(separator) ? '' : separator) + file.filepath;
-                if (file.status !== 'deleted') {
-                    openFile(fullPath, fileName);
-                }
+            // ステータスが変わった場合のみ再描画する
+            if (item.dataset.status !== file.status) {
+                needsRender = true;
             }
-        });
-
-        // --- ボタンイベントの設定 ---
-
-        // 1. 変更の破棄ボタン (Discard)
-        const btnDiscard = item.querySelector('.btn-discard');
-        if (btnDiscard) {
-            btnDiscard.addEventListener('click', async (e) => {
-                e.stopPropagation();
-
-                // カスタム確認ダイアログを表示
-                const doDiscard = await showConfirmDialog(`${fileName} の変更を破棄してもよろしいですか？\nこの操作は取り消せません。`);
-
-                if (!doDiscard) return;
-
-                try {
-                    const result = await window.electronAPI.gitDiscard(currentDirectoryPath, file.filepath, file.status);
-                    if (result.success) {
-                        showNotification('変更を破棄しました', 'success');
-                        refreshGitStatus();
-                        // 変更によりファイル内容が変わる可能性があるため、ツリーなどを更新
-                        if (typeof initializeFileTreeWithState === 'function') {
-                            initializeFileTreeWithState();
-                        }
-                    } else {
-                        showNotification(`破棄エラー: ${result.error}`, 'error');
-                    }
-                } catch (err) {
-                    console.error(err);
-                    showNotification(`エラー: ${err.message}`, 'error');
-                }
-            });
         }
 
-        // 2. ステージングボタン (Add)
-        const btnStage = item.querySelector('.btn-stage');
-        if (btnStage) {
-            btnStage.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                try {
-                    if (file.status === 'deleted') {
-                        await window.electronAPI.gitRemove(currentDirectoryPath, file.filepath);
-                    } else {
-                        await window.electronAPI.gitAdd(currentDirectoryPath, file.filepath);
-                    }
-                    refreshGitStatus();
-                } catch (err) {
-                    console.error(err);
-                    showNotification(`Git操作エラー: ${err.message}`, 'error');
-                }
-            });
-        }
-
-        // 3. アンステージングボタン (Reset)
-        const btnUnstage = item.querySelector('.btn-unstage');
-        if (btnUnstage) {
-            btnUnstage.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                try {
-                    await window.electronAPI.gitReset(currentDirectoryPath, file.filepath);
-                    refreshGitStatus();
-                } catch (err) {
-                    console.error(err);
-                    showNotification(`Git操作エラー: ${err.message}`, 'error');
-                }
-            });
-        }
-
+        // 要素をコンテナに追加（既存の場合は移動、新規の場合は追加）
         container.appendChild(item);
+
+        // 内容の更新が必要な場合のみ HTML を書き換える
+        if (needsRender) {
+            item.dataset.status = file.status;
+
+            // --- ステータス表示の決定 ---
+            let statusChar = 'M';
+            let statusClass = 'modified';
+            if (file.status === 'new' || file.status === 'added' || file.status === '??') {
+                statusChar = 'A';
+                statusClass = 'added';
+            } else if (file.status === 'deleted') {
+                statusChar = 'D';
+                statusClass = 'deleted';
+            } else if (file.status === 'modified') {
+                statusChar = 'M';
+                statusClass = 'modified';
+            } else if (file.status === 'renamed') {
+                statusChar = 'R';
+                statusClass = 'renamed';
+            }
+
+            // パス表示の整形
+            const fileName = file.filepath.split(/[/\\]/).pop();
+            const dirName = file.filepath.substring(0, file.filepath.length - fileName.length);
+            const displayPath = dirName === '' ? '' : dirName;
+
+            // --- ボタンのHTML生成 ---
+            let actionButtonsHtml = '';
+            if (type === 'unstaged') {
+                // 変更の破棄ボタン
+                actionButtonsHtml += `<button class="git-action-btn-small btn-discard" title="変更を破棄" style="margin-right: 4px; color: #d9534f;">↺</button>`;
+                // ステージングボタン
+                actionButtonsHtml += `<button class="git-action-btn-small btn-stage" title="ステージする">+</button>`;
+            } else {
+                // アンステージングボタン
+                actionButtonsHtml += `<button class="git-action-btn-small btn-unstage" title="ステージを取り消す">−</button>`;
+            }
+
+            item.innerHTML = `
+                <div class="git-file-left">
+                    <span class="git-file-name">${fileName} <span class="git-file-dir">${displayPath}</span></span>
+                </div>
+                <div class="git-file-right">
+                    <span class="git-status-badge ${statusClass}">${statusChar}</span>
+                    <div class="git-actions">
+                        ${actionButtonsHtml}
+                    </div>
+                </div>
+            `;
+
+            // --- イベントハンドラの設定 ---
+
+            // アイテムクリック
+            item.onclick = (e) => {
+                if (e.target.closest('.git-action-btn-small')) return;
+
+                if (type === 'unstaged' && file.status !== 'deleted') {
+                    openDiffView(file.filepath);
+                } else {
+                    if (file.status !== 'deleted') {
+                        openFile(path.join(currentDirectoryPath, file.filepath), fileName);
+                    }
+                }
+            };
+
+            // 1. 変更の破棄ボタン
+            const btnDiscard = item.querySelector('.btn-discard');
+            if (btnDiscard) {
+                btnDiscard.onclick = async (e) => {
+                    e.stopPropagation();
+                    // showConfirmDialogが存在するか確認して使い分ける
+                    const message = `${fileName} の変更を破棄してもよろしいですか？\nこの操作は取り消せません。`;
+                    const doDiscard = (typeof showConfirmDialog === 'function')
+                        ? await showConfirmDialog(message)
+                        : confirm(message);
+
+                    if (!doDiscard) return;
+
+                    try {
+                        const result = await window.electronAPI.gitDiscard(currentDirectoryPath, file.filepath, file.status);
+                        if (result.success) {
+                            showNotification('変更を破棄しました', 'success');
+                            refreshGitStatus();
+                            initializeFileTreeWithState();
+                            // エディタが開いていればリロード
+                            if (currentFilePath && !openedFiles.get(currentFilePath)?.isVirtual) {
+                                reloadFileFromDisk(currentFilePath);
+                            }
+                        } else {
+                            showNotification(`破棄エラー: ${result.error}`, 'error');
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        showNotification(`エラー: ${err.message}`, 'error');
+                    }
+                };
+            }
+
+            // 2. ステージングボタン
+            const btnStage = item.querySelector('.btn-stage');
+            if (btnStage) {
+                btnStage.onclick = async (e) => {
+                    e.stopPropagation();
+                    try {
+                        if (file.status === 'deleted') {
+                            await window.electronAPI.gitRemove(currentDirectoryPath, file.filepath);
+                        } else {
+                            await window.electronAPI.gitAdd(currentDirectoryPath, file.filepath);
+                        }
+                        refreshGitStatus();
+                    } catch (err) {
+                        showNotification(`エラー: ${err.message}`, 'error');
+                    }
+                };
+            }
+
+            // 3. アンステージングボタン
+            const btnUnstage = item.querySelector('.btn-unstage');
+            if (btnUnstage) {
+                btnUnstage.onclick = async (e) => {
+                    e.stopPropagation();
+                    try {
+                        await window.electronAPI.gitReset(currentDirectoryPath, file.filepath);
+                        refreshGitStatus();
+                    } catch (err) {
+                        showNotification(`エラー: ${err.message}`, 'error');
+                    }
+                };
+            }
+        }
+    });
+
+    // 4. 今回のリストに含まれなくなった古いファイル要素を削除
+    existingItems.forEach((node, path) => {
+        if (!processedPaths.has(path)) {
+            node.remove();
+        }
     });
 }
 
@@ -7988,38 +8097,82 @@ function getFileType(filePath) {
 
 /**
  * 画像やPDFを #media-view に描画する関数
+ * 修正: PDF表示時にコントロールバーを固定表示するため、Flexレイアウト(column)を適用
  */
 async function renderMediaContent(filePath, type) {
     const container = document.getElementById('media-view');
     if (!container) return;
+
+    // 既に同じファイルを表示している場合は再描画しない（タブ切り替え時のリロード防止）
+    if (container.dataset.currentFile === filePath && container.innerHTML.trim() !== '') {
+        container.classList.remove('hidden');
+
+        if (type === 'pdf') {
+            // PDFの場合はFlex-Columnで高さを確保し、スクロールは内部エリアで行うように設定
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+            container.style.height = '100%';
+            container.style.overflow = 'hidden';
+        } else {
+            // 画像の場合は中央揃え
+            container.style.display = 'flex';
+            container.style.flexDirection = 'row';
+            container.style.justifyContent = 'center';
+            container.style.alignItems = 'center';
+            container.style.height = '100%';
+            container.style.overflow = 'auto';
+        }
+        return;
+    }
+
+    container.dataset.currentFile = filePath;
+    container.classList.remove('hidden');
     container.innerHTML = '';
 
+    // パスを正規化して file:/// URLを生成
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const fileUrl = normalizedPath.startsWith('/') ? `file://${normalizedPath}` : `file:///${normalizedPath}`;
+
     if (type === 'image') {
+        // 画像表示の設定
+        container.style.display = 'flex';
+        container.style.flexDirection = 'row';
+        container.style.justifyContent = 'center';
+        container.style.alignItems = 'center';
+        container.style.height = '100%';
+        container.style.overflow = 'auto';
+
         const img = document.createElement('img');
-        // Windowsパスのバックスラッシュをスラッシュに置換して file:// プロトコルで使用
-        img.src = `file://${filePath.replace(/\\/g, '/')}`;
+        img.src = fileUrl;
         img.style.maxWidth = '100%';
+        img.style.maxHeight = '100%';
         img.style.boxShadow = '0 0 10px rgba(0,0,0,0.1)';
         container.appendChild(img);
+
     } else if (type === 'pdf') {
+        // PDF表示設定: 親コンテナをFlex-Columnにし、高さを100%に固定
+        // これにより renderAllPdfPages で設定した flex:1 のスクロールエリアが正しく機能します
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.height = '100%';
+        container.style.overflow = 'hidden';
+
         const loading = document.createElement('div');
         loading.textContent = 'Loading PDF...';
         loading.style.color = '#888';
         loading.style.marginTop = '20px';
+        loading.style.textAlign = 'center';
         container.appendChild(loading);
 
         try {
-
-            const url = `file://${filePath.replace(/\\/g, '/')}`;
-            const loadingTask = pdfjsLib.getDocument(url);
+            const loadingTask = pdfjsLib.getDocument(fileUrl);
             const pdf = await loadingTask.promise;
 
-            // ロードが完了したら、ローディングメッセージを削除
+            // ロード完了
             container.removeChild(loading);
 
-            // 新しい描画関数を呼び出し、コントロールUIと全ページを描画
+            // 描画関数呼び出し
             await renderAllPdfPages(pdf, container, filePath);
-
         } catch (e) {
             loading.textContent = `Error loading PDF: ${e.message}`;
             console.error(e);
@@ -8934,6 +9087,12 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
     let content;
     const fileData = openedFiles.get(filePath);
 
+    // PDFや画像などのバイナリファイルは保存処理を行わない（破壊防止）
+    if (fileData && fileData.type && fileData.type !== 'text' && fileData.type !== 'diff' && fileData.type !== 'settings') {
+        console.log('バイナリファイルのため保存をスキップしました:', filePath);
+        return;
+    }
+
     // --- コンテンツ取得ロジックの修正 ---
 
     // Diffモードの場合
@@ -9488,7 +9647,6 @@ async function initializeFileTree() {
     try {
         if (typeof window.electronAPI?.getCurrentDirectory === 'function') {
             currentDirectoryPath = await window.electronAPI.getCurrentDirectory();
-            // ディレクトリ取得時にデータ属性を更新
             updateCurrentDirData();
         } else {
             currentDirectoryPath = '.';
@@ -9497,72 +9655,91 @@ async function initializeFileTree() {
         const fileTreeContainer = document.getElementById('file-tree-container');
         if (!fileTreeContainer) return;
 
-        const newFileTreeContainer = fileTreeContainer.cloneNode(true);
-        fileTreeContainer.parentNode.replaceChild(newFileTreeContainer, fileTreeContainer);
+        // --- 修正: コンテナの置換(cloneNode)をやめ、既存コンテナを再利用する ---
+        // イベントリスナーの多重登録を防ぐため、初期化フラグを使用
+        if (!fileTreeContainer.dataset.initialized) {
+            fileTreeContainer.dataset.initialized = 'true';
 
-        const rootItem = newFileTreeContainer.querySelector('.tree-item.expanded');
+            // イベントリスナーの登録（初回のみ）
+            fileTreeContainer.addEventListener('dragover', handleDragOver);
+            fileTreeContainer.addEventListener('drop', handleDrop);
+            fileTreeContainer.addEventListener('click', (e) => {
+                const item = e.target.closest('.tree-item');
+                if (!item) return;
+                if (item.classList.contains('creation-mode')) return;
+                if (e.target.tagName.toLowerCase() === 'input') return;
 
-        if (rootItem) {
-            rootItem.dataset.path = currentDirectoryPath;
-            const rootLabel = rootItem.querySelector('.tree-label');
-            if (rootLabel) {
-                const folderName = currentDirectoryPath.split(/[/\\]/).pop() || currentDirectoryPath;
-                rootLabel.textContent = folderName;
-            }
-            const rootChildren = rootItem.nextElementSibling;
-            if (rootChildren) rootChildren.innerHTML = '';
-            await loadDirectoryTreeContents(rootItem, currentDirectoryPath);
+                e.stopPropagation();
+                fileTreeContainer.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
+                item.classList.add('selected');
 
+                if (item.classList.contains('file')) {
+                    openFile(item.dataset.path, item.dataset.name);
+                } else {
+                    toggleFolder(item);
+                }
+            });
+
+            fileTreeContainer.addEventListener('contextmenu', (e) => {
+                const item = e.target.closest('.tree-item');
+                if (!item) return;
+                e.preventDefault();
+                e.stopPropagation();
+                fileTreeContainer.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
+                item.classList.add('selected');
+                showContextMenu(e.pageX, e.pageY, item.dataset.path, item.dataset.name);
+            });
+        }
+
+        // --- ルートアイテムの更新 ---
+        // 既存のルートアイテムがあれば再利用、なければ作成
+        let rootItem = fileTreeContainer.querySelector('.tree-item.expanded');
+        if (!rootItem) {
+            // なければHTMLを初期構築（初回のみ）
+            fileTreeContainer.innerHTML = `
+                <div class="tree-item expanded" data-path="${currentDirectoryPath}" data-name="Root">
+                    <span class="tree-toggle">▼</span>
+                    <span class="tree-icon">📁</span>
+                    <span class="tree-label">Root</span>
+                </div>
+                <div class="tree-children"></div>
+            `;
+            rootItem = fileTreeContainer.querySelector('.tree-item');
+
+            // ルートアイテムへのドラッグイベント設定
             rootItem.addEventListener('dragover', handleDragOver);
             rootItem.addEventListener('dragleave', handleDragLeave);
             rootItem.addEventListener('drop', handleDrop);
         }
 
-        newFileTreeContainer.addEventListener('dragover', handleDragOver);
-        newFileTreeContainer.addEventListener('drop', handleDrop);
+        // ルート情報の更新
+        // 【追加修正】パスが変わったかどうかを確認
+        const previousPath = rootItem.dataset.path;
 
-        newFileTreeContainer.addEventListener('click', (e) => {
-            const item = e.target.closest('.tree-item');
+        rootItem.dataset.path = currentDirectoryPath;
+        const rootLabel = rootItem.querySelector('.tree-label');
+        if (rootLabel) {
+            const folderName = currentDirectoryPath.split(/[/\\]/).pop() || currentDirectoryPath;
+            rootLabel.textContent = folderName;
+        }
 
-            if (!item) {
-                return;
+        // 【追加修正】ディレクトリが変更された場合は、子要素コンテナをクリアして古い構造を消す
+        if (previousPath && previousPath !== currentDirectoryPath) {
+            const childrenContainer = rootItem.nextElementSibling;
+            if (childrenContainer && childrenContainer.classList.contains('tree-children')) {
+                childrenContainer.innerHTML = '';
             }
+        }
 
-            if (item.classList.contains('creation-mode')) return;
-            if (e.target.tagName.toLowerCase() === 'input') return;
-
-            e.stopPropagation();
-
-            newFileTreeContainer.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
-            item.classList.add('selected');
-
-            if (item.classList.contains('file')) {
-                openFile(item.dataset.path, item.dataset.name);
-            } else {
-                toggleFolder(item);
-            }
-        });
-
-        newFileTreeContainer.addEventListener('contextmenu', (e) => {
-            const item = e.target.closest('.tree-item');
-            if (!item) return;
-            if (item.classList.contains('creation-mode')) return;
-            if (item.querySelector('input')) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-
-            newFileTreeContainer.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
-            item.classList.add('selected');
-
-            showContextMenu(e.pageX, e.pageY, item.dataset.path, item.dataset.name);
-        });
+        // 中身の更新（ここもDiff更新される）
+        await loadDirectoryTreeContents(rootItem, currentDirectoryPath);
 
     } catch (error) {
         console.error('Failed to initialize file tree:', error);
     }
 }
 
+// 既存の関数を上書き
 async function loadDirectoryTreeContents(folderElement, dirPath) {
     let childrenContainer = folderElement.nextElementSibling;
     if (!childrenContainer || !childrenContainer.classList.contains('tree-children')) {
@@ -9571,15 +9748,72 @@ async function loadDirectoryTreeContents(folderElement, dirPath) {
         folderElement.parentNode.insertBefore(childrenContainer, folderElement.nextSibling);
     }
 
-    childrenContainer.innerHTML = '';
-
+    // innerHTML = '' を削除し、Diff更新関数を使用
     const items = await getSortedDirectoryContents(dirPath);
-    if (items && items.length > 0) {
-        items.forEach(item => {
-            const element = createTreeElement(item, dirPath);
-            childrenContainer.appendChild(element);
-        });
-    }
+    renderFileTree(childrenContainer, items, dirPath);
+}
+
+// 既存の関数を上書き
+async function reloadContainer(container, path) {
+    // innerHTML = '' を削除し、Diff更新関数を使用
+    const items = await getSortedDirectoryContents(path);
+    renderFileTree(container, items, path);
+}
+
+/**
+ * ファイルツリーのDOMを更新する関数（差分更新・ちらつき防止）
+ */
+function renderFileTree(container, items, parentPath) {
+    if (!items) return;
+
+    // 既存の要素をマップ化
+    const existingElements = new Map();
+    Array.from(container.children).forEach(child => {
+        if (child.dataset.name) {
+            existingElements.set(child.dataset.name, child);
+        }
+    });
+
+    const processedNames = new Set();
+
+    items.forEach(item => {
+        processedNames.add(item.name);
+
+        let element = existingElements.get(item.name);
+
+        // 新規作成
+        if (!element) {
+            element = createTreeElement(item, parentPath);
+            // 挿入位置の制御（ソート順通りに追加）
+            container.appendChild(element);
+        } else {
+            // 既存更新（必要ならアイコンやクラスを更新）
+            // 基本的に名前が同じなら大きな変化はないが、ディレクトリ<->ファイルの変更などはチェック推奨
+            const isDir = item.isDirectory;
+            const wasDir = !element.classList.contains('file');
+
+            if (isDir !== wasDir) {
+                // タイプが変わっている場合は作り直し
+                const newElement = createTreeElement(item, parentPath);
+                container.replaceChild(newElement, element);
+                element = newElement;
+            } else {
+                // 既存のものを維持（位置だけ合わせるためにappendChild再実行も可だが、パフォーマンス的には触らない方が良い）
+                // 順序が変わる場合は appendChild で末尾に移動させるなどの処理が必要だが、
+                // 通常はファイルシステム順序は変わらないため、ここでは簡易的な追加のみとする
+                if (!container.contains(element)) {
+                    container.appendChild(element);
+                }
+            }
+        }
+    });
+
+    // 削除されたファイルをDOMから削除
+    existingElements.forEach((node, name) => {
+        if (!processedNames.has(name)) {
+            node.remove();
+        }
+    });
 }
 
 async function toggleFolder(folderElement) {
