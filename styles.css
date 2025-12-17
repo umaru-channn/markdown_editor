@@ -915,6 +915,13 @@ body[data-theme="dark"] .git-action-btn-small:hover {
     background-color: #005a9e;
 }
 
+/* 破棄ボタンのホバースタイル */
+.btn-discard:hover {
+    color: #e81123 !important;
+    /* 赤色 */
+    background-color: rgba(232, 17, 35, 0.1) !important;
+}
+
 /* ========== Center Pane (Editor) ========== */
 .center-pane {
     flex: 1;
@@ -5132,7 +5139,9 @@ body[data-theme="dark"] .custom-webview-content {
 
 /* 無効化状態のボタンスタイル */
 .status-item.disabled {
-    visibility: hidden;    /* 完全に透明にする（場所は確保される） */
-    pointer-events: none;  /* クリック無効 */
+    visibility: hidden;
+    /* 完全に透明にする（場所は確保される） */
+    pointer-events: none;
+    /* クリック無効 */
     cursor: default;
 }

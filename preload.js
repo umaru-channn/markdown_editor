@@ -43,6 +43,7 @@ window.electronAPI = {
   gitGetBranches: (repoPath) => ipcRenderer.invoke('git-get-branches', repoPath),
   gitCheckout: (repoPath, branchName) => ipcRenderer.invoke('git-checkout', repoPath, branchName),
   gitFetch: (repoPath) => ipcRenderer.invoke('git-fetch', repoPath),
+  gitDiscard: (repoPath, filepath, status) => ipcRenderer.invoke('git-discard', repoPath, filepath, status),
 
   authGitHub: () => ipcRenderer.invoke('auth-github'),
   gitAddRemote: (repoPath, url) => ipcRenderer.invoke('git-add-remote', repoPath, url),

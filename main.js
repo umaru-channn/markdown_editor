@@ -2307,6 +2307,38 @@ ipcMain.handle('git-remove', async (event, repoPath, filepath) => {
   }
 });
 
+// git-discard: 変更の破棄ハンドラ
+ipcMain.handle('git-discard', async (event, repoPath, filepath, status) => {
+  try {
+    const fullPath = path.join(repoPath, filepath);
+
+    // 新規ファイル(Untracked/Added)の場合は、ファイルを物理削除する
+    if (status === 'new' || status === 'added') {
+      // ゴミ箱に入れるか、完全に削除するか。ここでは完全削除とします。
+      if (fs.existsSync(fullPath)) {
+        await fs.promises.unlink(fullPath);
+      }
+      return { success: true };
+    }
+    // 変更(Modified) または 削除(Deleted) の場合は git checkout でHEADの状態に戻す
+    else {
+      // "git checkout HEAD -- <file>" を実行
+      // パスにスペースが含まれる場合に対応するためダブルクォートで囲む
+      const cmd = `checkout HEAD -- "${filepath}"`;
+      const result = await runGitCommand(repoPath, cmd);
+
+      if (result.success) {
+        return { success: true };
+      } else {
+        return { success: false, error: result.error };
+      }
+    }
+  } catch (error) {
+    console.error('Git discard error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('git-reset', async (event, repoPath, filepath) => {
   try {
     const dir = repoPath;

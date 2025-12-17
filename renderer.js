@@ -5529,7 +5529,6 @@ function renderGitInitUI(container) {
  */
 function renderGitList(container, files, type) {
     container.innerHTML = '';
-
     if (!files || files.length === 0) {
         // container.innerHTML = '<div class="git-empty-msg">変更なし</div>';
         return;
@@ -5543,7 +5542,6 @@ function renderGitList(container, files, type) {
         // ステータスアイコンの決定
         let statusChar = 'M';
         let statusClass = 'modified';
-
         if (file.status === 'new' || file.status === 'added') {
             statusChar = 'A';
             statusClass = 'added';
@@ -5560,8 +5558,17 @@ function renderGitList(container, files, type) {
         const dirName = file.filepath.substring(0, file.filepath.length - fileName.length);
         const displayPath = dirName === '' ? '' : dirName;
 
-        const actionBtnIcon = type === 'unstaged' ? '+' : '−';
-        const actionTitle = type === 'unstaged' ? 'ステージする' : 'ステージを取り消す';
+        // ボタンのHTML生成
+        let actionButtonsHtml = '';
+        if (type === 'unstaged') {
+            // 変更の破棄ボタン (左側)
+            actionButtonsHtml += `<button class="git-action-btn-small btn-discard" title="変更を破棄" style="margin-right: 2px;">↺</button>`;
+            // ステージングボタン
+            actionButtonsHtml += `<button class="git-action-btn-small btn-stage" title="ステージする">+</button>`;
+        } else {
+            // アンステージングボタン
+            actionButtonsHtml += `<button class="git-action-btn-small btn-unstage" title="ステージを取り消す">−</button>`;
+        }
 
         item.innerHTML = `
             <div class="git-file-left">
@@ -5570,7 +5577,7 @@ function renderGitList(container, files, type) {
             <div class="git-file-right">
                 <span class="git-status-badge ${statusClass}">${statusChar}</span>
                 <div class="git-actions">
-                    <button class="git-action-btn-small" title="${actionTitle}">${actionBtnIcon}</button>
+                    ${actionButtonsHtml}
                 </div>
             </div>
         `;
@@ -5583,37 +5590,79 @@ function renderGitList(container, files, type) {
             if (type === 'unstaged' && file.status === 'modified') {
                 openDiffView(file.filepath);
             } else {
-                // 新規ファイル(new)や削除(deleted)、Stagedの場合は通常通り開く（または何もしない）
                 const separator = currentDirectoryPath.includes('\\') ? '\\' : '/';
                 const fullPath = currentDirectoryPath + (currentDirectoryPath.endsWith(separator) ? '' : separator) + file.filepath;
-
-                // 削除されたファイルでなければ開く
                 if (file.status !== 'deleted') {
                     openFile(fullPath, fileName);
                 }
             }
         });
 
-        // アクションボタンクリック
-        const actionBtn = item.querySelector('.git-action-btn-small');
-        actionBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            try {
-                if (type === 'unstaged') {
+        // --- ボタンイベントの設定 ---
+
+        // 1. 変更の破棄ボタン (Discard)
+        const btnDiscard = item.querySelector('.btn-discard');
+        if (btnDiscard) {
+            btnDiscard.addEventListener('click', async (e) => {
+                e.stopPropagation();
+
+                // カスタム確認ダイアログを表示
+                const doDiscard = await showConfirmDialog(`${fileName} の変更を破棄してもよろしいですか？\nこの操作は取り消せません。`);
+
+                if (!doDiscard) return;
+
+                try {
+                    const result = await window.electronAPI.gitDiscard(currentDirectoryPath, file.filepath, file.status);
+                    if (result.success) {
+                        showNotification('変更を破棄しました', 'success');
+                        refreshGitStatus();
+                        // 変更によりファイル内容が変わる可能性があるため、ツリーなどを更新
+                        if (typeof initializeFileTreeWithState === 'function') {
+                            initializeFileTreeWithState();
+                        }
+                    } else {
+                        showNotification(`破棄エラー: ${result.error}`, 'error');
+                    }
+                } catch (err) {
+                    console.error(err);
+                    showNotification(`エラー: ${err.message}`, 'error');
+                }
+            });
+        }
+
+        // 2. ステージングボタン (Add)
+        const btnStage = item.querySelector('.btn-stage');
+        if (btnStage) {
+            btnStage.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
                     if (file.status === 'deleted') {
                         await window.electronAPI.gitRemove(currentDirectoryPath, file.filepath);
                     } else {
                         await window.electronAPI.gitAdd(currentDirectoryPath, file.filepath);
                     }
-                } else {
-                    await window.electronAPI.gitReset(currentDirectoryPath, file.filepath);
+                    refreshGitStatus();
+                } catch (err) {
+                    console.error(err);
+                    showNotification(`Git操作エラー: ${err.message}`, 'error');
                 }
-                refreshGitStatus();
-            } catch (err) {
-                console.error(err);
-                showNotification(`Git操作エラー: ${err.message}`, 'error');
-            }
-        });
+            });
+        }
+
+        // 3. アンステージングボタン (Reset)
+        const btnUnstage = item.querySelector('.btn-unstage');
+        if (btnUnstage) {
+            btnUnstage.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    await window.electronAPI.gitReset(currentDirectoryPath, file.filepath);
+                    refreshGitStatus();
+                } catch (err) {
+                    console.error(err);
+                    showNotification(`Git操作エラー: ${err.message}`, 'error');
+                }
+            });
+        }
 
         container.appendChild(item);
     });
@@ -5831,6 +5880,60 @@ async function updateStatusBarGitInfo() {
         // エラー時は非表示
         statusBarBranch.classList.add('hidden');
     }
+}
+
+/**
+ * カスタム確認ダイアログを表示する関数
+ * @param {string} message 表示するメッセージ
+ * @returns {Promise<boolean>} OKならtrue, キャンセルならfalse
+ */
+function showConfirmDialog(message) {
+    return new Promise((resolve) => {
+        // モーダルのHTMLを作成
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+
+        const content = document.createElement('div');
+        content.className = 'modal-content';
+
+        const msgP = document.createElement('p');
+        msgP.className = 'modal-message';
+        msgP.textContent = message;
+        // 改行コードを反映させる場合
+        msgP.style.whiteSpace = 'pre-wrap';
+
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-buttons';
+
+        const btnCancel = document.createElement('button');
+        btnCancel.className = 'modal-btn';
+        btnCancel.textContent = 'キャンセル';
+
+        const btnOk = document.createElement('button');
+        btnOk.className = 'modal-btn primary';
+        btnOk.textContent = 'OK';
+
+        // イベントハンドラ
+        const close = (result) => {
+            document.body.removeChild(overlay);
+            resolve(result);
+        };
+
+        btnCancel.onclick = () => close(false);
+        btnOk.onclick = () => close(true);
+
+        // 組み立て
+        btnContainer.appendChild(btnCancel);
+        btnContainer.appendChild(btnOk);
+        content.appendChild(msgP);
+        content.appendChild(btnContainer);
+        overlay.appendChild(content);
+
+        document.body.appendChild(overlay);
+
+        // キャンセルボタンにフォーカス
+        btnCancel.focus();
+    });
 }
 
 // ========== コンパクトな入力ダイアログ ==========
