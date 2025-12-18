@@ -151,6 +151,8 @@ window.electronAPI = {
   // ファイル操作のUndo/Redo ---
   undoFileOperation: () => ipcRenderer.invoke('file:undo'),
   redoFileOperation: () => ipcRenderer.invoke('file:redo'),
+  copyFileSystemEntry: (srcPath, destDir) => ipcRenderer.invoke('copy-file-system-entry', srcPath, destDir),
+  isDirectory: (path) => ipcRenderer.invoke('is-directory', path),
 
   // Event Listeners
   onInitiateRename: (callback) => ipcRenderer.on('initiate-rename', (_event, val) => callback(val)),

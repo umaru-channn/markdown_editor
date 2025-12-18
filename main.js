@@ -4524,6 +4524,63 @@ ipcMain.handle('scan-backlinks', async (event, targetFileName, rootDir) => {
   return results;
 });
 
+/**
+ * 再帰的にファイルまたはディレクトリをコピーするヘルパー関数
+ */
+async function copyRecursive(src, dest) {
+    const stats = await fs.promises.stat(src);
+    if (stats.isDirectory()) {
+        // ディレクトリの場合
+        if (!fs.existsSync(dest)) {
+            await fs.promises.mkdir(dest, { recursive: true });
+        }
+        const entries = await fs.promises.readdir(src);
+        for (const entry of entries) {
+            await copyRecursive(path.join(src, entry), path.join(dest, entry));
+        }
+    } else {
+        // ファイルの場合
+        await fs.promises.copyFile(src, dest);
+    }
+}
+
+// ファイル/フォルダのコピーハンドラー
+ipcMain.handle('copy-file-system-entry', async (event, srcPath, destDir) => {
+    try {
+        if (!srcPath || !destDir) return { success: false, error: 'Invalid arguments' };
+
+        const fileName = path.basename(srcPath);
+        const destPath = path.join(destDir, fileName);
+
+        // 同一パスへのコピー防止
+        if (srcPath === destPath) {
+            return { success: false, error: 'Source and destination are the same.' };
+        }
+
+        // 上書き防止（必要であれば上書きするロジックに変更可）
+        if (fs.existsSync(destPath)) {
+            return { success: false, error: 'Destination already exists.' };
+        }
+
+        await copyRecursive(srcPath, destPath);
+        return { success: true };
+    } catch (error) {
+        console.error('Copy failed:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+// 指定されたパスがディレクトリかどうかを判定
+ipcMain.handle('is-directory', async (event, filePath) => {
+    try {
+        const stats = await fs.promises.stat(filePath);
+        return stats.isDirectory();
+    } catch (error) {
+        console.error('is-directory check failed:', error);
+        return false;
+    }
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.

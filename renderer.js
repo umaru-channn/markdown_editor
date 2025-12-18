@@ -436,58 +436,119 @@ let pdfCurrentScale = 1.5;
 
 /**
  * 単一のPDFページを指定されたスケールでCanvasにレンダリングする
+ * 修正: ライブラリに依存せず、手動で行列計算を行いテキストレイヤーを生成（コピペ機能の強制実装）
  */
 async function renderPdfPageToCanvas(page, canvas, scale) {
-    // デバイスのピクセル比（Retinaディスプレイなどで重要）を取得
     const pixelRatio = window.devicePixelRatio || 1;
-
-    // スケールをデバイスピクセル比で補正
-    const actualScale = scale; // PDF.jsが内部でdevicePixelRatioを考慮するため、ここでは補正しない
-
-    const viewport = page.getViewport({ scale: actualScale });
-
+    const viewport = page.getViewport({ scale: scale });
     const context = canvas.getContext('2d');
 
-    // Canvasの解像度（高解像度画像として描画）
-    canvas.height = viewport.height * pixelRatio; // 縦方向の解像度
-    canvas.width = viewport.width * pixelRatio;   // 横方向の解像度
-
-    // CSSサイズ（見た目のサイズ）をViewportのサイズに設定
-    // これがCanvasを視覚的に拡大・縮小する部分です
+    // Canvasのサイズ設定
+    canvas.height = viewport.height * pixelRatio;
+    canvas.width = viewport.width * pixelRatio;
     canvas.style.width = `${viewport.width}px`;
     canvas.style.height = `${viewport.height}px`;
 
-    // 描画コンテキストをピクセル比に応じてスケールさせる
     context.scale(pixelRatio, pixelRatio);
 
-    // 描画
+    // 1. 画像を描画
     await page.render({
         canvasContext: context,
         viewport: viewport
     }).promise;
+
+    // 2. テキストレイヤーの手動生成 (エラー回避版)
+    const container = canvas.parentElement;
+
+    // 既存のレイヤーがあれば削除
+    const oldLayer = container.querySelector('.textLayer');
+    if (oldLayer) oldLayer.remove();
+
+    const textLayerDiv = document.createElement('div');
+    textLayerDiv.className = 'textLayer';
+    textLayerDiv.style.width = `${viewport.width}px`;
+    textLayerDiv.style.height = `${viewport.height}px`;
+    container.style.width = `${viewport.width}px`; // 親コンテナも幅を合わせる
+    container.appendChild(textLayerDiv);
+
+    try {
+        const textContent = await page.getTextContent();
+
+        // テキストアイテムをループして配置
+        textContent.items.forEach(item => {
+            // 空白のみのアイテムはスキップしてもよいが、選択時のスペース確保のため残す場合もある
+            if (!item.str) return;
+
+            // 座標変換行列の計算: viewport.transform * item.transform
+            // item.transform は [fontScaleX, skewY, skewX, fontScaleY, x, y]
+            const v = viewport.transform;
+            const t = item.transform;
+
+            // 行列乗算: Canvas座標系への変換
+            // [a, b, c, d, tx, ty]
+            const tx = [
+                v[0] * t[0] + v[2] * t[1],
+                v[1] * t[0] + v[3] * t[1],
+                v[0] * t[2] + v[2] * t[3],
+                v[1] * t[2] + v[3] * t[3],
+                v[0] * t[4] + v[2] * t[5] + v[4],
+                v[1] * t[4] + v[3] * t[5] + v[5]
+            ];
+
+            // フォントサイズを計算（行列のスケール成分から推定）
+            const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+
+            const span = document.createElement('span');
+            span.textContent = item.str;
+
+            // 座標配置 (Canvas座標系)
+            // tx[4] = x, tx[5] = y (ベースライン)
+            span.style.left = `${tx[4]}px`;
+            // HTMLの配置は左上基準、PDFはベースライン基準のため、フォントサイズ分上にずらす補正
+            span.style.top = `${tx[5] - fontSize}px`;
+
+            span.style.fontSize = `${fontSize}px`;
+            span.style.fontFamily = 'sans-serif';
+
+            // 回転がある場合は適用 (簡易実装)
+            // const angle = Math.atan2(tx[1], tx[0]);
+            // if (Math.abs(angle) > 0.01) span.style.transform = `rotate(${angle}rad)`;
+
+            textLayerDiv.appendChild(span);
+        });
+
+    } catch (e) {
+        console.error('Manual text layer render error:', e);
+    }
 }
 
 /**
  * PDF全体の描画とコントロールUIの生成を行う
- * (ズーム変更時や初期描画時に呼び出される)
+ * 修正: ズームボタンをSVGアイコン化
+ * 修正: ページ数表示の判定ロジックを改善
+ * 修正: コントロールバーを上部に固定表示
  */
 async function renderAllPdfPages(pdf, container, filePath) {
-    // ズーム変更時にコンテナ全体を一旦クリア
     container.innerHTML = '';
 
     const numPages = pdf.numPages;
+    let activePageNum = 1;
 
-    // 1. コントロールパネルのコンテナを作成 (ブロック要素として配置)
+    // 1. コントロールパネル (固定表示エリア)
     const controlsContainer = document.createElement('div');
     controlsContainer.className = 'pdf-controls-top';
-    // position:sticky を削除し、flex-shrink: 0 で固定領域化
     controlsContainer.style.cssText = 'display:flex; justify-content:center; align-items:center; padding:10px 0; background-color:var(--sidebar-bg); width:100%; border-bottom: 1px solid var(--sidebar-border); color: var(--text-color); flex-shrink: 0;';
     container.appendChild(controlsContainer);
 
     // 2. ページ数とスケール表示エリア
     const pageInfo = document.createElement('span');
     pageInfo.id = 'pdf-page-indicator';
-    pageInfo.textContent = `1 / ${numPages} | Scale: ${Math.round(pdfCurrentScale * 100)}%`;
+
+    const updateInfoText = () => {
+        pageInfo.textContent = `${activePageNum} / ${numPages} | Scale: ${Math.round(pdfCurrentScale * 100)}%`;
+    };
+    updateInfoText();
+
     pageInfo.style.margin = '0 20px';
     pageInfo.style.minWidth = '150px';
     pageInfo.style.textAlign = 'center';
@@ -497,22 +558,17 @@ async function renderAllPdfPages(pdf, container, filePath) {
     // 3. ズームイン/アウトボタン (SVGアイコン化)
     const createZoomBtn = (iconSvg, title, onClick) => {
         const btn = document.createElement('button');
-        btn.innerHTML = iconSvg; // SVGを挿入
+        btn.innerHTML = iconSvg;
         btn.title = title;
         btn.onclick = onClick;
-        // スタイル調整: flexで中央揃え、padding調整
         btn.style.cssText = 'background:transparent; border:1px solid var(--sidebar-border); color:var(--text-color); border-radius:3px; padding:4px; cursor:pointer; margin:0 2px; display:flex; align-items:center; justify-content:center; width: 28px; height: 28px;';
 
-        // ホバー効果（任意）
         btn.onmouseover = () => btn.style.backgroundColor = 'rgba(0,0,0,0.1)';
         btn.onmouseout = () => btn.style.backgroundColor = 'transparent';
-
         return btn;
     };
 
-    // 虫眼鏡(-) アイコン
     const iconZoomOut = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
-    // 虫眼鏡(+) アイコン
     const iconZoomIn = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
 
     const zoomOutBtn = createZoomBtn(iconZoomOut, '縮小', () => {
@@ -531,27 +587,23 @@ async function renderAllPdfPages(pdf, container, filePath) {
     // 4. 描画エリア (ここだけスクロールさせる)
     const pageRenderArea = document.createElement('div');
     pageRenderArea.className = 'pdf-page-render-area';
-    // flex: 1 と overflow-y: auto を追加してスクロール領域にする
-    pageRenderArea.style.cssText = 'flex: 1; overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; padding: 20px 0;';
+    // flex: 1 と overflow-y: auto でこの部分だけスクロールさせる
+    pageRenderArea.style.cssText = 'flex: 1; overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; padding: 20px 0; position: relative;';
     container.appendChild(pageRenderArea);
 
     // 5. Intersection Observer の設定
-    let activePageNum = 1;
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
-                const pageNum = parseInt(entry.target.dataset.pageNum);
+                const pageNum = parseInt(entry.target.dataset.pageNum, 10);
                 activePageNum = pageNum;
-
-                const indicator = document.getElementById('pdf-page-indicator');
-                if (indicator) {
-                    indicator.textContent = `${activePageNum} / ${numPages} | Scale: ${Math.round(pdfCurrentScale * 100)}%`;
-                }
+                updateInfoText();
             }
         });
     }, {
-        root: pageRenderArea, // 監視対象のスクロールコンテナを pageRenderArea に変更
-        rootMargin: '-40% 0px -40% 0px',
+        root: pageRenderArea,
+        // 上下45%を無視し、画面中央の10%に入った要素を検知
+        rootMargin: '-45% 0px -45% 0px',
         threshold: 0
     });
 
@@ -560,8 +612,8 @@ async function renderAllPdfPages(pdf, container, filePath) {
         const pageContainer = document.createElement('div');
         pageContainer.className = 'pdf-page-container';
         pageContainer.dataset.pageNum = pageNum;
-
         pageContainer.style.cssText = 'margin-bottom:20px; position: relative;';
+
         pageRenderArea.appendChild(pageContainer);
 
         const canvas = document.createElement('canvas');
@@ -569,7 +621,6 @@ async function renderAllPdfPages(pdf, container, filePath) {
         pageContainer.appendChild(canvas);
 
         const page = await pdf.getPage(pageNum);
-
         await renderPdfPageToCanvas(page, canvas, pdfCurrentScale);
 
         observer.observe(pageContainer);
@@ -2113,15 +2164,33 @@ const pasteHandler = EditorView.domEventHandlers({
             }
         }
 
+        // 2. ローカルファイル・フォルダのパス貼り付け処理 (★ここを修正)
+        // クリップボード内のファイルを確認
+        if (event.clipboardData.files.length > 0) {
+            const files = Array.from(event.clipboardData.files);
+
+            // Electronではローカルファイルの場合、file.path でフルパスが取得できます
+            // パスを持っているものだけを抽出
+            const paths = files
+                .map(f => f.path)
+                .filter(p => p); // pathが存在するもの（空文字でないもの）
+
+            // ローカルファイル/フォルダのパスがある場合
+            if (paths.length > 0) {
+                event.preventDefault();
+                // 複数の場合は改行区切りでパスを挿入
+                view.dispatch(view.state.replaceSelection(paths.join('\n')));
+                return true;
+            }
+        }
+
         return false;
     }
 });
 
-// 高機能ドロップハンドラー (dragover追加・分割機能対応版)
 const dropHandler = EditorView.domEventHandlers({
     // ドラッグがエディタに入ってきた時
     dragenter(event, view) {
-        // タブを持っている場合のみ反応
         if (event.dataTransfer.types.includes('application/x-markdown-tab')) {
             event.preventDefault();
             if (!isSplitView) {
@@ -2134,10 +2203,8 @@ const dropHandler = EditorView.domEventHandlers({
 
     // ドラッグしてエディタ上を動いている時
     dragover(event, view) {
-        // タブを持っている場合
         if (event.dataTransfer.types.includes('application/x-markdown-tab')) {
             event.preventDefault();
-            // クラスが外れていたら付け直す
             if (!isSplitView) {
                 if (!view.dom.classList.contains('editor-drag-preview-split')) {
                     view.dom.classList.add('editor-drag-preview-split');
@@ -2149,7 +2216,6 @@ const dropHandler = EditorView.domEventHandlers({
             }
             return true;
         }
-        // 通常のファイルドロップの場合も dragover を許可する（駐車禁止マーク回避）
         event.preventDefault();
         return false;
     },
@@ -2175,37 +2241,25 @@ const dropHandler = EditorView.domEventHandlers({
         const tabPath = dataTransfer.getData('application/x-markdown-tab');
         if (tabPath) {
             event.preventDefault();
-
+            // ... (既存のタブドロップ処理) ...
             if (!isSplitView) {
-                // まだ分割されていない場合 -> ドロップ位置に応じて左右分割 (Swap logic)
                 const isLeftHalf = event.clientX < window.innerWidth / 2;
                 openInSplitView(tabPath, isLeftHalf ? 'left' : 'right');
             } else {
-                // 設定画面の二重配置防止 (Swap処理)
-                // 設定画面をドロップした場合、もう片方に設定画面があれば、中身を入れ替える
                 if (tabPath === 'settings://view') {
-                    // 左にドロップする場合
                     if (view === globalEditorView) {
-                        // 右側に設定画面があるなら、右側を「左側の元の内容」に切り替える
                         if (splitGroup.rightPath === 'settings://view') {
                             const originalLeft = splitGroup.leftPath;
-                            splitGroup.rightPath = originalLeft; // 情報を更新
-
-                            // 右側エディタの表示を更新 (順序重要: 先に右を更新して設定DOMを解放する)
+                            splitGroup.rightPath = originalLeft;
                             if (splitEditorView) {
                                 setActiveEditor(splitEditorView);
                                 switchToFile(originalLeft, 'right');
                             }
                         }
-                    }
-                    // 右にドロップする場合
-                    else if (splitEditorView && view === splitEditorView) {
-                        // 左側に設定画面があるなら、左側を「右側の元の内容」に切り替える
+                    } else if (splitEditorView && view === splitEditorView) {
                         if (splitGroup.leftPath === 'settings://view') {
                             const originalRight = splitGroup.rightPath;
-                            splitGroup.leftPath = originalRight; // 情報を更新
-
-                            // 左側エディタの表示を更新
+                            splitGroup.leftPath = originalRight;
                             if (globalEditorView) {
                                 setActiveEditor(globalEditorView);
                                 switchToFile(originalRight, 'left');
@@ -2213,17 +2267,13 @@ const dropHandler = EditorView.domEventHandlers({
                         }
                     }
                 }
-                // 既に分割されている場合 -> 対象ペインの内容を置き換える (Swapしない)
                 if (view === globalEditorView) {
-                    // 左側にドロップ
-                    // 【修正】先にグループ情報を更新して「左側はこのファイルだ」と確定させる
                     splitGroup.leftPath = tabPath;
                     setActiveEditor(globalEditorView);
                     switchToFile(tabPath, 'left');
                 } else {
-                    // 右側にドロップ
                     if (splitEditorView) {
-                        splitGroup.rightPath = tabPath; // 【修正】先にグループ情報を更新
+                        splitGroup.rightPath = tabPath;
                         setActiveEditor(splitEditorView);
                         switchToFile(tabPath, 'right');
                     }
@@ -2233,27 +2283,72 @@ const dropHandler = EditorView.domEventHandlers({
         }
 
         // -------------------------------------------------
-        // ケース2: ファイルがドロップされた場合 (ローカルファイル)
+        // ケース2: 内部ツリーからのドラッグ (text/plain) ★ここを追加
+        // -------------------------------------------------
+        const textData = dataTransfer.getData('text/plain');
+        if (textData) {
+            // 画像ファイルかどうか判定 (拡張子チェック)
+            const isImage = /\.(png|jpg|jpeg|gif|svg|webp|bmp|ico)$/i.test(textData);
+            // パス区切り文字が含まれているかチェック (ファイルパスらしさの判定)
+            const isPath = textData.includes('/') || textData.includes('\\');
+
+            if (isImage && isPath) {
+                event.preventDefault();
+
+                let insertPath = textData;
+
+                // 相対パスに変換
+                if (currentFilePath && typeof path !== 'undefined') {
+                    try {
+                        const currentDir = path.dirname(currentFilePath);
+                        // Windowsのパス区切り(\)を(/)に統一
+                        insertPath = path.relative(currentDir, textData).split(path.sep).join('/');
+                    } catch (e) {
+                        console.warn('Relative path calculation failed', e);
+                    }
+                } else {
+                    insertPath = insertPath.replace(/\\/g, '/');
+                }
+
+                // Markdown画像リンク形式で挿入
+                const insertText = `![image](${insertPath})`;
+
+                // ドロップ位置に挿入
+                const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+                const insertPos = pos !== null ? pos : view.state.selection.main.head;
+
+                view.dispatch({
+                    changes: { from: insertPos, insert: insertText },
+                    selection: { anchor: insertPos + insertText.length }
+                });
+                view.focus();
+                return true;
+            }
+            // 画像以外の場合は CodeMirror のデフォルト処理 (テキスト挿入) に任せるか、
+            // 必要に応じてここで処理を追加します。
+        }
+
+        // -------------------------------------------------
+        // ケース3: 外部ファイルがドロップされた場合 (Files)
         // -------------------------------------------------
         if (dataTransfer.files && dataTransfer.files.length > 0) {
             event.preventDefault();
 
             const imageFiles = [];
-            const textFiles = [];
+            const otherFiles = [];
 
             for (let i = 0; i < dataTransfer.files.length; i++) {
                 const file = dataTransfer.files[i];
                 if (file.type.startsWith('image/')) {
                     imageFiles.push(file);
                 } else {
-                    textFiles.push(file);
+                    otherFiles.push(file);
                 }
             }
 
-            // A. 画像ファイルの処理
+            // A. 画像ファイルの処理 (クリップボード保存 & リンク挿入)
             if (imageFiles.length > 0) {
                 const targetPath = view.filePath || currentFilePath;
-
                 if (!targetPath || targetPath === 'README.md') {
                     showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
                     return true;
@@ -2266,12 +2361,10 @@ const dropHandler = EditorView.domEventHandlers({
                         try {
                             const targetDir = path.dirname(targetPath);
                             const result = await window.electronAPI.saveClipboardImage(new Uint8Array(arrayBuffer), targetDir);
-
                             if (result.success) {
                                 const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
                                 const insertPos = pos !== null ? pos : view.state.selection.main.head;
                                 const insertText = `![image](${result.relativePath})\n`;
-
                                 view.dispatch({
                                     changes: { from: insertPos, insert: insertText },
                                     selection: { anchor: insertPos + insertText.length }
@@ -2281,28 +2374,47 @@ const dropHandler = EditorView.domEventHandlers({
                             } else {
                                 showNotification(`保存失敗: ${result.error}`, 'error');
                             }
-                        } catch (err) {
-                            console.error(err);
-                            showNotification(`エラー: ${err.message}`, 'error');
-                        }
+                        } catch (err) { console.error(err); }
                     };
                     reader.readAsArrayBuffer(file);
                 });
             }
 
-            // B. テキストファイル等の処理
-            if (textFiles.length > 0) {
-                const file = textFiles[0];
+            // B. その他ファイル または フォルダ -> 分岐処理
+            if (otherFiles.length > 0) {
+                const file = otherFiles[0];
                 if (file.path) {
-                    setActiveEditor(view);
-                    openFile(file.path, file.name);
+                    (async () => {
+                        try {
+                            // ★ ディレクトリか判定
+                            const isDir = await window.electronAPI.isDirectory(file.path);
+
+                            if (isDir) {
+                                // [フォルダの場合] パスを挿入
+                                const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+                                const insertPos = pos !== null ? pos : view.state.selection.main.head;
+
+                                view.dispatch({
+                                    changes: { from: insertPos, insert: file.path },
+                                    selection: { anchor: insertPos + file.path.length }
+                                });
+                                view.focus();
+                            } else {
+                                // [ファイルの場合] そのファイルを開く
+                                setActiveEditor(view);
+                                openFile(file.path, file.name);
+                            }
+                        } catch (err) {
+                            console.error(err);
+                        }
+                    })();
                 }
             }
             return true;
         }
 
         // -------------------------------------------------
-        // ケース3: Webページからの画像ドラッグ (HTML/URL)
+        // ケース4: Webページからの画像ドラッグ (HTML/URL)
         // -------------------------------------------------
         const html = dataTransfer.getData('text/html');
         if (html) {
@@ -2312,7 +2424,6 @@ const dropHandler = EditorView.domEventHandlers({
 
             if (img && img.src) {
                 event.preventDefault();
-
                 const targetPath = view.filePath || currentFilePath;
                 if (!targetPath || targetPath === 'README.md') {
                     showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
@@ -2322,15 +2433,13 @@ const dropHandler = EditorView.domEventHandlers({
                 (async () => {
                     try {
                         const targetDir = path.dirname(targetPath);
-
                         if (img.src.startsWith('data:')) {
                             const response = await fetch(img.src);
                             const blob = await response.blob();
                             const arrayBuffer = await blob.arrayBuffer();
                             const result = await window.electronAPI.saveClipboardImage(new Uint8Array(arrayBuffer), targetDir);
                             if (result.success) insertImageLink(result.relativePath);
-                        }
-                        else {
+                        } else {
                             showNotification('Web画像をダウンロード中...', 'info');
                             const result = await window.electronAPI.downloadImage(img.src, targetDir);
                             if (result.success) {
@@ -7204,6 +7313,81 @@ function setupFileExplorerEvents() {
             }
         });
 
+        // 1. ファイルツリーをフォーカス可能にする
+        fileContentContainer.setAttribute('tabindex', '0');
+
+        // 2. クリック時にフォーカスを当てる（これをしないとアクティブ判定ができません）
+        fileContentContainer.addEventListener('click', (e) => {
+            // すでにツリー内にフォーカスがある場合（子要素選択時など）は奪わない
+            if (!fileContentContainer.contains(document.activeElement)) {
+                fileContentContainer.focus();
+            }
+        });
+
+        // 3. ペースト処理 (document全体で監視し、ツリー選択時のみ実行)
+        document.addEventListener('paste', async (e) => {
+            // A. ファイルツリーが表示されていない場合は無視
+            if (fileContentContainer.classList.contains('content-hidden')) return;
+
+            // B. フォーカスがファイルツリー内（コンテナまたはその子要素）にあるかチェック
+            // これにより「ファイルツリー選択状態のみ」という条件を満たします
+            const isTreeActive = fileContentContainer.contains(document.activeElement) ||
+                document.activeElement === fileContentContainer;
+
+            if (!isTreeActive) return;
+
+            // C. クリップボードにファイルが含まれている場合のみ実行
+            if (e.clipboardData.files.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                let targetDir = currentDirectoryPath;
+
+                // 選択中のアイテムがあれば、その場所を基準にする
+                const selectedItem = fileContentContainer.querySelector('.tree-item.selected');
+                if (selectedItem) {
+                    const itemPath = selectedItem.dataset.path;
+                    if (selectedItem.classList.contains('file')) {
+                        // ファイルなら親フォルダへ
+                        targetDir = path.dirname(itemPath);
+                    } else {
+                        // フォルダならその中へ
+                        targetDir = itemPath;
+                    }
+                }
+
+                if (!targetDir) return;
+
+                let successCount = 0;
+                for (const file of e.clipboardData.files) {
+                    // Electronではローカルファイルのフルパスが取得可能
+                    if (file.path) {
+                        try {
+                            const result = await window.electronAPI.copyFileSystemEntry(file.path, targetDir);
+                            if (result.success) {
+                                successCount++;
+                            } else {
+                                showNotification(`貼り付け失敗 (${file.name}): ${result.error}`, 'error');
+                            }
+                        } catch (err) {
+                            console.error(err);
+                            showNotification(`エラー: ${err.message}`, 'error');
+                        }
+                    }
+                }
+
+                if (successCount > 0) {
+                    showNotification(`${successCount} 件の項目を貼り付けました`, 'success');
+                    // ツリーを更新
+                    if (typeof initializeFileTreeWithState === 'function') {
+                        await initializeFileTreeWithState();
+                    } else {
+                        await initializeFileTree();
+                    }
+                }
+            }
+        });
+
         fileContentContainer.addEventListener('click', (e) => {
             if (e.target.closest('.tree-item')) return;
 
@@ -8097,18 +8281,19 @@ function getFileType(filePath) {
 
 /**
  * 画像やPDFを #media-view に描画する関数
+ * 修正: 既に同じファイルが表示されている場合は再描画をスキップ（タブ切り替え時のリロード防止）
  * 修正: PDF表示時にコントロールバーを固定表示するため、Flexレイアウト(column)を適用
  */
 async function renderMediaContent(filePath, type) {
     const container = document.getElementById('media-view');
     if (!container) return;
 
-    // 既に同じファイルを表示している場合は再描画しない（タブ切り替え時のリロード防止）
+    // --- 修正: 既に同じファイルを表示している場合は再描画しない ---
     if (container.dataset.currentFile === filePath && container.innerHTML.trim() !== '') {
         container.classList.remove('hidden');
 
         if (type === 'pdf') {
-            // PDFの場合はFlex-Columnで高さを確保し、スクロールは内部エリアで行うように設定
+            // PDFの場合はFlex-Columnで高さを確保し、親コンテナ自体のスクロールは無効化
             container.style.display = 'flex';
             container.style.flexDirection = 'column';
             container.style.height = '100%';
@@ -8124,6 +8309,7 @@ async function renderMediaContent(filePath, type) {
         }
         return;
     }
+    // -----------------------------------------------------------
 
     container.dataset.currentFile = filePath;
     container.classList.remove('hidden');
@@ -8151,7 +8337,6 @@ async function renderMediaContent(filePath, type) {
 
     } else if (type === 'pdf') {
         // PDF表示設定: 親コンテナをFlex-Columnにし、高さを100%に固定
-        // これにより renderAllPdfPages で設定した flex:1 のスクロールエリアが正しく機能します
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
         container.style.height = '100%';
@@ -9919,16 +10104,31 @@ function handleDragOver(e) {
     e.preventDefault();
     e.stopPropagation();
 
+    // デフォルトのエフェクトを設定
+    let effect = 'none';
+
+    // 1. 内部ドラッグ (handleDragStartで 'text/plain' をセットしている場合) -> 移動
+    if (e.dataTransfer.types.includes('text/plain')) {
+        effect = 'move';
+    }
+    // 2. 外部からのファイル (Files を含んでいる場合) -> コピー
+    else if (e.dataTransfer.types.includes('Files')) {
+        effect = 'copy';
+    }
+
     const targetItem = e.target.closest('.tree-item');
     if (targetItem) {
+        // フォルダの上にいる時のみ受け入れる (ファイルの上は受け入れない)
         if (!targetItem.classList.contains('file')) {
             targetItem.classList.add('drag-over');
-            e.dataTransfer.dropEffect = 'move';
+            e.dataTransfer.dropEffect = effect;
         } else {
+            // ファイルの上に来たときは「なし」にする（誤操作防止）
             e.dataTransfer.dropEffect = 'none';
         }
     } else {
-        e.dataTransfer.dropEffect = 'move';
+        // ツリーの空白部分（ルート）へのドロップを許可
+        e.dataTransfer.dropEffect = effect;
     }
 }
 
@@ -9943,48 +10143,81 @@ async function handleDrop(e) {
     e.preventDefault();
     e.stopPropagation();
 
+    // スタイルリセット
     const targetItem = e.target.closest('.tree-item');
     if (targetItem) targetItem.classList.remove('drag-over');
 
-    const srcPath = e.dataTransfer.getData('text/plain');
-    if (!srcPath) return;
-
+    // ドロップ先のディレクトリを決定
     let destFolderPath;
-
     if (targetItem) {
-        if (targetItem.classList.contains('file')) return;
+        if (targetItem.classList.contains('file')) return; // ファイル上へのドロップは無視
         destFolderPath = targetItem.dataset.path;
     } else {
+        // 空白部分ならルートディレクトリ
         destFolderPath = currentDirectoryPath;
     }
 
     if (!destFolderPath) return;
 
-    if (srcPath === destFolderPath) return;
+    // --- 分岐処理 ---
 
-    const fileName = srcPath.split(/[/\\]/).pop();
+    // 1. 内部移動 (Move): handleDragStart でセットしたパスを取得
+    const srcPath = e.dataTransfer.getData('text/plain');
+    if (srcPath) {
+        // 移動元と移動先が同じなら無視
+        if (srcPath === destFolderPath) return;
 
-    const destSep = destFolderPath.includes('\\') ? '\\' : '/';
+        // 移動先のパスを作成 (destFolder/fileName)
+        const fileName = path.basename(srcPath);
+        const destPath = path.join(destFolderPath, fileName);
 
-    let destPath = destFolderPath;
-    if (!destPath.endsWith(destSep)) {
-        destPath += destSep;
-    }
-    destPath += fileName;
-
-    if (srcPath !== destPath) {
-        try {
-            if (typeof window.electronAPI?.moveFile === 'function') {
-                const result = await window.electronAPI.moveFile(srcPath, destPath);
-                if (result.success) {
-                    showNotification(`移動しました: ${fileName}`, 'success');
-                } else {
-                    showNotification(`移動に失敗しました: ${result.error}`, 'error');
+        if (srcPath !== destPath) {
+            try {
+                if (typeof window.electronAPI?.moveFile === 'function') {
+                    const result = await window.electronAPI.moveFile(srcPath, destPath);
+                    if (result.success) {
+                        showNotification(`移動しました: ${fileName}`, 'success');
+                        // ツリー更新等の処理があれば呼ぶ (例: initializeFileTreeWithState())
+                        // initializeFileTreeWithState(); 
+                    } else {
+                        showNotification(`移動に失敗しました: ${result.error}`, 'error');
+                    }
                 }
+            } catch (error) {
+                console.error('Move failed:', error);
+                showNotification(`エラーが発生しました: ${error.message}`, 'error');
             }
-        } catch (error) {
-            console.error('Move failed:', error);
-            showNotification(`エラーが発生しました: ${error.message}`, 'error');
+        }
+        return; // 移動処理完了
+    }
+
+    // 2. 外部からのコピー (Copy): Files がある場合
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        let successCount = 0;
+        for (const file of e.dataTransfer.files) {
+            try {
+                // file.path はElectron環境(コンテキスト分離ありでもドラッグ時は取得可能な場合が多い)でフルパス
+                const result = await window.electronAPI.copyFileSystemEntry(file.path, destFolderPath);
+
+                if (result.success) {
+                    successCount++;
+                } else {
+                    showNotification(`コピー失敗 (${file.name}): ${result.error}`, 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showNotification(`エラー: ${err.message}`, 'error');
+            }
+        }
+
+        if (successCount > 0) {
+            showNotification(`${successCount} 件の項目をコピーしました`, 'success');
+            // ファイルツリーを更新して新しいファイルを表示
+            if (typeof initializeFileTreeWithState === 'function') {
+                await initializeFileTreeWithState();
+            } else {
+                await initializeFileTree();
+            }
         }
     }
 }
