@@ -1329,7 +1329,7 @@ function getAvailableUntitledNumber() {
     // 1から順にチェックし、使われていない最初の番号を見つける
     // 最大 999 くらいまでチェックすれば十分でしょう
     while (nextNumber < 1000) {
-        const targetName = `Untitled-${nextNumber}`;
+        const targetName = `Untitled-${nextNumber}.md`;
 
         // 既存の openedFiles のキー（パス）の中に、
         // 仮想パスとして targetName が使われているかチェック
@@ -1364,7 +1364,7 @@ function createNewTab() {
     // 空き番号を取得
     const nextNumber = getAvailableUntitledNumber();
 
-    const fileName = `Untitled-${nextNumber}`;
+    const fileName = `Untitled-${nextNumber}.md`;
     const virtualPath = fileName; // パスとして仮の名前を使用
 
     // 既に開いている場合は切り替え（通常ありえないが念のため）
@@ -1384,7 +1384,7 @@ function createNewTab() {
     tab.className = 'tab';
     tab.dataset.filepath = virtualPath;
     // ● (未保存マーク) を最初からつけておく
-    tab.innerHTML = `${fileName} ● <span class="close-tab" data-filepath="${virtualPath}">×</span>`;
+    tab.innerHTML = `<span class="tab-filename">${fileName}</span> ● <span class="close-tab" data-filepath="${virtualPath}">×</span>`;
 
     enableTabDragging(tab);
 
@@ -2164,7 +2164,7 @@ const pasteHandler = EditorView.domEventHandlers({
             }
         }
 
-        // 2. ローカルファイル・フォルダのパス貼り付け処理 (★ここを修正)
+        // 2. ローカルファイル・フォルダのパス貼り付け処理
         // クリップボード内のファイルを確認
         if (event.clipboardData.files.length > 0) {
             const files = Array.from(event.clipboardData.files);
@@ -2283,7 +2283,7 @@ const dropHandler = EditorView.domEventHandlers({
         }
 
         // -------------------------------------------------
-        // ケース2: 内部ツリーからのドラッグ (text/plain) ★ここを追加
+        // ケース2: 内部ツリーからのドラッグ (text/plain)
         // -------------------------------------------------
         const textData = dataTransfer.getData('text/plain');
         if (textData) {
@@ -2386,7 +2386,7 @@ const dropHandler = EditorView.domEventHandlers({
                 if (file.path) {
                     (async () => {
                         try {
-                            // ★ ディレクトリか判定
+                            // ディレクトリか判定
                             const isDir = await window.electronAPI.isDirectory(file.path);
 
                             if (isDir) {
@@ -5914,59 +5914,57 @@ async function refreshGitHistory() {
 }
 
 /**
- * コミットグラフとリストの描画
+ * コミットグラフとリストの描画 (アコーディオン機能・クリック詳細表示を追加)
  */
 function renderGitGraph(commits, currentBranch) {
     gitHistoryList.innerHTML = '';
-
     if (commits.length === 0) {
         gitHistoryList.innerHTML = '<div class="git-empty-msg">No commits yet</div>';
         return;
     }
 
     commits.forEach((commit, index) => {
+        // 行全体を包むラッパー (詳細表示用のアコーディオンコンテナ)
+        const rowWrapper = document.createElement('div');
+        rowWrapper.className = 'git-history-row-wrapper';
+
+        // コミット行本体
         const row = document.createElement('div');
         row.className = 'git-history-row';
         row.dataset.oid = commit.oid;
 
-        // タイムラインの線とドット
+        // --- タイムライン ---
         const timeline = document.createElement('div');
         timeline.className = 'git-timeline';
         const line = document.createElement('div');
         line.className = 'git-timeline-line';
         if (index === commits.length - 1) line.classList.add('last');
-
         const dot = document.createElement('div');
         dot.className = 'git-timeline-dot';
-
         timeline.appendChild(line);
         timeline.appendChild(dot);
 
-        // コンテンツ
+        // --- コンテンツ ---
         const content = document.createElement('div');
         content.className = 'git-history-content';
 
-        // メッセージとRefs
+        // ヘッダー (メッセージとRefバッジ)
         const header = document.createElement('div');
         header.className = 'git-history-header';
 
-        // Refs (ブランチバッジ)
+        // Refs (ブランチバッジ等)
         if (commit.refs && commit.refs.length > 0) {
             const refsContainer = document.createElement('span');
             refsContainer.className = 'git-refs';
             commit.refs.forEach(ref => {
                 const badge = document.createElement('span');
                 badge.className = 'git-ref-badge';
-                // リモートかローカルかで色分け
                 if (ref.name.startsWith('origin/') || ref.name.startsWith('remotes/')) {
                     badge.classList.add('remote');
                     badge.textContent = `☁ ${ref.name.replace('remotes/', '')}`;
                 } else {
                     badge.textContent = ref.name;
-                    // 現在のブランチの場合、クラスを追加して強調する
-                    if (ref.name === currentBranch) {
-                        badge.classList.add('current-branch');
-                    }
+                    if (ref.name === currentBranch) badge.classList.add('current-branch');
                     if (ref.name === 'main' || ref.name === 'master') badge.classList.add('main');
                 }
                 refsContainer.appendChild(badge);
@@ -5979,14 +5977,12 @@ function renderGitGraph(commits, currentBranch) {
         msgSpan.textContent = commit.message.split('\n')[0]; // 1行目のみ
         header.appendChild(msgSpan);
 
-        // Author & Date
+        // メタ情報 (Author & Date)
         const meta = document.createElement('div');
         meta.className = 'git-history-meta';
         const authorName = commit.author.name;
-        // 日時のフォーマット
         const date = new Date(commit.author.timestamp * 1000);
         const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
         meta.textContent = `${authorName}, ${dateStr}`;
 
         content.appendChild(header);
@@ -5995,19 +5991,105 @@ function renderGitGraph(commits, currentBranch) {
         row.appendChild(timeline);
         row.appendChild(content);
 
-        // イベントリスナー: ツールチップ表示
-        row.addEventListener('mouseenter', (e) => showCommitTooltip(e, commit));
-        row.addEventListener('mouseleave', () => hideCommitTooltip());
+        // --- イベントリスナー設定 ---
 
-        // 右クリックでコンテキストメニュー表示
-        row.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            // ツールチップを隠す
-            hideCommitTooltip();
-            showCommitContextMenu(e.pageX, e.pageY, commit);
+        // 1. 既存のツールチップ (hover)
+        row.addEventListener('mouseenter', (e) => {
+            if (typeof showCommitTooltip === 'function') showCommitTooltip(e, commit);
+        });
+        row.addEventListener('mouseleave', () => {
+            if (typeof hideCommitTooltip === 'function') hideCommitTooltip();
         });
 
-        gitHistoryList.appendChild(row);
+        // 2. 右クリックメニュー
+        row.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (typeof hideCommitTooltip === 'function') hideCommitTooltip();
+            if (typeof showCommitContextMenu === 'function') showCommitContextMenu(e.pageX, e.pageY, commit);
+        });
+
+        // 3. 【新規】クリックで詳細(ファイルリスト)を展開
+        row.style.cursor = 'pointer';
+        row.onclick = async (e) => {
+            // バッジクリック等の場合は展開しない制御
+            if (e.target.closest('.git-ref-badge')) return;
+
+            // 既に詳細エリアがあるか確認
+            const existingDetail = rowWrapper.querySelector('.git-history-detail');
+            if (existingDetail) {
+                // 表示/非表示切り替え
+                const isHidden = existingDetail.style.display === 'none';
+                existingDetail.style.display = isHidden ? 'block' : 'none';
+                return;
+            }
+
+            // 詳細エリアを新規作成
+            const detailDiv = document.createElement('div');
+            detailDiv.className = 'git-history-detail';
+            // スタイル調整: タイムラインの右側に寄せる
+            detailDiv.style.paddingLeft = '34px';
+            detailDiv.style.paddingBottom = '8px';
+            detailDiv.style.fontSize = '12px';
+            detailDiv.style.color = 'var(--text-color)';
+            detailDiv.innerHTML = '<div style="color:#888;">Loading changes...</div>';
+            rowWrapper.appendChild(detailDiv);
+
+            try {
+                // メインプロセスから変更ファイル詳細を取得
+                const result = await window.electronAPI.gitGetCommitDetail(currentDirectoryPath, commit.oid);
+
+                if (result.success && result.stats.files) {
+                    detailDiv.innerHTML = ''; // Loading消去
+
+                    if (result.stats.files.length === 0) {
+                        detailDiv.innerHTML = '<div style="color:#888;">No files changed.</div>';
+                    } else {
+                        // ファイルリスト生成
+                        const fileList = document.createElement('div');
+                        fileList.className = 'git-commit-file-list';
+
+                        result.stats.files.forEach(file => {
+                            const fileItem = document.createElement('div');
+                            fileItem.className = 'git-commit-file-item';
+                            fileItem.style.cssText = 'display:flex; align-items:center; padding:2px 0; cursor:pointer; gap: 6px;';
+
+                            // ステータスに応じた色とアイコン
+                            let color = '#888';
+                            let statusLetter = 'M';
+                            if (file.status === 'A') { color = '#73c991'; statusLetter = 'A'; } // Added (Green)
+                            if (file.status === 'D') { color = '#d9534f'; statusLetter = 'D'; } // Deleted (Red)
+                            if (file.status === 'M') { color = '#e2c08d'; statusLetter = 'M'; } // Modified (Yellow)
+
+                            fileItem.innerHTML = `
+                                <span style="color:${color}; font-family:monospace; font-weight:bold; width:12px;">${statusLetter}</span>
+                                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${file.filepath}</span>
+                            `;
+
+                            // ホバーエフェクト
+                            fileItem.onmouseover = () => fileItem.style.textDecoration = 'underline';
+                            fileItem.onmouseout = () => fileItem.style.textDecoration = 'none';
+
+                            // ファイルクリックでDiff表示
+                            fileItem.onclick = (ev) => {
+                                ev.stopPropagation();
+                                openDiffView(file.filepath, commit.oid);
+                            };
+
+                            fileList.appendChild(fileItem);
+                        });
+                        detailDiv.appendChild(fileList);
+                    }
+                } else {
+                    detailDiv.innerHTML = '<div style="color:#888;">No details available.</div>';
+                }
+            } catch (err) {
+                console.error(err);
+                detailDiv.innerHTML = '<div style="color:#d9534f;">Error loading details.</div>';
+            }
+        };
+
+        rowWrapper.appendChild(row);
+        gitHistoryList.appendChild(rowWrapper);
     });
 }
 
@@ -8540,8 +8622,9 @@ const conflictField = StateField.define({
 /**
  * Git Diffビューを新しいタブで開く関数
  * @param {string} filePath - リポジトリルートからの相対パス
+ * @param {string|null} commitOid - (オプション) 過去のコミットを指定。nullの場合はWorking Tree vs HEAD。
  */
-async function openDiffView(filePath) {
+async function openDiffView(filePath, commitOid = null) {
     if (!currentDirectoryPath) return;
 
     // Diffを開く際にREADMEが表示されていたら閉じる
@@ -8549,72 +8632,106 @@ async function openDiffView(filePath) {
         closeWelcomeReadme();
     }
 
-    // 1. Diff用の仮想パスを作成
-    const diffPath = `DIFF://${filePath}`;
+    // 1. Diff用の仮想パスとタブ名を作成
+    // コミットIDがある場合はパスに含めて一意にする
+    let diffPath, tabName;
     const fileName = path.basename(filePath);
-    const tabName = `Diff: ${fileName}`;
+
+    if (commitOid) {
+        // 過去のコミット比較モード
+        diffPath = `DIFF://${commitOid}/${filePath}`;
+        tabName = `Diff: ${fileName} (${commitOid.substring(0, 7)})`;
+    } else {
+        // 通常のワーキングツリー比較モード
+        diffPath = `DIFF://${filePath}`;
+        tabName = `Diff: ${fileName}`;
+    }
 
     try {
-        // 2. 常に最新データを取得 (HEAD vs Local)
-        // A: HEADの内容 (Original / Left)
-        const headResult = await window.electronAPI.gitShow(currentDirectoryPath, 'HEAD', filePath);
-        const headContent = headResult.success ? headResult.content : "";
+        let headContent = "";
+        let rightContent = "";
+        let isRightEditable = true; // デフォルトは編集可能
 
-        // B: ワーキングツリーの内容 (Modified / Right)
-        const absolutePath = path.join(currentDirectoryPath, filePath);
-        let localContent = "";
-        try {
-            localContent = await window.electronAPI.loadFile(absolutePath);
-        } catch (e) {
-            localContent = "";
+        if (commitOid) {
+            // --- 過去のコミットモード (Read-only) ---
+            // A (Left): 親コミット (~1)
+            // git show commit~1:path
+            const parentRes = await window.electronAPI.gitShow(currentDirectoryPath, `${commitOid}~1`, filePath);
+            headContent = parentRes.success ? parentRes.content : "";
+
+            // B (Right): 対象コミット
+            // git show commit:path
+            const targetRes = await window.electronAPI.gitShow(currentDirectoryPath, commitOid, filePath);
+            rightContent = targetRes.success ? targetRes.content : "";
+
+            isRightEditable = false; // 過去のログなので編集不可
+        } else {
+            // --- 既存の HEAD vs Local モード ---
+            // A (Left): HEAD (Staged/Committed)
+            const headResult = await window.electronAPI.gitShow(currentDirectoryPath, 'HEAD', filePath);
+            headContent = headResult.success ? headResult.content : "";
+
+            // B (Right): ワーキングツリーの内容
+            // 現在エディタで開いているタブがあればその内容を、なければディスクから読み込む
+            const existingTab = openedFiles.get(filePath); // filePathは相対パスだが、openedFilesのキーは絶対パスの場合があることに注意が必要（※）
+
+            // ※ openedFilesのキーは通常絶対パスなので、相対パスではヒットしない可能性があります。
+            // 念のため絶対パスでも検索します。
+            const absPath = path.join(currentDirectoryPath, filePath);
+            const existingTabData = openedFiles.get(absPath);
+
+            if (existingTabData && existingTabData.content) {
+                // 既に開いていて編集中の内容があればそれを使う（未保存の変更も反映するため）
+                rightContent = existingTabData.content;
+            } else {
+                // 開いていない場合はディスクから最新を読み込む
+                try {
+                    rightContent = await window.electronAPI.loadFile(absPath);
+                } catch (e) {
+                    console.error('Failed to load local file for diff:', e);
+                    rightContent = "Error loading file content.";
+                }
+            }
         }
 
         // 3. データを登録・更新
-        // 既に存在する場合でも content / headContent を最新のもので上書きする
         openedFiles.set(diffPath, {
             type: 'diff',
             fileName: tabName,
-            content: localContent, // 保存用に現在の内容を保持
-            headContent: headContent, // 比較用
-            originalPath: absolutePath, // 上書き保存先
-            isVirtual: true
+            content: rightContent,      // Right (Editor/Modified)
+            headContent: headContent,   // Left (Original/HEAD)
+            originalPath: commitOid ? null : path.join(currentDirectoryPath, filePath), // 過去ログなら保存先なし
+            isVirtual: true,
+            readOnly: !isRightEditable, // フラグ: MergeView側で編集不可にするために使用
+            commitOid: commitOid        // 追跡用
         });
 
         // 4. タブがない場合は作成
-        // 【修正】document全体ではなく、タブコンテナの中から厳密に「.tab」クラスを持つ要素を探す
-        // これにより、他の場所にある要素を誤検知してタブ作成がスキップされるのを防ぎます
         let tab = editorTabsContainer.querySelector(`.tab[data-filepath="${CSS.escape(diffPath)}"]`);
-
         if (!tab) {
             tab = document.createElement('div');
             tab.className = 'tab';
             tab.dataset.filepath = diffPath;
-            // 閉じるボタン付きのタブHTML
             tab.innerHTML = `<span class="tab-filename">${tabName}</span> <span class="close-tab" data-filepath="${diffPath}">×</span>`;
-
-            // ドラッグ機能を有効化 (必要に応じて)
-            if (typeof enableTabDragging === 'function') {
-                enableTabDragging(tab);
-            }
-
+            if (typeof enableTabDragging === 'function') enableTabDragging(tab);
             editorTabsContainer.appendChild(tab);
         }
 
-        // 5. 表示内容の強制更新
-        // switchToFile は「同じパスなら再利用」する仕様だが、中身が変わっているため再描画させたい。
-        // diffContainerのdataset属性をクリアすることで、switchToFile内で「別のファイル」と認識させ、再生成をトリガーする。
+        // 5. 表示内容の強制更新 (DOMに残った古いDiffをクリアして再描画させる)
         const diffContainer = document.getElementById('diff-view-container');
         if (diffContainer && diffContainer.dataset.filepath === diffPath) {
-            diffContainer.dataset.filepath = '';
             diffContainer.innerHTML = '';
+            diffContainer.dataset.filepath = '';
         }
 
-        // 6. タブを開く
+        // 6. タブを開く (switchToFile -> MergeView生成)
         switchToFile(diffPath);
 
     } catch (e) {
         console.error('Failed to open diff view:', e);
-        showNotification(`Diff表示エラー: ${e.message}`, 'error');
+        if (typeof showNotification === 'function') {
+            showNotification(`Diff表示エラー: ${e.message}`, 'error');
+        }
     }
 }
 
@@ -8663,7 +8780,7 @@ async function openFile(filePath, fileName) {
         let tab = document.querySelector(`[data-filepath="${CSS.escape(normalizedPath)}"]`);
         let fileContent = '';
 
-        // ★修正点: テキストファイルなら一括で読み込む
+        // テキストファイルなら一括で読み込む
         if (fileType === 'text') {
             try {
                 fileContent = await window.electronAPI.loadFile(normalizedPath);
@@ -8921,7 +9038,9 @@ function switchToFile(filePath, targetPane = 'left') {
                 b: {
                     doc: docB,
                     extensions: [
-                        EditorView.editable.of(true),
+                        // fileData.readOnly フラグに基づいて編集可否を制御する
+                        EditorView.editable.of(!fileData.readOnly),
+                        fileData.readOnly ? EditorState.readOnly.of(true) : [],
                         ...commonDiffExtensions,
                         history(),
                         keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -8930,7 +9049,7 @@ function switchToFile(filePath, targetPane = 'left') {
                             if (v.docChanged) {
                                 // 1. ファイルのコンテンツ文字列を更新
                                 fileData.content = v.state.doc.toString();
-                                // 2. ★重要: メインエディタの古い状態(editorState)を破棄
+                                // 2. メインエディタの古い状態(editorState)を破棄
                                 // これにより、通常画面に戻った時に新しいcontentから再描画される
                                 fileData.editorState = null;
                                 onEditorInput(true);
@@ -8945,7 +9064,7 @@ function switchToFile(filePath, targetPane = 'left') {
             });
         }
 
-        // ★修正: アクティブなエディタをDiffの右側(b)に設定
+        // アクティブなエディタをDiffの右側(b)に設定
         // これにより、Diff画面でのCtrl+S保存などが正しく機能する
         if (globalDiffView) {
             targetView = globalDiffView.b;
@@ -10338,11 +10457,16 @@ async function showCreationInput(isFolder) {
         if (isCreating) return;
         isCreating = true;
 
-        const name = inputField.value.trim();
+        let name = inputField.value.trim();
         if (!name) {
             safeRemove();
             isCreating = false;
             return;
+        }
+
+        // フォルダでなく、かつ拡張子がない場合は .md を付与
+        if (!isFolder && !name.includes('.') && !name.endsWith('/')) {
+            name += '.md';
         }
 
         // path.joinを使用してパスを正しく結合
@@ -10377,9 +10501,14 @@ async function showCreationInput(isFolder) {
 
     // ファイル名バリデーション
     const validateFileName = () => {
-        const name = inputField.value.trim();
+        let name = inputField.value.trim();
 
         if (!name) return null;
+
+        // バリデーション時も拡張子補完を考慮してチェックする
+        if (!isFolder && !name.includes('.') && !name.endsWith('/')) {
+            name += '.md';
+        }
 
         // 不正な文字/形式チェック
         // .で終わる、.のみ、..のみなどは禁止

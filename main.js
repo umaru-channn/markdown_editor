@@ -2134,26 +2134,26 @@ ipcMain.handle('git-commit-detail', async (event, repoPath, oid) => {
     const commit = await git.readCommit({ fs, dir, oid });
     const parentOid = commit.commit.parent && commit.commit.parent.length > 0 ? commit.commit.parent[0] : null;
 
-    let filesChanged = 0;
-
+    let changes = [];
     if (parentOid) {
-      // 親コミットと比較して変更数をカウント
-      filesChanged = await countChangedFiles(fs, dir, oid, parentOid);
+      // 親コミットと比較して変更ファイルを取得
+      changes = await getCommitChanges(fs, dir, parentOid, oid);
     } else {
-      // 親がない場合（Initial commit）、全ファイル数をカウント
-      filesChanged = await countTreeFiles(fs, dir, oid);
+      // 親がない（Initial commit）場合は、そのコミットの全ツリーを取得する等の処理が必要だが
+      // 簡易的に空配列または全追加として扱う
+      // ここでは空の親と比較するロジックで対応
+      changes = await getCommitChanges(fs, dir, null, oid);
     }
 
     return {
       success: true,
       stats: {
-        filesChanged: filesChanged,
-        insertions: 0, // isomorphic-gitで正確な行数diffを取るのは重いため省略
-        deletions: 0
+        filesChanged: changes.length,
+        // 詳細なファイルリストも返す
+        files: changes
       }
     };
   } catch (error) {
-    console.error('Git commit detail error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -2218,32 +2218,39 @@ ipcMain.handle('git-revert-commit', async (event, repoPath, oid) => {
 });
 
 // ヘルパー: 2つのコミット間の変更ファイル数をカウント
-async function countChangedFiles(fs, dir, oid1, oid2) {
+// 既存の countChangedFiles を getCommitChanges に置き換え・拡張
+// (変更ファイル数だけでなく、詳細なリストも返すように変更)
+async function getCommitChanges(fs, dir, oid1, oid2) {
   try {
     return (await git.walk({
-      fs,
-      dir,
+      fs, dir,
       trees: [git.TREE({ ref: oid1 }), git.TREE({ ref: oid2 })],
       map: async function (filepath, [A, B]) {
         // ルートディレクトリは無視
         if (filepath === '.') return;
 
-        // ディレクトリ自体の変更はカウントしない（ファイルのみ）
+        // ディレクトリ自体の変更はカウントしない
         if ((await A?.type()) === 'tree' || (await B?.type()) === 'tree') return;
 
         const oidA = await A?.oid();
         const oidB = await B?.oid();
 
-        // OIDが異なれば変更あり（追加/削除/変更）
         if (oidA !== oidB) {
-          return 1;
+          // 変更の種類を特定
+          let status = 'M'; // Modified
+          if (!oidA) status = 'A'; // Added
+          else if (!oidB) status = 'D'; // Deleted
+
+          return {
+            filepath,
+            status
+          };
         }
-        return undefined;
       }
-    })).reduce((a, b) => a + (b || 0), 0);
+    })).flat().filter(Boolean); // undefinedを除去
   } catch (e) {
     console.error('Walk error:', e);
-    return 0;
+    return [];
   }
 }
 
@@ -4528,57 +4535,57 @@ ipcMain.handle('scan-backlinks', async (event, targetFileName, rootDir) => {
  * 再帰的にファイルまたはディレクトリをコピーするヘルパー関数
  */
 async function copyRecursive(src, dest) {
-    const stats = await fs.promises.stat(src);
-    if (stats.isDirectory()) {
-        // ディレクトリの場合
-        if (!fs.existsSync(dest)) {
-            await fs.promises.mkdir(dest, { recursive: true });
-        }
-        const entries = await fs.promises.readdir(src);
-        for (const entry of entries) {
-            await copyRecursive(path.join(src, entry), path.join(dest, entry));
-        }
-    } else {
-        // ファイルの場合
-        await fs.promises.copyFile(src, dest);
+  const stats = await fs.promises.stat(src);
+  if (stats.isDirectory()) {
+    // ディレクトリの場合
+    if (!fs.existsSync(dest)) {
+      await fs.promises.mkdir(dest, { recursive: true });
     }
+    const entries = await fs.promises.readdir(src);
+    for (const entry of entries) {
+      await copyRecursive(path.join(src, entry), path.join(dest, entry));
+    }
+  } else {
+    // ファイルの場合
+    await fs.promises.copyFile(src, dest);
+  }
 }
 
 // ファイル/フォルダのコピーハンドラー
 ipcMain.handle('copy-file-system-entry', async (event, srcPath, destDir) => {
-    try {
-        if (!srcPath || !destDir) return { success: false, error: 'Invalid arguments' };
+  try {
+    if (!srcPath || !destDir) return { success: false, error: 'Invalid arguments' };
 
-        const fileName = path.basename(srcPath);
-        const destPath = path.join(destDir, fileName);
+    const fileName = path.basename(srcPath);
+    const destPath = path.join(destDir, fileName);
 
-        // 同一パスへのコピー防止
-        if (srcPath === destPath) {
-            return { success: false, error: 'Source and destination are the same.' };
-        }
-
-        // 上書き防止（必要であれば上書きするロジックに変更可）
-        if (fs.existsSync(destPath)) {
-            return { success: false, error: 'Destination already exists.' };
-        }
-
-        await copyRecursive(srcPath, destPath);
-        return { success: true };
-    } catch (error) {
-        console.error('Copy failed:', error);
-        return { success: false, error: error.message };
+    // 同一パスへのコピー防止
+    if (srcPath === destPath) {
+      return { success: false, error: 'Source and destination are the same.' };
     }
+
+    // 上書き防止（必要であれば上書きするロジックに変更可）
+    if (fs.existsSync(destPath)) {
+      return { success: false, error: 'Destination already exists.' };
+    }
+
+    await copyRecursive(srcPath, destPath);
+    return { success: true };
+  } catch (error) {
+    console.error('Copy failed:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // 指定されたパスがディレクトリかどうかを判定
 ipcMain.handle('is-directory', async (event, filePath) => {
-    try {
-        const stats = await fs.promises.stat(filePath);
-        return stats.isDirectory();
-    } catch (error) {
-        console.error('is-directory check failed:', error);
-        return false;
-    }
+  try {
+    const stats = await fs.promises.stat(filePath);
+    return stats.isDirectory();
+  } catch (error) {
+    console.error('is-directory check failed:', error);
+    return false;
+  }
 });
 
 // This method will be called when Electron has finished
