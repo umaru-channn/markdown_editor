@@ -9412,62 +9412,75 @@ function switchToFile(filePath, targetPane = 'left') {
 
     const fileName = fileData ? fileData.fileName : filePath.split(/[/\\]/).pop();
     const fileTitleBarEl = document.getElementById('file-title-bar');
+    const splitTitleBarEl = document.getElementById('file-title-bar-split');
     const fileTitleInput = document.getElementById('file-title-input');
     const fileTitleInputSplit = document.getElementById('file-title-input-split');
 
-    if (isMainPane) {
-        if (fileTitleInput) {
-            if (isSettings) {
-                fileTitleInput.value = '設定';
-                fileTitleInput.disabled = true;
-            } else if (isDiff) {
-                fileTitleInput.value = fileName;
-                fileTitleInput.disabled = true;
-            } else {
-                const extIndex = fileName.lastIndexOf('.');
-                const nameNoExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
-                fileTitleInput.value = nameNoExt;
-                fileTitleInput.disabled = false;
-            }
-        }
+    // ヘルパー: タイトルバーを隠すべきファイルか判定
+    const shouldHideTitleBar = (p) => {
+        if (!p) return false;
+        // StartPage, README.md(互換性), 設定画面 は隠す
+        return p === 'StartPage' || p === 'README.md' || p === 'settings://view';
+    };
 
-        if (!isSplitLayoutVisible) {
-            if (fileTitleBarEl) {
-                if (filePath === 'StartPage' || isSettings) {
-                    fileTitleBarEl.classList.add('hidden');
-                } else {
-                    fileTitleBarEl.classList.remove('hidden');
-                }
-            }
+    // 1. 左側入力欄の設定
+    if (fileTitleInput) {
+        const leftPath = isSplitLayoutVisible ? (splitGroup.leftPath || globalEditorView.filePath) : currentFilePath;
+        if (leftPath === 'StartPage' || leftPath === 'README.md' || leftPath === 'settings://view') {
+            fileTitleInput.value = (leftPath === 'settings://view') ? '設定' : 'スタートページ';
+            fileTitleInput.disabled = true;
+        } else if (leftPath && leftPath.startsWith('DIFF://')) {
+            fileTitleInput.value = openedFiles.get(leftPath)?.fileName || 'Diff';
+            fileTitleInput.disabled = true;
         } else {
-            if (fileTitleBarEl) fileTitleBarEl.classList.remove('hidden');
+            const name = openedFiles.get(leftPath)?.fileName || (leftPath ? path.basename(leftPath) : '');
+            const extIndex = name.lastIndexOf('.');
+            const nameNoExt = extIndex > 0 ? name.substring(0, extIndex) : name;
+            fileTitleInput.value = nameNoExt;
+            fileTitleInput.disabled = false;
         }
     }
 
-    if (isSplitLayoutVisible) {
-        if (fileTitleInput) {
-            let leftPath = splitGroup.leftPath || (targetPane === 'left' ? filePath : globalEditorView.filePath);
-            if (leftPath === 'settings://view') {
-                fileTitleInput.value = '設定';
-                fileTitleInput.disabled = true;
-            } else {
-                const leftName = openedFiles.get(leftPath)?.fileName || '';
-                const extIndex = leftName.lastIndexOf('.');
-                fileTitleInput.value = extIndex > 0 ? leftName.substring(0, extIndex) : leftName;
-                fileTitleInput.disabled = false;
-            }
+    // 2. 右側入力欄の設定
+    if (isSplitLayoutVisible && fileTitleInputSplit) {
+        const rightPath = splitGroup.rightPath || (splitEditorView ? splitEditorView.filePath : null);
+        if (rightPath === 'StartPage' || rightPath === 'README.md' || rightPath === 'settings://view') {
+            fileTitleInputSplit.value = (rightPath === 'settings://view') ? '設定' : 'スタートページ';
+            fileTitleInputSplit.disabled = true;
+        } else if (rightPath && rightPath.startsWith('DIFF://')) {
+            fileTitleInputSplit.value = openedFiles.get(rightPath)?.fileName || 'Diff';
+            fileTitleInputSplit.disabled = true;
+        } else {
+            const name = openedFiles.get(rightPath)?.fileName || (rightPath ? path.basename(rightPath) : '');
+            const extIndex = name.lastIndexOf('.');
+            const nameNoExt = extIndex > 0 ? name.substring(0, extIndex) : name;
+            fileTitleInputSplit.value = nameNoExt;
+            fileTitleInputSplit.disabled = false;
         }
-        if (fileTitleInputSplit) {
-            let rightPath = splitGroup.rightPath || (targetPane === 'right' ? filePath : splitEditorView.filePath);
-            if (rightPath === 'settings://view') {
-                fileTitleInputSplit.value = '設定';
-                fileTitleInputSplit.disabled = true;
-            } else {
-                const rightName = openedFiles.get(rightPath)?.fileName || '';
-                const extIndex = rightName.lastIndexOf('.');
-                fileTitleInputSplit.value = extIndex > 0 ? rightName.substring(0, extIndex) : rightName;
-                fileTitleInputSplit.disabled = false;
-            }
+    }
+
+    // 3. タイトルバー自体の表示/非表示 (左右独立制御)
+    if (isSplitLayoutVisible) {
+        // 分割表示中
+        const leftPath = splitGroup.leftPath || (targetPane === 'left' ? filePath : globalEditorView.filePath);
+        const rightPath = splitGroup.rightPath || (targetPane === 'right' ? filePath : (splitEditorView ? splitEditorView.filePath : null));
+
+        // 左側
+        if (fileTitleBarEl) {
+            fileTitleBarEl.classList.toggle('hidden', shouldHideTitleBar(leftPath));
+        }
+        // 右側
+        if (splitTitleBarEl) {
+            splitTitleBarEl.classList.toggle('hidden', shouldHideTitleBar(rightPath));
+        }
+    } else {
+        // 全画面表示中
+        if (fileTitleBarEl) {
+            fileTitleBarEl.classList.toggle('hidden', shouldHideTitleBar(filePath));
+        }
+        // 右側は確実に隠す
+        if (splitTitleBarEl) {
+            splitTitleBarEl.classList.add('hidden');
         }
     }
 
@@ -9893,12 +9906,9 @@ function openInSplitView(filePath, side = 'right') {
     if (!targetPath) return;
 
     // 設定画面 ('settings://view') の重複オープン防止
-    // 既に設定画面が開かれている場合は警告を出して中断する
     if (targetPath === 'settings://view') {
         const isOpenedInLeft = globalEditorView && globalEditorView.filePath === 'settings://view';
         const isOpenedInRight = splitEditorView && splitEditorView.filePath === 'settings://view';
-        // const isOpenedInRight = isSplitLayoutVisible && splitEditorView && splitEditorView.filePath === 'settings://view';
-
 
         // 左右どちらかで既に開かれている場合
         if (isOpenedInLeft || isOpenedInRight) {
@@ -9916,7 +9926,43 @@ function openInSplitView(filePath, side = 'right') {
     const splitTitleBar = document.getElementById('file-title-bar-split');
     const mainEditorDiv = document.getElementById('editor');
 
-    // 分割レイアウトを適用するヘルパー
+    // ヘルパー: タイトルバーを隠すべきファイルか判定
+    const shouldHideTitleBar = (p) => {
+        if (!p) return false;
+        return p === 'StartPage' || p === 'README.md' || p === 'settings://view';
+    };
+
+    // ヘルパー: タイトルバーの幅と表示を最適化する（ここが修正の肝です）
+    const updateTitleBars = () => {
+        if (!mainTitleBar || !splitTitleBar) return;
+
+        const leftPath = splitGroup.leftPath || globalEditorView.filePath;
+        const rightPath = splitGroup.rightPath || (splitEditorView ? splitEditorView.filePath : null);
+
+        const hideLeft = shouldHideTitleBar(leftPath);
+        const hideRight = shouldHideTitleBar(rightPath);
+
+        // 表示・非表示の切り替え
+        mainTitleBar.classList.toggle('hidden', hideLeft);
+        splitTitleBar.classList.toggle('hidden', hideRight);
+
+        // 幅の調整ロジック
+        if (!hideLeft && !hideRight) {
+            // 両方表示: 50%ずつにリセット
+            mainTitleBar.style.width = '50%';
+            mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
+            splitTitleBar.style.width = '50%';
+        } else if (!hideLeft && hideRight) {
+            // 左のみ表示（右が設定など）: 左を100%に広げる
+            mainTitleBar.style.width = '100%';
+            mainTitleBar.style.borderRight = 'none';
+        } else if (hideLeft && !hideRight) {
+            // 右のみ表示（左が設定など）: 右を100%に広げる
+            splitTitleBar.style.width = '100%';
+        }
+    };
+
+    // 分割レイアウトを適用するヘルパー（初期化）
     const ensureSplitLayout = () => {
         if (!isSplitView) {
             isSplitView = true;
@@ -9932,52 +9978,41 @@ function openInSplitView(filePath, side = 'right') {
 
             if (mainTitleBar) {
                 mainTitleBar.style.flex = 'none';
-                mainTitleBar.style.width = '50%';
+                mainTitleBar.style.width = '50%'; // 初期値
                 mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
             }
             if (splitTitleBar) {
                 splitTitleBar.style.display = 'flex';
-                splitTitleBar.style.width = '50%';
+                splitTitleBar.style.width = '50%'; // 初期値
                 splitTitleBar.classList.remove('hidden');
             }
         }
     };
 
     // --- 左分割モード (side === 'left') ---
-    // 現在のメイン(左)にあるファイルを右に移し、新しいファイルを左に開く
     if (side === 'left') {
         ensureSplitLayout();
 
         // 1. 現在の左側のファイルパスを取得
         const currentLeftPath = globalEditorView ? globalEditorView.filePath : null;
 
-        // 2. 右側(splitEditorView)を初期化または更新して、左側にあったファイルを開く
+        // 2. 右側(splitEditorView)を初期化して、左側にあったファイルを開く
         if (currentLeftPath) {
             const leftFileData = openedFiles.get(currentLeftPath);
             let leftContent = leftFileData ? (leftFileData.content || '') : '';
-
-            // 現在のステートがあればそれを使う
-            if (globalEditorView) {
-                leftContent = globalEditorView.state.doc.toString();
-            }
+            if (globalEditorView) leftContent = globalEditorView.state.doc.toString();
 
             if (!splitEditorView) {
-                // 新規作成
                 const newState = createEditorState(leftContent, currentLeftPath);
-                splitEditorView = new EditorView({
-                    state: newState,
-                    parent: splitEditorDiv
-                });
+                splitEditorView = new EditorView({ state: newState, parent: splitEditorDiv });
                 splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
                 splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
             } else {
-                // 既存更新
                 const newState = createEditorState(leftContent, currentLeftPath);
                 splitEditorView.setState(newState);
             }
             splitEditorView.filePath = currentLeftPath;
 
-            // 右側のタイトルバー設定
             if (fileTitleInputSplit) {
                 const fName = currentLeftPath.split(/[/\\]/).pop();
                 const extIndex = fName.lastIndexOf('.');
@@ -9987,48 +10022,49 @@ function openInSplitView(filePath, side = 'right') {
             }
         }
 
-        // 3. 【重要】先に永続化状態（分割グループ情報）を更新する
-        // これにより switchToFile 内で isSplitGroupMember が true になり、全画面に戻らずに済む
+        // 3. グループ更新
         isSplitView = true;
         splitGroup.leftPath = targetPath;
         splitGroup.rightPath = currentLeftPath;
 
-        // 4. 左側(globalEditorView)でターゲットファイルを開く
+        // 4. 左側でターゲットファイルを開く
         switchToFile(targetPath, 'left');
 
+        // タイトルバー更新
+        updateTitleBars();
         return;
     }
 
     // --- 通常の右分割モード (side === 'right') ---
 
-    // 既存の右側チェック（既に開いている場合）
+    // 既存チェック
     if (isSplitLayoutVisible && splitEditorView && splitEditorView.filePath === targetPath) {
         ensureSplitLayout();
-        // 設定画面以外ならアクティブにする
         if (targetPath !== 'settings://view') {
             setActiveEditor(splitEditorView);
             activePane = 'right';
 
-            // ここでも念のためグループ情報を更新しておく
             isSplitView = true;
             splitGroup.leftPath = globalEditorView.filePath;
             splitGroup.rightPath = targetPath;
+
+            // タイトルバー更新
+            updateTitleBars();
             return;
         }
     }
 
     ensureSplitLayout();
 
-    // 1. 先にグループ情報を更新して「分割状態であること」を確定させる
+    // グループ更新
     isSplitView = true;
     splitGroup.leftPath = globalEditorView.filePath;
     splitGroup.rightPath = targetPath;
 
-    // ファイル情報の取得
     const fileData = openedFiles.get(targetPath);
 
     // 設定画面の場合
-    if (fileData && fileData.type === 'settings') {
+    if (targetPath === 'settings://view' || (fileData && fileData.type === 'settings')) {
         if (!splitEditorView) {
             splitEditorView = new EditorView({ parent: splitEditorDiv });
             splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
@@ -10036,10 +10072,14 @@ function openInSplitView(filePath, side = 'right') {
         }
         splitEditorView.filePath = targetPath;
         switchToFile(targetPath, 'right');
+
         if (fileTitleInputSplit) {
             fileTitleInputSplit.value = '設定';
             fileTitleInputSplit.disabled = true;
         }
+
+        // タイトルバー更新（ここで左が100%になる）
+        updateTitleBars();
         return;
     }
 
@@ -10055,7 +10095,6 @@ function openInSplitView(filePath, side = 'right') {
 
     // コンテンツ取得とエディタ生成
     let content = fileData ? (fileData.content || '') : 'Loading...';
-    // 左側で同じファイルを開いているなら同期
     if (globalEditorView && globalEditorView.filePath === targetPath) {
         content = globalEditorView.state.doc.toString();
     }
@@ -10066,15 +10105,8 @@ function openInSplitView(filePath, side = 'right') {
             state: state,
             parent: splitEditorDiv
         });
-
-        splitEditorView.contentDOM.addEventListener('focus', () => {
-            activePane = 'right';
-            setActiveEditor(splitEditorView);
-        });
-        splitEditorView.contentDOM.addEventListener('click', () => {
-            activePane = 'right';
-            setActiveEditor(splitEditorView);
-        });
+        splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+        splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
     } else {
         const newState = createEditorState(content, targetPath);
         splitEditorView.setState(newState);
@@ -10092,8 +10124,10 @@ function openInSplitView(filePath, side = 'right') {
         detachSettingsView();
     }
 
-    // showSplitLayout(); // 上ですでに ensureSplitLayout を呼んでいるので不要だが念のため
     showSplitLayout();
+
+    // 最後にタイトルバー更新
+    updateTitleBars();
 }
 
 // タブを切り替える関数 (Ctrl+Tab等での重複防止)
