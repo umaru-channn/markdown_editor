@@ -7343,14 +7343,16 @@ if (fileTitleInput) {
 
     fileTitleInput.addEventListener('blur', async () => {
         const newName = fileTitleInput.value.trim();
-
+        // 現在のファイルパスがなければ中断
         if (!newName || !currentFilePath) return;
 
+        // パス区切り文字の判定
         const separator = currentFilePath.includes('\\') ? '\\' : '/';
         const currentFileName = currentFilePath.split(separator).pop();
         const currentExt = currentFileName.includes('.') ? '.' + currentFileName.split('.').pop() : '';
         const currentNameWithoutExt = currentFileName.replace(currentExt, '');
 
+        // 変更がなければ終了
         if (newName === currentNameWithoutExt) return;
 
         try {
@@ -7362,17 +7364,21 @@ if (fileTitleInput) {
                     const newPath = result.path;
                     const newFileName = newPath.split(separator).pop();
 
-                    // 共通のリネーム後処理を呼び出し（ここを修正）
-                    // updateTabsAfterRenameを使用することで、エディタのパス情報やタブ、左右のタイトルバーが正しく同期されます
+                    // 共通のリネーム後処理を呼び出し (左右の同期もここで行われる)
                     updateTabsAfterRename(oldPath, newPath, newFileName);
-                    updateRecentFilesAfterRename(oldPath, newPath);
-                    initializeFileTreeWithState();
 
+                    // その他の更新処理
+                    updateRecentFilesAfterRename(oldPath, newPath);
+                    if (typeof initializeFileTreeWithState === 'function') {
+                        initializeFileTreeWithState();
+                    } else {
+                        initializeFileTree();
+                    }
                     console.log(`Renamed ${oldPath} to ${newPath}`);
                 } else {
                     console.error('Rename failed:', result.error);
                     showNotification(`ファイル名の変更に失敗しました: ${result.error}`, 'error');
-                    fileTitleInput.value = currentNameWithoutExt;
+                    fileTitleInput.value = currentNameWithoutExt; // 失敗時は元に戻す
                 }
             }
         } catch (e) {
@@ -7385,13 +7391,13 @@ if (fileTitleInput) {
 if (fileTitleInputSplit) {
     // フォーカス時に右側をアクティブにする
     fileTitleInputSplit.addEventListener('focus', () => {
-        if (splitEditorView) {
+        if (typeof splitEditorView !== 'undefined' && splitEditorView) {
             activePane = 'right';
             setActiveEditor(splitEditorView);
         }
     });
 
-    // Enterキーで確定
+    // Enterキーで確定 (Blurを発火させる)
     fileTitleInputSplit.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -7403,7 +7409,7 @@ if (fileTitleInputSplit) {
     fileTitleInputSplit.addEventListener('blur', async () => {
         const newName = fileTitleInputSplit.value.trim();
 
-        // アクティブなパスを使用 (focusイベントで右側になっているはず)
+        // アクティブなパスを使用 (focusイベントで右側=currentFilePathになっているはず)
         if (!newName || !currentFilePath) return;
 
         const separator = currentFilePath.includes('\\') ? '\\' : '/';
@@ -7424,9 +7430,13 @@ if (fileTitleInputSplit) {
 
                     // 共通のリネーム後処理を呼び出し
                     updateTabsAfterRename(oldPath, newPath, newFileName);
-                    updateRecentFilesAfterRename(oldPath, newPath);
-                    initializeFileTreeWithState();
 
+                    updateRecentFilesAfterRename(oldPath, newPath);
+                    if (typeof initializeFileTreeWithState === 'function') {
+                        initializeFileTreeWithState();
+                    } else {
+                        initializeFileTree();
+                    }
                     console.log(`Renamed (Right Pane) ${oldPath} to ${newPath}`);
                 } else {
                     console.error('Rename failed:', result.error);
@@ -7441,59 +7451,181 @@ if (fileTitleInputSplit) {
     });
 }
 
-function updateTabsAfterRename(oldPath, newPath, newName) {
-    const fileData = openedFiles.get(oldPath);
-    if (fileData) {
-        fileData.fileName = newName;
-        openedFiles.set(newPath, fileData);
+/**
+ * タイトルバーの表示・非表示と幅を、現在のファイルと設定画面の状態に合わせて更新する関数
+ * 設定画面やDiff、スタートページの場合はタイトルバーを非表示にし、
+ * 片方が非表示の場合はもう片方を全幅(100%)に広げて表示します。
+ */
+function updateFileTitleBars() {
+    const mainTitleBar = document.getElementById('file-title-bar');
+    const splitTitleBar = document.getElementById('file-title-bar-split');
+    const fileTitleInput = document.getElementById('file-title-input');
+    const fileTitleInputSplit = document.getElementById('file-title-input-split');
+
+    if (!mainTitleBar || !splitTitleBar) return;
+
+    // ヘルパー: タイトルバーを隠すべきパスか判定
+    const shouldHide = (p) => {
+        if (!p) return true; // パスなしは隠す
+        // 設定画面、スタートページ、README(互換)、Diff画面の場合は隠す
+        if (p === 'settings://view' || p === 'StartPage' || p === 'README.md' || p.startsWith('DIFF://')) {
+            return true;
+        }
+        return false;
+    };
+
+    // ヘルパー: 入力欄の値を更新
+    const updateInputValue = (input, p) => {
+        if (!input || !p) return;
+        if (shouldHide(p)) {
+            // 隠す場合でも値はセットしておく（念のため）
+            const name = openedFiles.get(p)?.fileName || 'Untitled';
+            input.value = name;
+            input.disabled = true;
+        } else {
+            const name = openedFiles.get(p)?.fileName || path.basename(p);
+            // 拡張子を除去して表示
+            const extIndex = name.lastIndexOf('.');
+            const nameNoExt = extIndex > 0 ? name.substring(0, extIndex) : name;
+            input.value = nameNoExt;
+            input.disabled = false;
+        }
+    };
+
+    if (typeof isSplitLayoutVisible !== 'undefined' && isSplitLayoutVisible) {
+        // --- 分割表示中 ---
+        const leftPath = splitGroup.leftPath || (globalEditorView ? globalEditorView.filePath : null);
+        const rightPath = splitGroup.rightPath || (splitEditorView ? splitEditorView.filePath : null);
+
+        const hideLeft = shouldHide(leftPath);
+        const hideRight = shouldHide(rightPath);
+
+        // クラス操作で表示/非表示切り替え
+        mainTitleBar.classList.toggle('hidden', hideLeft);
+        splitTitleBar.classList.toggle('hidden', hideRight);
+
+        // 幅とボーダーの調整
+        if (!hideLeft && !hideRight) {
+            // 両方表示: 50%ずつ
+            mainTitleBar.style.width = '50%';
+            mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
+            splitTitleBar.style.width = '50%';
+        } else if (!hideLeft && hideRight) {
+            // 左のみ表示: 左を100%に
+            mainTitleBar.style.width = '100%';
+            mainTitleBar.style.borderRight = 'none';
+        } else if (hideLeft && !hideRight) {
+            // 右のみ表示: 右を100%に
+            splitTitleBar.style.width = '100%';
+        } else {
+            // 両方隠す（設定 vs 設定 など）
+        }
+
+        // 入力欄の値更新
+        updateInputValue(fileTitleInput, leftPath);
+        updateInputValue(fileTitleInputSplit, rightPath);
+
+    } else {
+        // --- 全画面表示中 ---
+        const currentPath = currentFilePath;
+        const hide = shouldHide(currentPath);
+
+        mainTitleBar.classList.toggle('hidden', hide);
+        splitTitleBar.classList.add('hidden'); // 右は常に隠す
+
+        if (!hide) {
+            mainTitleBar.style.width = '100%';
+            mainTitleBar.style.borderRight = 'none';
+            updateInputValue(fileTitleInput, currentPath);
+        }
+    }
+}
+
+/**
+ * リネーム後にタブ、内部状態、タイトルバーを一括更新する関数
+ */
+function updateTabsAfterRename(oldPath, newPath, newFileName) {
+    // 1. openedFiles (内部管理マップ) の更新
+    if (openedFiles.has(oldPath)) {
+        const data = openedFiles.get(oldPath);
+        data.fileName = newFileName;
+        // 新しいパスで登録し直し、古いパスを削除
+        openedFiles.set(newPath, data);
         openedFiles.delete(oldPath);
     }
 
-    if (fileModificationState.has(oldPath)) {
-        fileModificationState.set(newPath, fileModificationState.get(oldPath));
-        fileModificationState.delete(oldPath);
-    }
-
-    // ビューのパス情報を更新
+    // 2. エディタのファイルパスプロパティ更新 (左右両方をチェック)
     if (globalEditorView && globalEditorView.filePath === oldPath) {
         globalEditorView.filePath = newPath;
     }
-    if (splitEditorView && splitEditorView.filePath === oldPath) {
+    // splitEditorView が存在し、かつ同じファイルを開いていた場合も更新
+    if (typeof splitEditorView !== 'undefined' && splitEditorView && splitEditorView.filePath === oldPath) {
         splitEditorView.filePath = newPath;
     }
 
-    // 現在アクティブなパスなら更新
+    // 3. splitGroup (画面分割管理) のパス更新
+    if (typeof splitGroup !== 'undefined') {
+        if (splitGroup.leftPath === oldPath) splitGroup.leftPath = newPath;
+        if (splitGroup.rightPath === oldPath) splitGroup.rightPath = newPath;
+    }
+
+    // 4. カレントパスの更新 (現在アクティブなファイルがリネームされた場合)
     if (currentFilePath === oldPath) {
         currentFilePath = newPath;
-        document.title = `${newName} - Markdown IDE`;
     }
 
-    // ▼ 修正: 左側のエディタがこのファイルを表示している場合、左のタイトルバーを更新
-    if (globalEditorView && globalEditorView.filePath === newPath && fileTitleInput) {
-        const extIndex = newName.lastIndexOf('.');
-        const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
-        fileTitleInput.value = nameNoExt;
-    }
-
-    // ▼ 修正: 右側のエディタがこのファイルを表示している場合、右のタイトルバーを更新
-    if (splitEditorView && splitEditorView.filePath === newPath && fileTitleInputSplit) {
-        const extIndex = newName.lastIndexOf('.');
-        const nameNoExt = extIndex > 0 ? newName.substring(0, extIndex) : newName;
-        fileTitleInputSplit.value = nameNoExt;
-    }
-
-    // タブの表示更新
-    const tab = document.querySelector(`[data-filepath="${CSS.escape(oldPath)}"]`);
-    if (tab) {
+    // 5. タブUIの更新 (すべての該当タブの属性と表示名を更新)
+    const tabs = document.querySelectorAll(`.tab[data-filepath="${CSS.escape(oldPath)}"]`);
+    tabs.forEach(tab => {
         tab.dataset.filepath = newPath;
+
+        // タブ名の更新
+        const nameSpan = tab.querySelector('.tab-filename');
+        if (nameSpan) {
+            nameSpan.textContent = newFileName;
+        }
+
+        // 閉じるボタンのパス更新
         const closeBtn = tab.querySelector('.close-tab');
         if (closeBtn) {
             closeBtn.dataset.filepath = newPath;
         }
-        // Dirtyマーク(●)を維持しつつ名前更新
-        const isDirty = tab.innerHTML.includes('●');
-        // HTML構造を壊さないように書き換え
-        tab.innerHTML = `<span class="tab-filename">${newName}</span> ${isDirty ? '● ' : ''}<span class="close-tab" data-filepath="${newPath}">×</span>`;
+    });
+
+    // 6. タイトルバー入力欄の更新 (拡張子を除いた名前を表示)
+    // 拡張子の取得ロジック (既存コードに合わせて簡易実装)
+    const extIndex = newFileName.lastIndexOf('.');
+    const nameWithoutExt = extIndex !== -1 ? newFileName.substring(0, extIndex) : newFileName;
+
+    // 左側 (Main) のタイトルバー更新
+    if (globalEditorView && globalEditorView.filePath === newPath) {
+        if (fileTitleInput) {
+            fileTitleInput.value = nameWithoutExt;
+        }
+    }
+
+    // 右側 (Split) のタイトルバー更新 [ここが修正ポイント: 分割時も確実に更新]
+    if (typeof splitEditorView !== 'undefined' && splitEditorView && splitEditorView.filePath === newPath) {
+        if (fileTitleInputSplit) {
+            fileTitleInputSplit.value = nameWithoutExt;
+        }
+    }
+
+    // 7. シンタックスハイライト（言語モード）の再設定 (拡張子変更に対応)
+    const updateLang = (view, path) => {
+        if (!view) return;
+        if (typeof getLanguageExtensions === 'function' && typeof languageCompartment !== 'undefined') {
+            view.dispatch({
+                effects: languageCompartment.reconfigure(getLanguageExtensions(path))
+            });
+        }
+    };
+
+    if (globalEditorView && globalEditorView.filePath === newPath) {
+        updateLang(globalEditorView, newPath);
+    }
+    if (typeof splitEditorView !== 'undefined' && splitEditorView && splitEditorView.filePath === newPath) {
+        updateLang(splitEditorView, newPath);
     }
 }
 
@@ -9410,79 +9542,8 @@ function switchToFile(filePath, targetPane = 'left') {
         if (diffContainer) diffContainer.style.display = 'none';
     }
 
-    const fileName = fileData ? fileData.fileName : filePath.split(/[/\\]/).pop();
-    const fileTitleBarEl = document.getElementById('file-title-bar');
-    const splitTitleBarEl = document.getElementById('file-title-bar-split');
-    const fileTitleInput = document.getElementById('file-title-input');
-    const fileTitleInputSplit = document.getElementById('file-title-input-split');
-
-    // ヘルパー: タイトルバーを隠すべきファイルか判定
-    const shouldHideTitleBar = (p) => {
-        if (!p) return false;
-        // StartPage, README.md(互換性), 設定画面 は隠す
-        return p === 'StartPage' || p === 'README.md' || p === 'settings://view';
-    };
-
-    // 1. 左側入力欄の設定
-    if (fileTitleInput) {
-        const leftPath = isSplitLayoutVisible ? (splitGroup.leftPath || globalEditorView.filePath) : currentFilePath;
-        if (leftPath === 'StartPage' || leftPath === 'README.md' || leftPath === 'settings://view') {
-            fileTitleInput.value = (leftPath === 'settings://view') ? '設定' : 'スタートページ';
-            fileTitleInput.disabled = true;
-        } else if (leftPath && leftPath.startsWith('DIFF://')) {
-            fileTitleInput.value = openedFiles.get(leftPath)?.fileName || 'Diff';
-            fileTitleInput.disabled = true;
-        } else {
-            const name = openedFiles.get(leftPath)?.fileName || (leftPath ? path.basename(leftPath) : '');
-            const extIndex = name.lastIndexOf('.');
-            const nameNoExt = extIndex > 0 ? name.substring(0, extIndex) : name;
-            fileTitleInput.value = nameNoExt;
-            fileTitleInput.disabled = false;
-        }
-    }
-
-    // 2. 右側入力欄の設定
-    if (isSplitLayoutVisible && fileTitleInputSplit) {
-        const rightPath = splitGroup.rightPath || (splitEditorView ? splitEditorView.filePath : null);
-        if (rightPath === 'StartPage' || rightPath === 'README.md' || rightPath === 'settings://view') {
-            fileTitleInputSplit.value = (rightPath === 'settings://view') ? '設定' : 'スタートページ';
-            fileTitleInputSplit.disabled = true;
-        } else if (rightPath && rightPath.startsWith('DIFF://')) {
-            fileTitleInputSplit.value = openedFiles.get(rightPath)?.fileName || 'Diff';
-            fileTitleInputSplit.disabled = true;
-        } else {
-            const name = openedFiles.get(rightPath)?.fileName || (rightPath ? path.basename(rightPath) : '');
-            const extIndex = name.lastIndexOf('.');
-            const nameNoExt = extIndex > 0 ? name.substring(0, extIndex) : name;
-            fileTitleInputSplit.value = nameNoExt;
-            fileTitleInputSplit.disabled = false;
-        }
-    }
-
-    // 3. タイトルバー自体の表示/非表示 (左右独立制御)
-    if (isSplitLayoutVisible) {
-        // 分割表示中
-        const leftPath = splitGroup.leftPath || (targetPane === 'left' ? filePath : globalEditorView.filePath);
-        const rightPath = splitGroup.rightPath || (targetPane === 'right' ? filePath : (splitEditorView ? splitEditorView.filePath : null));
-
-        // 左側
-        if (fileTitleBarEl) {
-            fileTitleBarEl.classList.toggle('hidden', shouldHideTitleBar(leftPath));
-        }
-        // 右側
-        if (splitTitleBarEl) {
-            splitTitleBarEl.classList.toggle('hidden', shouldHideTitleBar(rightPath));
-        }
-    } else {
-        // 全画面表示中
-        if (fileTitleBarEl) {
-            fileTitleBarEl.classList.toggle('hidden', shouldHideTitleBar(filePath));
-        }
-        // 右側は確実に隠す
-        if (splitTitleBarEl) {
-            splitTitleBarEl.classList.add('hidden');
-        }
-    }
+    // --- タイトルバーの更新ロジックを共通関数に置き換え ---
+    updateFileTitleBars();
 
     if (fileData) {
         document.title = `${fileData.fileName} - Markdown IDE`;
@@ -9922,45 +9983,7 @@ function openInSplitView(filePath, side = 'right') {
     if (btnCloseSplit) btnCloseSplit.classList.remove('disabled');
 
     const splitEditorDiv = document.getElementById('editor-split');
-    const mainTitleBar = document.getElementById('file-title-bar');
-    const splitTitleBar = document.getElementById('file-title-bar-split');
     const mainEditorDiv = document.getElementById('editor');
-
-    // ヘルパー: タイトルバーを隠すべきファイルか判定
-    const shouldHideTitleBar = (p) => {
-        if (!p) return false;
-        return p === 'StartPage' || p === 'README.md' || p === 'settings://view';
-    };
-
-    // ヘルパー: タイトルバーの幅と表示を最適化する（ここが修正の肝です）
-    const updateTitleBars = () => {
-        if (!mainTitleBar || !splitTitleBar) return;
-
-        const leftPath = splitGroup.leftPath || globalEditorView.filePath;
-        const rightPath = splitGroup.rightPath || (splitEditorView ? splitEditorView.filePath : null);
-
-        const hideLeft = shouldHideTitleBar(leftPath);
-        const hideRight = shouldHideTitleBar(rightPath);
-
-        // 表示・非表示の切り替え
-        mainTitleBar.classList.toggle('hidden', hideLeft);
-        splitTitleBar.classList.toggle('hidden', hideRight);
-
-        // 幅の調整ロジック
-        if (!hideLeft && !hideRight) {
-            // 両方表示: 50%ずつにリセット
-            mainTitleBar.style.width = '50%';
-            mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
-            splitTitleBar.style.width = '50%';
-        } else if (!hideLeft && hideRight) {
-            // 左のみ表示（右が設定など）: 左を100%に広げる
-            mainTitleBar.style.width = '100%';
-            mainTitleBar.style.borderRight = 'none';
-        } else if (hideLeft && !hideRight) {
-            // 右のみ表示（左が設定など）: 右を100%に広げる
-            splitTitleBar.style.width = '100%';
-        }
-    };
 
     // 分割レイアウトを適用するヘルパー（初期化）
     const ensureSplitLayout = () => {
@@ -9975,19 +9998,19 @@ function openInSplitView(filePath, side = 'right') {
                 resizerEditorSplit.classList.remove('hidden');
             }
             splitEditorDiv.style.borderLeft = 'none';
-
-            if (mainTitleBar) {
-                mainTitleBar.style.flex = 'none';
-                mainTitleBar.style.width = '50%'; // 初期値
-                mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
-            }
-            if (splitTitleBar) {
-                splitTitleBar.style.display = 'flex';
-                splitTitleBar.style.width = '50%'; // 初期値
-                splitTitleBar.classList.remove('hidden');
-            }
         }
     };
+
+    // splitEditorView が未作成なら作成する（インスタンスがないと switchToFile がエラーになる可能性があるため）
+    if (!splitEditorView) {
+        // 初期状態は空で作成
+        splitEditorView = new EditorView({
+            parent: splitEditorDiv
+        });
+        // フォーカスイベントの登録
+        splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+        splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
+    }
 
     // --- 左分割モード (side === 'left') ---
     if (side === 'left') {
@@ -9996,138 +10019,45 @@ function openInSplitView(filePath, side = 'right') {
         // 1. 現在の左側のファイルパスを取得
         const currentLeftPath = globalEditorView ? globalEditorView.filePath : null;
 
-        // 2. 右側(splitEditorView)を初期化して、左側にあったファイルを開く
-        if (currentLeftPath) {
-            const leftFileData = openedFiles.get(currentLeftPath);
-            let leftContent = leftFileData ? (leftFileData.content || '') : '';
-            if (globalEditorView) leftContent = globalEditorView.state.doc.toString();
-
-            if (!splitEditorView) {
-                const newState = createEditorState(leftContent, currentLeftPath);
-                splitEditorView = new EditorView({ state: newState, parent: splitEditorDiv });
-                splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
-                splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
-            } else {
-                const newState = createEditorState(leftContent, currentLeftPath);
-                splitEditorView.setState(newState);
-            }
-            splitEditorView.filePath = currentLeftPath;
-
-            if (fileTitleInputSplit) {
-                const fName = currentLeftPath.split(/[/\\]/).pop();
-                const extIndex = fName.lastIndexOf('.');
-                const nameNoExt = extIndex > 0 ? fName.substring(0, extIndex) : fName;
-                fileTitleInputSplit.value = nameNoExt;
-                fileTitleInputSplit.disabled = false;
-            }
-        }
-
-        // 3. グループ更新
+        // 2. グループ更新 (左:ターゲット, 右:元の左側)
         isSplitView = true;
         splitGroup.leftPath = targetPath;
         splitGroup.rightPath = currentLeftPath;
+
+        // 3. 元の左側を右側に移すために右側を更新
+        // (switchToFileを呼ぶことで、エディタの状態や設定画面のDOM移動などが適切に行われる)
+        if (currentLeftPath) {
+            switchToFile(currentLeftPath, 'right');
+        }
 
         // 4. 左側でターゲットファイルを開く
         switchToFile(targetPath, 'left');
 
         // タイトルバー更新
-        updateTitleBars();
+        updateFileTitleBars();
         return;
     }
 
     // --- 通常の右分割モード (side === 'right') ---
 
-    // 既存チェック
-    if (isSplitLayoutVisible && splitEditorView && splitEditorView.filePath === targetPath) {
-        ensureSplitLayout();
-        if (targetPath !== 'settings://view') {
-            setActiveEditor(splitEditorView);
-            activePane = 'right';
-
-            isSplitView = true;
-            splitGroup.leftPath = globalEditorView.filePath;
-            splitGroup.rightPath = targetPath;
-
-            // タイトルバー更新
-            updateTitleBars();
-            return;
-        }
-    }
-
     ensureSplitLayout();
 
-    // グループ更新
+    // グループ更新 (左:そのまま, 右:ターゲット)
     isSplitView = true;
-    splitGroup.leftPath = globalEditorView.filePath;
+    // 左側が設定画面の場合もあるので、現在の globalEditorView.filePath を信頼するのではなく
+    // splitGroup.leftPath があればそれを維持、なければ現在のパスを採用
+    const currentLeftPath = splitGroup.leftPath || (globalEditorView ? globalEditorView.filePath : null);
+
+    splitGroup.leftPath = currentLeftPath;
     splitGroup.rightPath = targetPath;
 
-    const fileData = openedFiles.get(targetPath);
+    // 重要: switchToFile に描画処理を委譲する
+    // これにより、splitGroup に基づいて左右の表示内容（設定画面含む）が正しく再描画される
+    // 特に左側が設定画面だった場合、switchToFile がそのDOM配置を維持してくれる
+    switchToFile(targetPath, 'right');
 
-    // 設定画面の場合
-    if (targetPath === 'settings://view' || (fileData && fileData.type === 'settings')) {
-        if (!splitEditorView) {
-            splitEditorView = new EditorView({ parent: splitEditorDiv });
-            splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
-            splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
-        }
-        splitEditorView.filePath = targetPath;
-        switchToFile(targetPath, 'right');
-
-        if (fileTitleInputSplit) {
-            fileTitleInputSplit.value = '設定';
-            fileTitleInputSplit.disabled = true;
-        }
-
-        // タイトルバー更新（ここで左が100%になる）
-        updateTitleBars();
-        return;
-    }
-
-    // 通常ファイル
-    if (fileTitleInputSplit) {
-        const fileName = targetPath.split(/[/\\]/).pop();
-        const extIndex = fileName.lastIndexOf('.');
-        const nameNoExt = extIndex > 0 ? fileName.substring(0, extIndex) : fileName;
-        fileTitleInputSplit.value = nameNoExt;
-        fileTitleInputSplit.title = targetPath;
-        fileTitleInputSplit.disabled = false;
-    }
-
-    // コンテンツ取得とエディタ生成
-    let content = fileData ? (fileData.content || '') : 'Loading...';
-    if (globalEditorView && globalEditorView.filePath === targetPath) {
-        content = globalEditorView.state.doc.toString();
-    }
-
-    if (!splitEditorView) {
-        const state = createEditorState(content, targetPath);
-        splitEditorView = new EditorView({
-            state: state,
-            parent: splitEditorDiv
-        });
-        splitEditorView.contentDOM.addEventListener('focus', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
-        splitEditorView.contentDOM.addEventListener('click', () => { activePane = 'right'; setActiveEditor(splitEditorView); });
-    } else {
-        const newState = createEditorState(content, targetPath);
-        splitEditorView.setState(newState);
-    }
-
-    splitEditorView.filePath = targetPath;
-    activePane = 'right';
-    setActiveEditor(splitEditorView);
-
-    const editorEl = document.getElementById('editor-split');
-    const settingsEl = document.getElementById('content-settings');
-    if (editorEl) editorEl.style.display = 'block';
-
-    if (settingsEl && settingsEl.parentElement === document.getElementById('editor-wrapper') && settingsEl.nextElementSibling === null) {
-        detachSettingsView();
-    }
-
-    showSplitLayout();
-
-    // 最後にタイトルバー更新
-    updateTitleBars();
+    // 念のためタイトルバー更新
+    updateFileTitleBars();
 }
 
 // タブを切り替える関数 (Ctrl+Tab等での重複防止)
@@ -12023,6 +11953,7 @@ if (resizerEditorSplit) {
 // 既存の mousemove イベント内に追加、または新規に追加
 document.addEventListener('mousemove', (e) => {
 
+    // --- 左サイドバーのリサイズ (元のロジックのまま) ---
     if (isResizingLeft && resizerLeft) {
         const activityBarWidth = 50; // CSS変数の値と合わせる
         // マウス位置からアクティビティバーの幅を引いてサイドバーの幅を算出
@@ -12040,6 +11971,7 @@ document.addEventListener('mousemove', (e) => {
         document.documentElement.style.setProperty('--current-left-pane-width', widthStr);
     }
 
+    // --- 右サイドバーのリサイズ (元のロジックのまま) ---
     if (isResizingRight && resizerRight) {
         const rightActivityBarWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--activitybar-width')) || 50;
         const newWidth = window.innerWidth - e.clientX - rightActivityBarWidth;
@@ -12057,6 +11989,7 @@ document.addEventListener('mousemove', (e) => {
         }
     }
 
+    // --- 下パネル（ターミナル）のリサイズ (元のロジックのまま) ---
     if (isResizingBottom && resizerBottom) {
         const newHeight = window.innerHeight - e.clientY - 24;
 
@@ -12072,7 +12005,7 @@ document.addEventListener('mousemove', (e) => {
         }
     }
 
-    // エディタ分割のリサイズ処理
+    // --- エディタ分割のリサイズ処理 ---
     if (isResizingEditorSplit && isSplitView) {
         const wrapper = document.getElementById('editor-wrapper');
         const mainEditorDiv = document.getElementById('editor');
@@ -12101,14 +12034,23 @@ document.addEventListener('mousemove', (e) => {
         const rightWidthPx = wrapperWidth - newLeftWidth - resizerWidth;
 
         // エディタ幅の適用 (px指定の方が計算ズレが少ないです)
-        mainEditorDiv.style.width = `${leftWidthPx}px`;
-        splitEditorDiv.style.width = `${rightWidthPx}px`;
+        if (mainEditorDiv) mainEditorDiv.style.width = `${leftWidthPx}px`;
+        if (splitEditorDiv) splitEditorDiv.style.width = `${rightWidthPx}px`;
 
-        // タイトルバー幅の適用（同期させる）
-        // タイトルバーにはリサイザーがないため、純粋な比率で分割するか、上記と同じpx幅を適用
-        if (mainTitleBar) mainTitleBar.style.width = `${leftWidthPx}px`;
-        // 右側タイトルバーは残り幅全部を使うように flex: 1 にするか、計算して適用
-        if (splitTitleBar) splitTitleBar.style.width = `${rightWidthPx + resizerWidth}px`; // タイトルバー側は隙間を埋めるため少し広めに
+        // ▼▼▼ 修正箇所: タイトルバー幅の適用（同期させる） ▼▼▼
+        // 両方のタイトルバーが存在し、かつ「非表示(hidden)」になっていない場合のみ幅を調整します。
+        // これにより、設定画面が右側にある（＝右のタイトルバーが非表示の）場合に、
+        // 左のタイトルバーが勝手に縮んでしまうのを防ぎます。
+        if (mainTitleBar && splitTitleBar) {
+            const isMainVisible = !mainTitleBar.classList.contains('hidden');
+            const isSplitVisible = !splitTitleBar.classList.contains('hidden');
+
+            if (isMainVisible && isSplitVisible) {
+                mainTitleBar.style.width = `${leftWidthPx}px`;
+                // 右側タイトルバーは隙間を埋めるためリサイザー幅分も含める
+                splitTitleBar.style.width = `${rightWidthPx + resizerWidth}px`;
+            }
+        }
     }
 });
 
