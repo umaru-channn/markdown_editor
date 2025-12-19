@@ -191,6 +191,7 @@ const currentLanguageField = StateField.define({
 // ファイルパスからPrism言語IDを取得するヘルパー
 function getPrismLanguageFromPath(filePath) {
     if (!filePath) return 'markdown';
+    if (filePath === 'StartPage') return 'markdown';
     const ext = path.extname(filePath).toLowerCase().replace('.', '');
 
     const langMap = {
@@ -685,7 +686,7 @@ function switchMainView(targetId) {
             fileTitleBar.classList.remove('hidden');
         }
         // 全画面表示のときは、READMEや設定画面なら隠す（既存ロジック）
-        else if (currentFilePath === 'README.md' || currentFilePath === 'settings://view') {
+        else if (currentFilePath === 'StartPage' || currentFilePath === 'settings://view') {
             fileTitleBar.classList.add('hidden');
         } else {
             // 通常ファイルの場合
@@ -814,7 +815,7 @@ function applySettingsToUI() {
         // Markdown判定用ヘルパー
         const isMarkdown = (filePath) => {
             if (!filePath) return false;
-            if (filePath === 'README.md') return true;
+            if (filePath === 'StartPage') return true;
             if (filePath === 'settings://view') return false;
             const ext = path.extname(filePath).toLowerCase();
             // 許可する拡張子リスト: .md, .markdown, .txt
@@ -849,7 +850,7 @@ function applySettingsToUI() {
     const readmeContent = document.getElementById('content-readme');
     if (fileTitleBarEl && readmeContent) {
         const isEditorViewActive = !readmeContent.classList.contains('content-hidden');
-        if (appSettings.showFileTitleBar && isEditorViewActive && currentFilePath !== 'README.md' && currentFilePath !== 'settings://view') {
+        if (appSettings.showFileTitleBar && isEditorViewActive && currentFilePath !== 'StartPage' && currentFilePath !== 'settings://view') {
             fileTitleBarEl.classList.remove('hidden');
         } else {
             fileTitleBarEl.classList.add('hidden');
@@ -1186,7 +1187,7 @@ function setupSettingsListeners() {
 function openSettingsTab() {
 
     // READMEが開いている場合は閉じる
-    if (openedFiles.has('README.md')) {
+    if (openedFiles.has('StartPage')) {
         closeWelcomeReadme();
     }
 
@@ -1357,7 +1358,7 @@ function getAvailableUntitledNumber() {
 function createNewTab() {
 
     // READMEが開いている場合は閉じる
-    if (openedFiles.has('README.md')) {
+    if (openedFiles.has('StartPage')) {
         closeWelcomeReadme();
     }
 
@@ -2349,7 +2350,7 @@ const dropHandler = EditorView.domEventHandlers({
             // A. 画像ファイルの処理 (クリップボード保存 & リンク挿入)
             if (imageFiles.length > 0) {
                 const targetPath = view.filePath || currentFilePath;
-                if (!targetPath || targetPath === 'README.md') {
+                if (!targetPath || targetPath === 'StartPage') {
                     showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
                     return true;
                 }
@@ -2425,7 +2426,7 @@ const dropHandler = EditorView.domEventHandlers({
             if (img && img.src) {
                 event.preventDefault();
                 const targetPath = view.filePath || currentFilePath;
-                if (!targetPath || targetPath === 'README.md') {
+                if (!targetPath || targetPath === 'StartPage') {
                     showNotification('画像を保存するには、まずファイルを保存してください。', 'error');
                     return true;
                 }
@@ -3165,6 +3166,10 @@ function createEditorState(content, filePath) {
                         }
                     }
                 }
+                // カーソル移動（選択範囲変更）時にアウトラインを同期
+                if (update.selectionSet) {
+                    syncOutlineWithCursor();
+                }
             })
         ]
     });
@@ -3564,7 +3569,7 @@ function initEditor() {
     if (globalEditorView) return;
 
     // 初期状態（README相当）でステートを作成
-    const state = createEditorState(startDoc, 'default.md');
+    const state = createEditorState(startDoc, 'StartPage');
 
     globalEditorView = new EditorView({
         state: state,
@@ -3572,7 +3577,7 @@ function initEditor() {
     });
 
     // パス情報をViewに紐付ける
-    globalEditorView.filePath = 'README.md';
+    globalEditorView.filePath = 'StartPage';
 
     // フォーカス時にアクティブに設定
     globalEditorView.contentDOM.addEventListener('focus', () => setActiveEditor(globalEditorView));
@@ -4204,7 +4209,7 @@ function updateCurrentDirData() {
 
 function onEditorInput(markAsDirty = true) {
     // 1. 未保存マークの更新
-    if (markAsDirty && currentFilePath && currentFilePath !== 'README.md') {
+    if (markAsDirty && currentFilePath && currentFilePath !== 'StartPage') {
         fileModificationState.set(currentFilePath, true);
         // 自動保存が OFF の場合のみ、視覚的なマーク(●)を表示する
         // 自動保存 ON の場合は、見た目上は何も変化させない（Obsidianライクな挙動）
@@ -4245,7 +4250,7 @@ function onEditorInput(markAsDirty = true) {
     const fileData = openedFiles.get(currentFilePath);
     const isVirtual = fileData && fileData.isVirtual;
 
-    if (appSettings.autoSave && currentFilePath && currentFilePath !== 'README.md' && !isVirtual) { // 仮想ファイルでない場合のみ実行
+    if (appSettings.autoSave && currentFilePath && currentFilePath !== 'StartPage' && !isVirtual) { // 仮想ファイルでない場合のみ実行
         if (autoSaveTimer) clearTimeout(autoSaveTimer);
         // 2秒間入力がなければ保存
         autoSaveTimer = setTimeout(() => {
@@ -5258,7 +5263,7 @@ async function saveRecentFiles() {
 }
 
 async function addToRecentFiles(filePath) {
-    if (!filePath || filePath === 'README.md') return;
+    if (!filePath || filePath === 'StartPage') return;
 
     const now = Date.now();
     // 既存のエントリがあれば削除
@@ -6930,32 +6935,288 @@ function updateOutline() {
         }
     });
 
+    // 各見出しの範囲（終了行）を計算
+    // 次の「同レベル以上の見出し」の直前までを範囲とする
+    headers.forEach((h, i) => {
+        let endLine = lines.length - 1;
+        for (let j = i + 1; j < headers.length; j++) {
+            if (headers[j].level <= h.level) {
+                endLine = headers[j].lineNumber - 1;
+                break;
+            }
+        }
+        h.endLine = endLine;
+    });
+
+    outlineTree.innerHTML = '';
     if (headers.length === 0) {
         outlineTree.innerHTML = '<li style="color: #999; padding: 5px;">見出しがありません</li>';
         return;
     }
 
-    let html = '';
-    headers.forEach((header, i) => {
-        const paddingLeft = (header.level - 1) * 15 + 5;
-        const fontSize = Math.max(14 - (header.level - 1), 11);
+    // 既存のスタイルがあれば削除して、常に最新のスタイル定義を適用する
+    // (これにより、開発中にコードを書き換えてもスタイルが正しく更新されます)
+    const existingStyle = document.getElementById('outline-tree-styles');
+    if (existingStyle) {
+        existingStyle.remove();
+    }
 
-        html += `<li class="outline-item" data-line="${header.lineNumber}" data-level="${header.level}" style="padding-left: ${paddingLeft}px; font-size: ${fontSize}px;">
-            <span class="outline-text">${header.text}</span>
-        </li>`;
-    });
+    // ドラッグ＆ドロップ用のスタイルを追加
+    const style = document.createElement('style');
+    style.id = 'outline-tree-styles';
+    style.textContent = `
+        .outline-children { list-style: none; padding-left: 16px; margin: 0; display: block; }
+        .outline-item-row { display: flex; align-items: center; cursor: pointer; padding: 2px 0; border-radius: 3px; border-top: 2px solid transparent; border-bottom: 2px solid transparent; }
+        .outline-item-row:hover { background-color: rgba(128, 128, 128, 0.1); }
+        .outline-item-row.active { background-color: rgba(0, 122, 204, 0.2); color: var(--accent-color, #007acc); }
+        
+        /* ドラッグ中のドロップ位置表示用スタイル */
+        .outline-item-row.outline-drag-over-top { border-top: 2px solid var(--accent-color, #007acc); }
+        .outline-item-row.outline-drag-over-bottom { border-bottom: 2px solid var(--accent-color, #007acc); }
 
-    outlineTree.innerHTML = html;
+        .outline-toggle { 
+            width: 20px; 
+            height: 20px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            border-radius: 3px; 
+            color: #888;
+            flex-shrink: 0;
+            visibility: hidden;
+        }
+        
+        .outline-toggle:hover { background-color: rgba(128, 128, 128, 0.2); color: #555; }
+        .outline-toggle.visible { visibility: visible; }
+        
+        .outline-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    `;
+    document.head.appendChild(style);
 
-    const items = outlineTree.querySelectorAll('.outline-item');
-    items.forEach(item => {
-        item.addEventListener('click', () => {
-            const lineNum = parseInt(item.dataset.line);
-            scrollToLine(lineNum);
-            items.forEach(i => i.classList.remove('active'));
-            item.classList.add('active');
+    // SVGのサイズを14pxに拡大し視認性を向上
+    const iconCollapsed = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+    const iconExpanded = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
+    // 階層管理用スタック
+    const stack = [{ level: 0, container: outlineTree }];
+
+    headers.forEach(header => {
+        while (stack.length > 1 && stack[stack.length - 1].level >= header.level) {
+            stack.pop();
+        }
+        const parent = stack[stack.length - 1];
+
+        const li = document.createElement('li');
+        li.style.listStyle = 'none';
+        li.style.margin = '0';
+        li.style.padding = '0';
+
+        const row = document.createElement('div');
+        row.className = 'outline-item-row outline-item';
+        row.dataset.line = header.lineNumber;
+
+        const toggle = document.createElement('span');
+        toggle.className = 'outline-toggle';
+        toggle.innerHTML = iconExpanded;
+
+        const text = document.createElement('span');
+        text.className = 'outline-text';
+        text.textContent = header.text;
+        text.style.fontSize = `${Math.max(14 - (header.level - 1), 11)}px`;
+
+        row.appendChild(toggle);
+        row.appendChild(text);
+        li.appendChild(row);
+
+        row.draggable = true;
+
+        row.addEventListener('dragstart', (e) => {
+            e.stopPropagation();
+            e.dataTransfer.effectAllowed = 'move';
+            // 移動元の開始行と終了行をデータとして保持
+            e.dataTransfer.setData('application/x-outline-item', JSON.stringify({
+                startLine: header.lineNumber,
+                endLine: header.endLine
+            }));
+            row.classList.add('dragging');
+        });
+
+        row.addEventListener('dragend', () => {
+            row.classList.remove('dragging');
+            const overs = outlineTree.querySelectorAll('.outline-drag-over-top, .outline-drag-over-bottom');
+            overs.forEach(el => el.classList.remove('outline-drag-over-top', 'outline-drag-over-bottom'));
+        });
+
+        row.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!e.dataTransfer.types.includes('application/x-outline-item')) return;
+
+            const rect = row.getBoundingClientRect();
+            const relY = e.clientY - rect.top;
+
+            row.classList.remove('outline-drag-over-top', 'outline-drag-over-bottom');
+
+            // 上半分なら「前に挿入」、下半分なら「後ろに挿入」
+            if (relY < rect.height / 2) {
+                row.classList.add('outline-drag-over-top');
+            } else {
+                row.classList.add('outline-drag-over-bottom');
+            }
+            e.dataTransfer.dropEffect = 'move';
+        });
+
+        row.addEventListener('dragleave', () => {
+            row.classList.remove('outline-drag-over-top', 'outline-drag-over-bottom');
+        });
+
+        row.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            row.classList.remove('outline-drag-over-top', 'outline-drag-over-bottom');
+
+            const data = e.dataTransfer.getData('application/x-outline-item');
+            if (!data) return;
+            const source = JSON.parse(data);
+
+            const srcStart = source.startLine;
+            const srcEnd = source.endLine;
+
+            const targetStart = header.lineNumber;
+            const targetEnd = header.endLine;
+
+            const rect = row.getBoundingClientRect();
+            const relY = e.clientY - rect.top;
+            const insertBefore = relY < rect.height / 2;
+
+            let insertAtLine;
+
+            if (insertBefore) {
+                // ターゲットの前に挿入
+                insertAtLine = targetStart;
+            } else {
+                // ターゲット（とその子要素）の後ろに挿入
+                insertAtLine = targetEnd + 1;
+            }
+
+            // 無効な移動チェック（自分自身の中への移動など）
+            if (insertAtLine > srcStart && insertAtLine <= srcEnd + 1) {
+                return;
+            }
+            // 移動なし
+            if (insertAtLine === srcStart || insertAtLine === srcEnd + 1) {
+                return;
+            }
+
+            // 実際のテキスト移動処理を実行
+            moveTextRange(srcStart, srcEnd, insertAtLine);
+        });
+
+        const childrenUl = document.createElement('ul');
+        childrenUl.className = 'outline-children';
+        li.appendChild(childrenUl);
+
+        parent.container.appendChild(li);
+
+        // 親要素に子供ができたとき、クラスを追加して表示させる
+        if (parent.toggleBtn) {
+            if (!parent.toggleBtn.classList.contains('visible')) {
+                parent.toggleBtn.classList.add('visible');
+
+                parent.toggleBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const isExpanded = parent.childContainer.style.display !== 'none';
+                    if (isExpanded) {
+                        parent.childContainer.style.display = 'none';
+                        parent.toggleBtn.innerHTML = iconCollapsed;
+                    } else {
+                        parent.childContainer.style.display = 'block';
+                        parent.toggleBtn.innerHTML = iconExpanded;
+                    }
+                };
+            }
+        }
+
+        row.addEventListener('click', (e) => {
+            if (e.target.closest('.outline-toggle')) return;
+            scrollToLine(header.lineNumber);
+            const allItems = outlineTree.querySelectorAll('.outline-item-row');
+            allItems.forEach(i => i.classList.remove('active'));
+            row.classList.add('active');
+        });
+
+        stack.push({
+            level: header.level,
+            container: childrenUl,
+            toggleBtn: toggle,
+            childContainer: childrenUl
         });
     });
+}
+
+/**
+ * エディタ内の行範囲を移動する関数
+ * @param {number} srcStartLine - 移動元の開始行(0-indexed)
+ * @param {number} srcEndLine - 移動元の終了行(0-indexed)
+ * @param {number} destLine - 挿入先の行番号(0-indexed)。この行の直前に挿入される
+ */
+function moveTextRange(srcStartLine, srcEndLine, destLine) {
+    if (!globalEditorView) return;
+
+    const state = globalEditorView.state;
+    const doc = state.doc;
+
+    // 削除範囲の計算
+    let delFrom = doc.line(srcStartLine + 1).from;
+    let delTo;
+
+    if (srcEndLine < doc.lines - 1) {
+        // 最終行でない場合、次の行の開始位置まで削除（末尾の改行を含む）
+        delTo = doc.line(srcEndLine + 2).from;
+    } else {
+        // 最終行の場合、ドキュメント末尾まで削除
+        delTo = doc.length;
+        // 先頭行でなければ、直前の改行も削除する
+        if (srcStartLine > 0) {
+            delFrom = doc.line(srcStartLine + 1).from - 1;
+        }
+    }
+
+    // 移動するテキストを取得
+    const insertionContent = doc.sliceString(delFrom, delTo);
+
+    // 挿入位置の計算
+    let insFrom;
+    let finalInsertString = insertionContent;
+
+    if (destLine >= doc.lines) {
+        // ドキュメント末尾に追加
+        insFrom = doc.length;
+        // 移動元が末尾だった（改行なし）場合、末尾に追加する際に改行が必要
+        if (srcEndLine === doc.lines - 1) {
+            finalInsertString = '\n' + finalInsertString;
+        }
+    } else {
+        // 指定行の前に挿入
+        insFrom = doc.line(destLine + 1).from;
+
+        // 移動元が末尾だった（改行なし）場合、行の間に挿入するには改行が必要
+        if (srcEndLine === doc.lines - 1) {
+            finalInsertString += '\n';
+        }
+    }
+
+    // 変更を適用 (削除と挿入を一括実行)
+    globalEditorView.dispatch({
+        changes: [
+            { from: delFrom, to: delTo, insert: "" },
+            { from: insFrom, insert: finalInsertString }
+        ],
+        userEvent: "move.outline"
+    });
+
+    // フォーカスを戻す
+    globalEditorView.focus();
 }
 
 function syncOutlineWithCursor() {
@@ -6990,30 +7251,53 @@ function scrollToLine(lineNumber) {
 
     globalEditorView.dispatch({
         selection: { anchor: line.from },
-        scrollIntoView: true
+        effects: EditorView.scrollIntoView(line.from, { y: "start" })
     });
     globalEditorView.focus();
 }
 
+// アウトラインの展開・折りたたみボタンのイベントリスナー設定
 if (btnOutlineCollapse) {
     btnOutlineCollapse.addEventListener('click', () => {
-        const items = outlineTree.querySelectorAll('.outline-item');
-        items.forEach(item => {
-            const level = parseInt(item.dataset.level);
-            if (level > 1) {
-                item.classList.add('hidden-outline-item');
-            } else {
-                item.classList.remove('hidden-outline-item');
-            }
+        if (!outlineTree) return;
+
+        // 1. すべての子リストを非表示にする
+        const allChildren = outlineTree.querySelectorAll('.outline-children');
+        allChildren.forEach(ul => {
+            ul.style.display = 'none';
+        });
+
+        // 2. すべてのトグルボタンを「閉じた状態（右矢印）」にする
+        // (clickable クラスがついている＝子供がいる要素のみ対象)
+        const allToggles = outlineTree.querySelectorAll('.outline-toggle.visible');
+
+        // updateOutlineで定義したものと同じSVG (右向き矢印)
+        const iconCollapsed = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+
+        allToggles.forEach(toggle => {
+            toggle.innerHTML = iconCollapsed;
         });
     });
 }
 
 if (btnOutlineExpand) {
     btnOutlineExpand.addEventListener('click', () => {
-        const items = outlineTree.querySelectorAll('.outline-item');
-        items.forEach(item => {
-            item.classList.remove('hidden-outline-item');
+        if (!outlineTree) return;
+
+        // 1. すべての子リストを表示する
+        const allChildren = outlineTree.querySelectorAll('.outline-children');
+        allChildren.forEach(ul => {
+            ul.style.display = 'block';
+        });
+
+        // 2. すべてのトグルボタンを「開いた状態（下矢印）」にする
+        const allToggles = outlineTree.querySelectorAll('.outline-toggle.visible');
+
+        // updateOutlineで定義したものと同じSVG (下向き矢印)
+        const iconExpanded = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
+        allToggles.forEach(toggle => {
+            toggle.innerHTML = iconExpanded;
         });
     });
 }
@@ -8628,7 +8912,7 @@ async function openDiffView(filePath, commitOid = null) {
     if (!currentDirectoryPath) return;
 
     // Diffを開く際にREADMEが表示されていたら閉じる
-    if (openedFiles.has('README.md')) {
+    if (openedFiles.has('StartPage')) {
         closeWelcomeReadme();
     }
 
@@ -8758,7 +9042,7 @@ async function openFile(filePath, fileName) {
     addToRecentFiles(normalizedPath);
 
     try {
-        if (openedFiles.has('README.md')) {
+        if (openedFiles.has('StartPage')) {
             closeWelcomeReadme();
         }
 
@@ -8817,19 +9101,19 @@ async function openFile(filePath, fileName) {
 }
 
 function showWelcomeReadme() {
-    const readmePath = 'README.md';
+    const readmePath = 'StartPage';
     if (openedFiles.has(readmePath)) return;
 
     openedFiles.set(readmePath, {
         content: startDoc,
-        fileName: 'README.md',
+        fileName: 'スタートページ',
         isVirtual: true
     });
 
     const tab = document.createElement('div');
     tab.className = 'tab';
     tab.dataset.filepath = readmePath;
-    tab.innerHTML = `README.md`;
+    tab.innerHTML = `スタートページ`;
 
     if (editorTabsContainer) {
         editorTabsContainer.appendChild(tab);
@@ -8839,7 +9123,7 @@ function showWelcomeReadme() {
 }
 
 function closeWelcomeReadme() {
-    const readmePath = 'README.md';
+    const readmePath = 'StartPage';
     const readmeTab = document.querySelector(`[data-filepath="${readmePath}"]`);
 
     if (readmeTab) {
@@ -8859,7 +9143,7 @@ function switchToFile(filePath, targetPane = 'left') {
     }
 
     const fileData = openedFiles.get(filePath);
-    if (!fileData && filePath !== 'README.md') return;
+    if (!fileData && filePath !== 'StartPage') return;
 
     // 1. 直前のファイル状態保存
     if (previouslyActivePath && openedFiles.has(previouslyActivePath)) {
@@ -9149,7 +9433,7 @@ function switchToFile(filePath, targetPane = 'left') {
 
         if (!isSplitLayoutVisible) {
             if (fileTitleBarEl) {
-                if (filePath === 'README.md' || isSettings) {
+                if (filePath === 'StartPage' || isSettings) {
                     fileTitleBarEl.classList.add('hidden');
                 } else {
                     fileTitleBarEl.classList.remove('hidden');
@@ -9440,7 +9724,7 @@ async function saveCurrentFile(isSaveAs = false, targetPath = null) {
         }
     }
 
-    if (currentFilePath === 'README.md' && !isSaveAs) return;
+    if (currentFilePath === 'StartPage' && !isSaveAs) return;
 
     try {
         // ▼ 仮想ファイル（新規作成）または「名前を付けて保存」の場合
@@ -9566,7 +9850,7 @@ function setActiveEditor(view) {
             // Markdown判定用ヘルパー（ローカル関数）
             const isMarkdown = (filePath) => {
                 if (!filePath) return false;
-                if (filePath === 'README.md') return true;
+                if (filePath === 'StartPage') return true;
                 if (filePath === 'settings://view') return false;
                 const ext = path.extname(filePath).toLowerCase();
                 return ['.md', '.markdown', '.txt'].includes(ext);
@@ -12019,8 +12303,8 @@ async function togglePreviewMode() {
         const ext = path.extname(lowerPath);
         const allowedExts = ['.md', '.markdown', '.txt'];
 
-        // README.md などのファイル名、または許可された拡張子か
-        const isTargetFile = fileName.includes('readme') || allowedExts.includes(ext);
+        // StartPage などのファイル名、または許可された拡張子か
+        const isTargetFile = currentFilePath === 'StartPage' || fileName.includes('readme') || allowedExts.includes(ext);
 
         if (!isTargetFile) {
             showNotification('プレビューはMarkdown/テキストファイルのみ利用可能です', 'error');

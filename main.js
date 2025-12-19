@@ -2254,24 +2254,6 @@ async function getCommitChanges(fs, dir, oid1, oid2) {
   }
 }
 
-// ヘルパー: ツリー内のファイル数をカウント (Initial commit用)
-async function countTreeFiles(fs, dir, oid) {
-  try {
-    return (await git.walk({
-      fs,
-      dir,
-      trees: [git.TREE({ ref: oid })],
-      map: async function (filepath, [A]) {
-        if (filepath === '.') return;
-        if ((await A?.type()) === 'tree') return;
-        return 1;
-      }
-    })).reduce((a, b) => a + (b || 0), 0);
-  } catch (e) {
-    return 0;
-  }
-}
-
 // Helper function to get status text
 function getStatusText(HEADStatus, WorkdirStatus, StageStatus, type) {
   if (type === 'workdir') {

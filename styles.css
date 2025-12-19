@@ -648,35 +648,8 @@ body[data-theme="dark"] .tree-item:hover {
     list-style-type: none;
     padding: 0;
     margin: 0;
-}
-
-.outline-item {
-    cursor: pointer;
-    padding: 3px 5px;
-    color: var(--text-color);
-    border-radius: 3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    opacity: 0.8;
-}
-
-.outline-item:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-    opacity: 1;
-}
-
-body[data-theme="dark"] .outline-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
-.outline-item.active {
-    background-color: rgba(0, 122, 204, 0.2);
-    color: inherit;
-}
-
-.hidden-outline-item {
-    display: none;
+    /* エディタ同様のフォント設定を適用 */
+    font-family: inherit;
 }
 
 /* ========== Git Panel Styles (Updated) ========== */
@@ -1458,7 +1431,7 @@ body[data-theme="dark"] .cm-live-ol-marker {
     color: #58a6ff;
 }
 
-/* ★★★ Code Block Styles (Updated with Line Numbers) ★★★ */
+/* Code Block Styles (Updated with Line Numbers) */
 
 /* 共通設定 */
 .cm-code-block,
@@ -4253,7 +4226,7 @@ body[data-theme="dark"] .cm-mermaid-preview {
     min-height: 1em;
 
     margin: 0;
-    /* ★重要: 外側の余白をなくす（ズレの原因） */
+    /* 外側の余白をなくす（ズレの原因） */
     padding: 10px 0;
     /* 代わりに内側に余白をつける */
 
@@ -5218,7 +5191,10 @@ body[data-theme="dark"] .custom-webview-content {
     list-style-type: none;
     padding: 0;
     margin: 0;
-    flex: 1;            /* 空きスペースを埋める */
-    min-height: 100px;  /* 最低限の高さを確保 */
-    padding-bottom: 20px; /* 下部に少し余白を作ってドロップしやすくする */
+    flex: 1;
+    /* 空きスペースを埋める */
+    min-height: 100px;
+    /* 最低限の高さを確保 */
+    padding-bottom: 20px;
+    /* 下部に少し余白を作ってドロップしやすくする */
 }
