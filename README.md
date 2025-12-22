@@ -1,44 +1,70 @@
-# minimal-repro
+# Markdown IDE
 
-**Quickly create and share examples of Electron app behaviors or bugs.**
+**Markdown IDE** は、ElectronとCodeMirror 6で構築された、開発者とライターのための高機能な統合執筆環境です。
+Notionライクなテーブル編集、リアルタイムプレビュー、Gitクライアント、統合ターミナルを一つのウィンドウに集約。コンテキストスイッチを極限まで減らし、執筆と開発のフローを加速させます。
 
-> [!NOTE]
-> This repro was renamed from `electron-quick-start` to clarify its purpose as a repro template. If you're looking to boostrap a new Electron app, check out the [Electron Forge](https://www.electronforge.io/) docs instead to get started!
+## ✨ 主な機能
 
-Creating a minimal reproduction (or "minimal repro") is essential when troubleshooting Electron apps. By stripping away everything except the code needed to demonstrate a specific behavior or bug, it becomes easier for others to understand, debug, and fix issues. This focused approach saves time and ensures that everyone involved is looking at exactly the same problem without distractions.
+### 📝 強力な編集機能 (Live Preview)
+* **Notionライクなテーブル**: マークダウンの表をGUIで直感的に編集可能。行・列のドラッグ移動、リサイズ、右クリックメニューによる追加・削除に対応。
+* **リッチなプレビュー**:
+    * **数式**: KaTeX (`$$...$$`) による美しい数式レンダリング。
+    * **ダイアグラム**: Mermaid記法によるフローチャートやシーケンス図の描画。
+    * **Wikiリンク**: `[[ファイル名]]` でプロジェクト内のファイルへ素早くリンク＆ジャンプ（オートコンプリート対応）。
+* **コード実行**: JS, Python, Bash などのコードブロックをエディタ上で直接実行し、結果を表示可能。
 
-A basic Electron application contains:
+### 🚀 開発者向けツール
+* **統合ターミナル**: `node-pty` と `xterm.js` を採用した高機能ターミナル。PowerShell, Bash, CMDなどをタブ切り替えで複数起動可能。
+* **完全なGit GUI**:
+    * ステータス確認、ステージング、コミット、プッシュ/プル。
+    * ブランチの作成・切り替え・削除。
+    * コミット履歴のグラフ表示と、ファイル単位のDiffビューアー。
+* **コマンドパレット**: `Ctrl+Shift+P` でほぼ全ての機能にキーボードからアクセス可能。
+* **プロジェクト内検索 (Grep)**: 高速な全文検索機能。
 
-- `package.json` - Points to the app's main file and lists its details and dependencies.
-- `main.js` - Starts the app and creates a browser window to render HTML. This is the app's **main process**.
-- `index.html` - A web page to render. This is the app's **renderer process**.
-- `preload.js` - A content script that runs before the renderer process loads.
+### ☁️ クラウド連携とエクスポート
+* **クラウド同期対応**: DropboxやGoogle Driveのフォルダでプロジェクトを開くことで、シームレスな同期が可能。
+* **PDFエクスポート**: 目次生成、ヘッダー/フッター、テーマ適用など詳細な設定が可能なPDF出力。
 
-You can learn more about each of these components in depth within the [Tutorial](https://electronjs.org/docs/latest/tutorial/tutorial-prerequisites).
-
-## To Use
-
-To clone and run this repository you'll need [Git](https://git-scm.com) and [Node.js](https://nodejs.org/en/download/) (which comes with [npm](http://npmjs.com)) installed on your computer. From your command line:
+## 🛠️ インストールと実行
 
 ```bash
-# Clone this repository
-git clone https://github.com/electron/minimal-repro
-# Go into the repository
-cd minimal-repro
-# Install dependencies
+# リポジトリのクローン
+git clone https://github.com/umaru-channn/markdown_editor.git
+
+# 依存関係のインストール
 npm install
-# Run the app
+
+# アプリケーションの起動 (開発モード)
 npm start
+
+# ビルド (Windows .exe / macOS .dmg 等の生成)
+npm run build
 ```
 
-Note: If you're using Linux Bash for Windows, [see this guide](https://www.howtogeek.com/261575/how-to-run-graphical-linux-desktop-applications-from-windows-10s-bash-shell/) or use `node` from the command prompt.
+## ⌨️ 主なショートカットキー
 
-## Resources for Learning Electron
+| アクション | Windows / Linux | macOS |
+| :--- | :--- | :--- |
+| **コマンドパレット** | `Ctrl` + `Shift` + `P` | `Cmd` + `Shift` + `P` |
+| **サイドバー切替** | `Ctrl` + `Shift` + `B` | `Cmd` + `Shift` + `B` |
+| **ターミナル表示** | `Ctrl` + `@` | `Cmd` + `@` |
+| **ファイル検索** | `Ctrl` + `P` | `Cmd` + `P` |
+| **検索・置換** | `Ctrl` + `F` | `Cmd` + `F` |
+| **設定を開く** | `Ctrl` + `,` | `Cmd` + `,` |
+| **新規タブ** | `Ctrl` + `T` | `Cmd` + `T` |
+| **タブを閉じる** | `Ctrl` + `W` | `Cmd` + `W` |
+| **Zenモード** | ツールバーボタン | ツールバーボタン |
 
-- [electronjs.org/docs](https://electronjs.org/docs) - all of Electron's documentation
-- [Electron Fiddle](https://electronjs.org/fiddle) - Electron Fiddle, an app to test small Electron experiments
-- [Electron Forge](https://www.electronforge.io/) - Looking to bootstrap a new Electron app? Check out the Electron Forge docs to get started
+## 🧩 技術スタック
 
-## License
+* **Core**: [Electron](https://www.electronjs.org/), [Node.js](https://nodejs.org/)
+* **Editor**: [CodeMirror 6](https://codemirror.net/)
+* **UI/Styling**: CSS Variables, Native DOM, Preact
+* **Git**: [isomorphic-git](https://isomorphic-git.org/) & Git CLI integration
+* **Terminal**: [xterm.js](https://xtermjs.org/), [node-pty](https://github.com/microsoft/node-pty)
+* **Markdown**: [marked](https://marked.js.org/), [katex](https://katex.org/), [mermaid](https://mermaid.js.org/)
 
-[CC0 1.0 (Public Domain)](LICENSE.md)
+## 📄 ライセンス
+
+CC0-1.0

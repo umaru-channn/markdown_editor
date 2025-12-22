@@ -181,6 +181,7 @@ let isResizingEditorSplit = false;
 let activeEditorView = null;
 let activeCustomLinkId = null; // 現在表示中のカスタムリンクID
 let isPreviewMode = false; // プレビューモードの状態
+let splitLayoutRatio = 0.5; // エディタとプレビューの分割比率 (初期値50%)
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -1540,64 +1541,63 @@ function getLanguageExtensions(filePath) {
     return extensions;
 }
 
-const startDoc = `# Markdown Editor マニュアル
+const startDoc = `# Welcome to Markdown IDE
 
-Markdown記法をリアルタイムでプレビューしながら記述できるエディタです。
-ショートカットキーやツールバーを利用して効率的に編集を行えます。
+高機能な統合Markdown編集環境へようこそ。
+このドキュメント自体がエディタの機能デモになっています。自由に編集して試してみてください。
 
-## テキスト装飾
+## すぐに試せる機能
 
-| 機能 | 記法 | ショートカット |
+### 1. Notionライクな高機能テーブル
+下の表はGUIで編集可能です。列の境界線をドラッグして幅を変えたり、**右クリック**から行・列を追加できます。
+
+| 機能名 | 説明 | 状態 |
 | :--- | :--- | :--- |
-| **太字** | \`**テキスト**\` | Ctrl + B |
-| *斜体* | \`*テキスト*\` | Ctrl + I |
-| ~~取り消し線~~ | \`~~テキスト~~\` | Ctrl + Shift + S |
-| ==ハイライト== | \`==テキスト==\` | Ctrl + Shift + H |
-| \`インラインコード\` | \` \`テキスト\` \` | Ctrl + E |
+| **Live Preview** | マークダウン記法を即座に装飾 | Active |
+| **Table Editor** | ドラッグ&ドロップで列移動が可能 | Active |
+| **Git Client** | コミット、プッシュ、履歴表示 | Integrated |
 
-## 見出しと構成
+### 2. ダイアグラム (Mermaid)
+コードブロックを書くだけで、フローチャートやシーケンス図をリアルタイムに描画します。
 
-# H1 見出し
-## H2 見出し
-### H3 見出し
-
-- **リスト**: 行頭に \`- \` または \`* \` を入力
-1. **番号付きリスト**: 行頭に \`1. \` を入力
-- [ ] **タスクリスト**: 行頭に \`- [ ] \` を入力
-> **引用**: 行頭に \`> \` を入力
----
-**区切り線**: \`---\` を入力
-
-## リンクとメディア
-
-- **リンク**: \`[タイトル](URL)\`
-- **画像**: \`![代替テキスト](画像URL)\`
-- **ブックマーク**: \`@card URL\` と入力するとカード形式で表示されます
-
-## コードブロック
-
-バッククォート3つで囲むとコードブロックになります。言語を指定するとシンタックスハイライトが適用されます。
-
-\`\`\`javascript
-console.log("Hello, World!");
+\`\`\`mermaid
+graph TD;
+    A[Start] --> B{編集開始};
+    B -->|Yes| C[プレビュー確認];
+    B -->|No| D[設定変更];
+    C --> E[Git Commit];
+    D --> B;
 \`\`\`
 
-## テーブル（表）
+### 3. 数式 (KaTeX)
+美しい数式レンダリングをサポートしています。
 
-ツールバーのテーブルボタンから挿入可能です。
-右クリックメニューから行・列の追加や削除ができます。
+$$
+f(x) = \\int_{-\\infty}^\\infty \\hat f(\\xi)\\,e^{2\\pi i \\xi x} \\,d\\xi
+$$
 
-| Header 1 | Header 2 |
-| :--- | :--- |
-| Cell 1 | Cell 2 |
+### 4. コード実行
+JS, Python, Bashなどのコードブロックには「▶ Run」ボタンが表示され、エディタ内で実行結果を確認できます。
 
-## その他の機能
+\`\`\`javascript
+// 右上の「▶ Run」ボタンを押してみてください
+const greeting = "Hello, Markdown IDE!";
+console.log(greeting);
+console.log("現在時刻: " + new Date().toLocaleString());
+\`\`\`
 
-- **検索・置換**: Ctrl + F で検索バーを表示
-- **PDFエクスポート**: ツールバーのボタンからPDFとして保存
-- **改ページ**: 印刷用の改ページ位置を指定するにはツールバーの改ページボタンを使用
-  <div class="page-break"></div>
-- **自動保存**: 入力停止後、自動的にファイルが保存されます
+---
+
+## 効率的なワークフロー
+
+* **サイドバー**: \`Ctrl+Shift+B\` でファイルツリー、Git、アウトライン、検索を切り替え。
+* **統合ターミナル**: \`Ctrl+@\` でターミナルを表示し、npmコマンドなどを実行できます。
+* **コマンドパレット**: \`Ctrl+Shift+P\` で「PDFエクスポート」や「テーマ変更」など全ての機能にアクセスできます。
+
+---
+> **Tip:** このファイルは \`StartPage\` という仮想ファイルです。まずは新しいファイルを作成するか、フォルダを開いて作業を開始しましょう！
+
+
 `;
 
 // ========== リスト操作ロジック (Custom List Handling) ==========
@@ -7506,10 +7506,13 @@ function updateFileTitleBars() {
 
         // 幅とボーダーの調整
         if (!hideLeft && !hideRight) {
-            // 両方表示: 50%ずつ
-            mainTitleBar.style.width = '50%';
+            // 両方表示: 保存された比率を適用
+            const leftPercent = splitLayoutRatio * 100;
+            const rightPercent = 100 - leftPercent;
+
+            mainTitleBar.style.width = `${leftPercent}%`;
             mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
-            splitTitleBar.style.width = '50%';
+            splitTitleBar.style.width = `${rightPercent}%`;
         } else if (!hideLeft && hideRight) {
             // 左のみ表示: 左を100%に
             mainTitleBar.style.width = '100%';
@@ -8779,8 +8782,7 @@ function getFileType(filePath) {
 
 /**
  * 画像やPDFを #media-view に描画する関数
- * 修正: 既に同じファイルが表示されている場合は再描画をスキップ（タブ切り替え時のリロード防止）
- * 修正: PDF表示時にコントロールバーを固定表示するため、Flexレイアウト(column)を適用
+ * 修正: 幅とFlex設定を明示的に指定し、分割解除後の全画面表示を確実にする
  */
 async function renderMediaContent(filePath, type) {
     const container = document.getElementById('media-view');
@@ -8795,6 +8797,8 @@ async function renderMediaContent(filePath, type) {
             container.style.display = 'flex';
             container.style.flexDirection = 'column';
             container.style.height = '100%';
+            container.style.width = '100%';
+            container.style.flex = '1';
             container.style.overflow = 'hidden';
         } else {
             // 画像の場合は中央揃え
@@ -8803,6 +8807,8 @@ async function renderMediaContent(filePath, type) {
             container.style.justifyContent = 'center';
             container.style.alignItems = 'center';
             container.style.height = '100%';
+            container.style.width = '100%';
+            container.style.flex = '1';
             container.style.overflow = 'auto';
         }
         return;
@@ -8824,6 +8830,8 @@ async function renderMediaContent(filePath, type) {
         container.style.justifyContent = 'center';
         container.style.alignItems = 'center';
         container.style.height = '100%';
+        container.style.width = '100%';
+        container.style.flex = '1';
         container.style.overflow = 'auto';
 
         const img = document.createElement('img');
@@ -8838,6 +8846,8 @@ async function renderMediaContent(filePath, type) {
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
         container.style.height = '100%';
+        container.style.width = '100%';
+        container.style.flex = '1';
         container.style.overflow = 'hidden';
 
         const loading = document.createElement('div');
@@ -9990,9 +10000,15 @@ function openInSplitView(filePath, side = 'right') {
         if (!isSplitView) {
             isSplitView = true;
 
-            mainEditorDiv.style.width = 'calc(50% - 3px)';
+            mainEditorDiv.style.display = 'block';
             splitEditorDiv.style.display = 'block';
-            splitEditorDiv.style.width = 'calc(50% - 3px)';
+
+            // 保存された比率を適用
+            const leftPercent = splitLayoutRatio * 100;
+            const rightPercent = 100 - leftPercent;
+
+            mainEditorDiv.style.width = `calc(${leftPercent}% - 3px)`;
+            splitEditorDiv.style.width = `calc(${rightPercent}% - 3px)`;
 
             if (resizerEditorSplit) {
                 resizerEditorSplit.classList.remove('hidden');
@@ -11805,26 +11821,35 @@ function showSplitLayout() {
 
     // レイアウトを分割状態に設定
     mainEditorDiv.style.display = 'block';
-    mainEditorDiv.style.width = 'calc(50% - 3px)';
     splitEditorDiv.style.display = 'block';
-    splitEditorDiv.style.width = 'calc(50% - 3px)';
+
+    // 保存された比率に基づいて幅を設定
+    const leftPercent = splitLayoutRatio * 100;
+    const rightPercent = 100 - leftPercent;
+
+    // リサイザーの幅(約6px)を考慮して少し引く
+    mainEditorDiv.style.width = `calc(${leftPercent}% - 3px)`;
+    splitEditorDiv.style.width = `calc(${rightPercent}% - 3px)`;
 
     // リサイザーを表示
     if (resizerEditorSplit) {
         resizerEditorSplit.classList.remove('hidden');
+        // リサイザーの位置も比率に合わせる（左ペインの右端）
+        // CSSで position: relative などの構成であれば不要な場合もあるが、
+        // width設定だけで自動的に配置される構造であれば上記width設定で十分
     }
     splitEditorDiv.style.borderLeft = 'none';
 
     // タイトルバーを分割状態に設定
     if (mainTitleBar) {
         mainTitleBar.style.flex = 'none';
-        mainTitleBar.style.width = '50%';
+        mainTitleBar.style.width = `${leftPercent}%`; // 比率を適用
         mainTitleBar.style.borderRight = '1px solid var(--sidebar-border)';
         mainTitleBar.classList.remove('hidden');
     }
     if (splitTitleBar) {
         splitTitleBar.style.display = 'flex';
-        splitTitleBar.style.width = '50%';
+        splitTitleBar.style.width = `${rightPercent}%`; // 比率を適用
         splitTitleBar.classList.remove('hidden');
     }
 
@@ -11939,14 +11964,54 @@ function closeSplitView() {
 }
 
 // --- エディタ分割リサイザーのイベント ---
+let lastSplitResizerClickTime = 0; // ダブルクリック判定用
 
 if (resizerEditorSplit) {
     resizerEditorSplit.addEventListener('mousedown', (e) => {
         e.preventDefault(); // テキスト選択などを防止
+
+        const now = Date.now();
+        // 300ms以内に再クリックされたらダブルクリックとみなしてリセット
+        if (now - lastSplitResizerClickTime < 300) {
+            // --- リセット処理 ---
+            isResizingEditorSplit = false;
+            resizerEditorSplit.classList.remove('resizing');
+            document.body.classList.remove('is-resizing-col');
+
+            // 比率を初期値に戻す
+            splitLayoutRatio = 0.5;
+
+            // 幅の適用
+            const mainEditorDiv = document.getElementById('editor');
+            const splitEditorDiv = document.getElementById('editor-split');
+            const mainTitleBar = document.getElementById('file-title-bar');
+            const splitTitleBar = document.getElementById('file-title-bar-split');
+
+            if (mainEditorDiv) mainEditorDiv.style.width = 'calc(50% - 3px)';
+            if (splitEditorDiv) splitEditorDiv.style.width = 'calc(50% - 3px)';
+
+            // タイトルバーもリセット
+            if (mainTitleBar && !mainTitleBar.classList.contains('hidden')) {
+                mainTitleBar.style.width = '50%';
+            }
+            if (splitTitleBar && !splitTitleBar.classList.contains('hidden')) {
+                splitTitleBar.style.width = '50%';
+            }
+
+            // UI更新
+            updateFileTitleBars();
+            if (globalEditorView) globalEditorView.requestMeasure();
+            if (splitEditorView) splitEditorView.requestMeasure();
+
+            lastSplitResizerClickTime = 0; // 判定タイマーリセット
+            return; // リサイズ処理を開始せずに終了
+        }
+
+        // --- 通常のリサイズ開始処理 ---
+        lastSplitResizerClickTime = now;
         isResizingEditorSplit = true;
         resizerEditorSplit.classList.add('resizing');
-        // ドラッグ中は他の要素（iframeなど）がマウスイベントを奪わないようにする
-        document.body.classList.add('is-resizing-col'); // カーソル固定用クラス
+        document.body.classList.add('is-resizing-col');
     });
 }
 
@@ -12005,7 +12070,7 @@ document.addEventListener('mousemove', (e) => {
         }
     }
 
-    // --- エディタ分割のリサイズ処理 ---
+    // --- エディタ分割のリサイズ処理 (修正) ---
     if (isResizingEditorSplit && isSplitView) {
         const wrapper = document.getElementById('editor-wrapper');
         const mainEditorDiv = document.getElementById('editor');
@@ -12028,8 +12093,10 @@ document.addEventListener('mousemove', (e) => {
         if (newLeftWidth < 100) newLeftWidth = 100;
         if (newLeftWidth > wrapperWidth - 100) newLeftWidth = wrapperWidth - 100;
 
-        // リサイザーの幅を考慮してパーセント計算
-        // 左側の幅ピクセルを直接スタイルに適用（計算精度のためpx指定を推奨）
+        // ★修正: 比率を保存
+        splitLayoutRatio = newLeftWidth / wrapperWidth;
+
+        // 比率を使って再計算 (整合性を保つため)
         const leftWidthPx = newLeftWidth;
         const rightWidthPx = wrapperWidth - newLeftWidth - resizerWidth;
 
@@ -12038,9 +12105,6 @@ document.addEventListener('mousemove', (e) => {
         if (splitEditorDiv) splitEditorDiv.style.width = `${rightWidthPx}px`;
 
         // ▼▼▼ 修正箇所: タイトルバー幅の適用（同期させる） ▼▼▼
-        // 両方のタイトルバーが存在し、かつ「非表示(hidden)」になっていない場合のみ幅を調整します。
-        // これにより、設定画面が右側にある（＝右のタイトルバーが非表示の）場合に、
-        // 左のタイトルバーが勝手に縮んでしまうのを防ぎます。
         if (mainTitleBar && splitTitleBar) {
             const isMainVisible = !mainTitleBar.classList.contains('hidden');
             const isSplitVisible = !splitTitleBar.classList.contains('hidden');
