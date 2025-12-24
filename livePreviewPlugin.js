@@ -765,32 +765,14 @@ class PdfWidget extends WidgetType {
         wrapper.style.border = "1px solid #ccc";
 
         // 高さを固定してスクロールバーを出す
-        wrapper.style.height = "23.8em";
-        wrapper.style.overflowY = "auto";
-        wrapper.style.overflowX = "hidden";
+        wrapper.style.height = "500px"; // 高さを少し広めに設定
+        wrapper.style.overflow = "hidden"; // iframe内でスクロールさせるため隠す
         wrapper.style.marginBottom = "0px";
 
-        // 幅指定 (デフォルト600px)
-        const displayWidth = this.width ? parseInt(this.width) : 600;
-        wrapper.style.width = displayWidth + "px";
+        // 幅指定 (デフォルト100%)
+        const displayWidth = this.width ? parseInt(this.width) + "px" : "100%";
+        wrapper.style.width = displayWidth;
         wrapper.style.maxWidth = "100%";
-
-        // ローディングメッセージ
-        const message = document.createElement("div");
-        message.textContent = "Loading PDF...";
-        message.style.color = "#f0f0f0";
-        message.style.padding = "20px";
-        message.style.textAlign = "center";
-        wrapper.appendChild(message);
-
-        // ページを縦に並べるコンテナ
-        const pagesContainer = document.createElement("div");
-        pagesContainer.style.display = "flex";
-        pagesContainer.style.flexDirection = "column";
-        pagesContainer.style.alignItems = "center";
-        pagesContainer.style.padding = "20px";
-        pagesContainer.style.gap = "10px"; // ページ間の隙間
-        wrapper.appendChild(pagesContainer);
 
         // パス解決ロジック
         let fileSrc = this.src;
@@ -810,8 +792,14 @@ class PdfWidget extends WidgetType {
             }
         }
 
-        // レンダリング実行
-        this.renderPdf(fileSrc, pagesContainer, message, displayWidth);
+        // iframeを作成してPDFを表示 (Chrome標準ビューア)
+        const iframe = document.createElement('iframe');
+        iframe.src = fileSrc;
+        iframe.style.width = "100%";
+        iframe.style.height = "100%";
+        iframe.style.border = "none";
+
+        wrapper.appendChild(iframe);
 
         // リサイズ用ハンドル (幅変更)
         const handle = document.createElement("div");
@@ -842,71 +830,11 @@ class PdfWidget extends WidgetType {
 
         return wrapper;
     }
-
-    async renderPdf(url, container, message, displayWidth) {
-        if (!window.pdfjsLib) {
-            message.textContent = "Error: pdfjs-dist not loaded (check index.html)";
-            return;
-        }
-
-        try {
-            const loadingTask = window.pdfjsLib.getDocument(url);
-            const pdf = await loadingTask.promise;
-
-            message.style.display = "none"; // ロード完了で非表示
-
-            // 全ページをループして追加
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                const canvas = document.createElement("canvas");
-                canvas.style.boxShadow = "0 2px 5px rgba(0,0,0,0.3)";
-                canvas.style.maxWidth = "100%";
-                // 最初は白紙で枠だけ確保しても良いが、今回は順次描画
-                container.appendChild(canvas);
-
-                await this.renderPage(pdf, pageNum, canvas, displayWidth);
-            }
-
-        } catch (e) {
-            console.error(e);
-            message.textContent = "PDF Load Error: " + e.message;
-            message.style.color = "#ffaaaa";
-        }
-    }
-
-    async renderPage(pdf, pageNum, canvas, displayWidth) {
-        const page = await pdf.getPage(pageNum);
-        const pixelRatio = window.devicePixelRatio || 1;
-
-        // 利用可能な幅（コンテナ幅 - パディング分）
-        const availableWidth = displayWidth - 40;
-        const viewportRaw = page.getViewport({ scale: 1.0 });
-
-        // 横幅に合わせてスケール計算
-        const scale = (availableWidth / viewportRaw.width) * pixelRatio;
-        const viewport = page.getViewport({ scale: scale });
-
-        // Canvasの内部サイズ（高解像度）
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        // 見た目のサイズ（CSS）
-        canvas.style.width = `${viewport.width / pixelRatio}px`;
-        canvas.style.height = `${viewport.height / pixelRatio}px`;
-
-        const context = canvas.getContext('2d');
-        await page.render({
-            canvasContext: context,
-            viewport: viewport
-        }).promise;
-    }
-
+    
     updateSizeInMarkdown(view, wrapperDom, newWidth) {
         const pos = view.posAtDOM(wrapperDom);
         if (pos === null) return;
 
-        // ※syntaxTreeのインポートが必要（@codemirror/language）
-        // renderer.js で syntaxTree が使えるか、もしくは livePreviewPlugin.js 内で import しているか確認してください
-        // もし syntaxTree が未定義なら、この機能は動きませんが表示には影響しません
         try {
             const { syntaxTree } = require("@codemirror/language");
             const tree = syntaxTree(view.state);

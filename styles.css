@@ -1919,36 +1919,6 @@ body[data-theme="dark"] .cm-language-item:hover {
     color: white;
 }
 
-/* PDF Preview */
-.pdf-preview-header {
-    padding: 0 10px;
-    background: #252526;
-    border-bottom: 1px solid #333;
-    height: 30px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    color: #ccc;
-}
-
-.pdf-preview-content {
-    flex: 1;
-    background-color: #525252;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 20px;
-}
-
-.pdf-page-canvas {
-    background-color: #fff;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-    margin-bottom: 20px;
-    max-width: 100%;
-}
-
 /* ========== Resizers ========== */
 .resizer {
     position: absolute;
@@ -5132,69 +5102,4 @@ body[data-theme="dark"] .custom-webview-content {
 
     /* 線の濃さを調整 */
     opacity: 0.4;
-}
-
-/* ========== PDF Text Layer Styles (コピペ用) ========== */
-/* ページコンテナ：Canvasとテキストレイヤーを重ねる基準 */
-.pdf-page-container {
-    position: relative;
-    margin-bottom: 20px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-}
-
-/* テキストレイヤー：Canvasの上に透明な文字を配置 */
-.textLayer {
-    position: absolute;
-    text-align: initial;
-    left: 0;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    overflow: hidden;
-    opacity: 1;
-    /* 文字自体は透明にするのでopacityは1でOK */
-    line-height: 1.0;
-    text-size-adjust: none;
-    pointer-events: auto;
-    /* マウスイベントを有効化 */
-    user-select: text;
-    -webkit-user-select: text;
-}
-
-/* 各文字要素 */
-.textLayer span {
-    color: transparent;
-    position: absolute;
-    white-space: pre;
-    cursor: text;
-    transform-origin: 0% 0%;
-    user-select: text;
-    -webkit-user-select: text;
-}
-
-/* テキスト選択時のハイライト色 */
-.textLayer ::selection {
-    background: rgba(0, 120, 215, 0.3);
-    /* 青色半透明 */
-    color: transparent;
-}
-
-/* 左ペインのファイル表示エリア：Flexboxにして中身を広げる */
-#content-files {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-}
-
-/* ファイルツリー：余白を埋めるように伸長させる */
-.file-tree {
-    list-style-type: none;
-    padding: 0;
-    margin: 0;
-    flex: 1;
-    /* 空きスペースを埋める */
-    min-height: 100px;
-    /* 最低限の高さを確保 */
-    padding-bottom: 20px;
-    /* 下部に少し余白を作ってドロップしやすくする */
 }

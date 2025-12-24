@@ -1347,16 +1347,7 @@
 
                 <div id="shell-dropdown" class="hidden"></div>
                 <div id="terminal-container" class="terminal-content"></div>
-
-                <div class="pdf-preview-header hidden" id="pdf-preview-header">
-                    PDFプレビュー
-                    <div class="pdf-controls">
-                        <span id="pdf-page-info"></span>
-                    </div>
-                </div>
-                <div id="pdf-preview-container" class="pdf-preview-content hidden">
-                    <canvas id="pdf-canvas"></canvas>
-                </div>
+                <div id="pdf-preview-container" class="pdf-preview-content hidden"></div>
 
                 <div class="backlinks-header hidden" id="backlinks-header">
                     バックリンク (リンク元)
@@ -1495,17 +1486,6 @@
         });
         // グローバル変数として公開し、livePreviewPlugin.jsからアクセス可能にする
         window.mermaid = mermaid;
-    </script>
-    <script src="./node_modules/pdfjs-dist/build/pdf.min.mjs" type="module"></script>
-    <script src="./node_modules/pdfjs-dist/build/pdf.worker.min.mjs" type="module"></script>
-    <script>
-        // PDF.jsがグローバルに定義されていることを前提とする
-        if (typeof pdfjsLib !== 'undefined') {
-            pdfjsLib.GlobalWorkerOptions.cMapUrl = './node_modules/pdfjs-dist/cmaps/';
-            pdfjsLib.GlobalWorkerOptions.cMapPacked = true;
-            // ワーカースクリプトのパスも明示的に設定
-            pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
-        }
     </script>
     <script src="./calendar.js"></script>
     <script src="./renderer.js"></script>

@@ -409,7 +409,7 @@ const whitespaceCompartment = new Compartment();
 
 // ========== PDF Preview State ==========
 let isPdfPreviewVisible = false;
-let pdfDocument = null;
+let currentPdfBlobUrl = null;
 
 // ========== Terminal Integration State ==========
 const terminals = new Map();
@@ -432,202 +432,6 @@ let currentFilePath = null;
 let recentFiles = []; // 最近開いたファイルのリスト
 // 各ファイルの最終保存時刻を記録するマップ (誤検知防止用)
 const lastSaveTimeMap = new Map();
-
-// PDFのズームレベルを管理するグローバル変数 (初期値: 1.5倍)
-let pdfCurrentScale = 1.5;
-
-/**
- * 単一のPDFページを指定されたスケールでCanvasにレンダリングする
- * 修正: ライブラリに依存せず、手動で行列計算を行いテキストレイヤーを生成（コピペ機能の強制実装）
- */
-async function renderPdfPageToCanvas(page, canvas, scale) {
-    const pixelRatio = window.devicePixelRatio || 1;
-    const viewport = page.getViewport({ scale: scale });
-    const context = canvas.getContext('2d');
-
-    // Canvasのサイズ設定
-    canvas.height = viewport.height * pixelRatio;
-    canvas.width = viewport.width * pixelRatio;
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
-
-    context.scale(pixelRatio, pixelRatio);
-
-    // 1. 画像を描画
-    await page.render({
-        canvasContext: context,
-        viewport: viewport
-    }).promise;
-
-    // 2. テキストレイヤーの手動生成 (エラー回避版)
-    const container = canvas.parentElement;
-
-    // 既存のレイヤーがあれば削除
-    const oldLayer = container.querySelector('.textLayer');
-    if (oldLayer) oldLayer.remove();
-
-    const textLayerDiv = document.createElement('div');
-    textLayerDiv.className = 'textLayer';
-    textLayerDiv.style.width = `${viewport.width}px`;
-    textLayerDiv.style.height = `${viewport.height}px`;
-    container.style.width = `${viewport.width}px`; // 親コンテナも幅を合わせる
-    container.appendChild(textLayerDiv);
-
-    try {
-        const textContent = await page.getTextContent();
-
-        // テキストアイテムをループして配置
-        textContent.items.forEach(item => {
-            // 空白のみのアイテムはスキップしてもよいが、選択時のスペース確保のため残す場合もある
-            if (!item.str) return;
-
-            // 座標変換行列の計算: viewport.transform * item.transform
-            // item.transform は [fontScaleX, skewY, skewX, fontScaleY, x, y]
-            const v = viewport.transform;
-            const t = item.transform;
-
-            // 行列乗算: Canvas座標系への変換
-            // [a, b, c, d, tx, ty]
-            const tx = [
-                v[0] * t[0] + v[2] * t[1],
-                v[1] * t[0] + v[3] * t[1],
-                v[0] * t[2] + v[2] * t[3],
-                v[1] * t[2] + v[3] * t[3],
-                v[0] * t[4] + v[2] * t[5] + v[4],
-                v[1] * t[4] + v[3] * t[5] + v[5]
-            ];
-
-            // フォントサイズを計算（行列のスケール成分から推定）
-            const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
-
-            const span = document.createElement('span');
-            span.textContent = item.str;
-
-            // 座標配置 (Canvas座標系)
-            // tx[4] = x, tx[5] = y (ベースライン)
-            span.style.left = `${tx[4]}px`;
-            // HTMLの配置は左上基準、PDFはベースライン基準のため、フォントサイズ分上にずらす補正
-            span.style.top = `${tx[5] - fontSize}px`;
-
-            span.style.fontSize = `${fontSize}px`;
-            span.style.fontFamily = 'sans-serif';
-
-            // 回転がある場合は適用 (簡易実装)
-            // const angle = Math.atan2(tx[1], tx[0]);
-            // if (Math.abs(angle) > 0.01) span.style.transform = `rotate(${angle}rad)`;
-
-            textLayerDiv.appendChild(span);
-        });
-
-    } catch (e) {
-        console.error('Manual text layer render error:', e);
-    }
-}
-
-/**
- * PDF全体の描画とコントロールUIの生成を行う
- * 修正: ズームボタンをSVGアイコン化
- * 修正: ページ数表示の判定ロジックを改善
- * 修正: コントロールバーを上部に固定表示
- */
-async function renderAllPdfPages(pdf, container, filePath) {
-    container.innerHTML = '';
-
-    const numPages = pdf.numPages;
-    let activePageNum = 1;
-
-    // 1. コントロールパネル (固定表示エリア)
-    const controlsContainer = document.createElement('div');
-    controlsContainer.className = 'pdf-controls-top';
-    controlsContainer.style.cssText = 'display:flex; justify-content:center; align-items:center; padding:10px 0; background-color:var(--sidebar-bg); width:100%; border-bottom: 1px solid var(--sidebar-border); color: var(--text-color); flex-shrink: 0;';
-    container.appendChild(controlsContainer);
-
-    // 2. ページ数とスケール表示エリア
-    const pageInfo = document.createElement('span');
-    pageInfo.id = 'pdf-page-indicator';
-
-    const updateInfoText = () => {
-        pageInfo.textContent = `${activePageNum} / ${numPages} | Scale: ${Math.round(pdfCurrentScale * 100)}%`;
-    };
-    updateInfoText();
-
-    pageInfo.style.margin = '0 20px';
-    pageInfo.style.minWidth = '150px';
-    pageInfo.style.textAlign = 'center';
-    pageInfo.style.fontSize = '13px';
-    controlsContainer.appendChild(pageInfo);
-
-    // 3. ズームイン/アウトボタン (SVGアイコン化)
-    const createZoomBtn = (iconSvg, title, onClick) => {
-        const btn = document.createElement('button');
-        btn.innerHTML = iconSvg;
-        btn.title = title;
-        btn.onclick = onClick;
-        btn.style.cssText = 'background:transparent; border:1px solid var(--sidebar-border); color:var(--text-color); border-radius:3px; padding:4px; cursor:pointer; margin:0 2px; display:flex; align-items:center; justify-content:center; width: 28px; height: 28px;';
-
-        btn.onmouseover = () => btn.style.backgroundColor = 'rgba(0,0,0,0.1)';
-        btn.onmouseout = () => btn.style.backgroundColor = 'transparent';
-        return btn;
-    };
-
-    const iconZoomOut = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
-    const iconZoomIn = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
-
-    const zoomOutBtn = createZoomBtn(iconZoomOut, '縮小', () => {
-        pdfCurrentScale = Math.max(0.5, pdfCurrentScale - 0.25);
-        renderAllPdfPages(pdf, container, filePath);
-    });
-    controlsContainer.appendChild(zoomOutBtn);
-
-    const zoomInBtn = createZoomBtn(iconZoomIn, '拡大', () => {
-        pdfCurrentScale = Math.min(3.0, pdfCurrentScale + 0.25);
-        renderAllPdfPages(pdf, container, filePath);
-    });
-    controlsContainer.appendChild(zoomInBtn);
-
-
-    // 4. 描画エリア (ここだけスクロールさせる)
-    const pageRenderArea = document.createElement('div');
-    pageRenderArea.className = 'pdf-page-render-area';
-    // flex: 1 と overflow-y: auto でこの部分だけスクロールさせる
-    pageRenderArea.style.cssText = 'flex: 1; overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; padding: 20px 0; position: relative;';
-    container.appendChild(pageRenderArea);
-
-    // 5. Intersection Observer の設定
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const pageNum = parseInt(entry.target.dataset.pageNum, 10);
-                activePageNum = pageNum;
-                updateInfoText();
-            }
-        });
-    }, {
-        root: pageRenderArea,
-        // 上下45%を無視し、画面中央の10%に入った要素を検知
-        rootMargin: '-45% 0px -45% 0px',
-        threshold: 0
-    });
-
-    // 6. 各ページをレンダリング
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const pageContainer = document.createElement('div');
-        pageContainer.className = 'pdf-page-container';
-        pageContainer.dataset.pageNum = pageNum;
-        pageContainer.style.cssText = 'margin-bottom:20px; position: relative;';
-
-        pageRenderArea.appendChild(pageContainer);
-
-        const canvas = document.createElement('canvas');
-        canvas.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-        pageContainer.appendChild(canvas);
-
-        const page = await pdf.getPage(pageNum);
-        await renderPdfPageToCanvas(page, canvas, pdfCurrentScale);
-
-        observer.observe(pageContainer);
-    }
-}
 
 // ========== 左ペイン幅の動的制御用変数更新関数 ==========
 function updateLeftPaneWidthVariable() {
@@ -4537,7 +4341,6 @@ function updateTerminalVisibility() {
     const rightActivityBarWidth = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--activitybar-width')) || 50;
 
     const terminalHeader = document.getElementById('terminal-header');
-    const pdfPreviewHeader = document.getElementById('pdf-preview-header');
     const pdfPreviewContainer = document.getElementById('pdf-preview-container');
 
     // バックリンク用の要素取得
@@ -4573,7 +4376,6 @@ function updateTerminalVisibility() {
         // まず全てのヘッダーとコンテンツを非表示にする（リセット）
         if (terminalHeader) terminalHeader.classList.add('hidden');
         if (terminalContainer) terminalContainer.classList.add('hidden');
-        if (pdfPreviewHeader) pdfPreviewHeader.classList.add('hidden');
         if (pdfPreviewContainer) pdfPreviewContainer.classList.add('hidden');
         if (backlinksHeader) backlinksHeader.classList.add('hidden');
         if (backlinksContainer) backlinksContainer.classList.add('hidden');
@@ -4584,7 +4386,7 @@ function updateTerminalVisibility() {
         if (showCalendar) {
             // カレンダーはAPI側で制御されるため何もしない
         } else if (showPdf) {
-            if (pdfPreviewHeader) pdfPreviewHeader.classList.remove('hidden');
+            // PDFヘッダー表示コードを削除し、コンテナのみ表示
             if (pdfPreviewContainer) pdfPreviewContainer.classList.remove('hidden');
         } else if (showTerminalRight) {
             if (terminalHeader) terminalHeader.classList.remove('hidden');
@@ -4665,11 +4467,10 @@ function updateTerminalVisibility() {
         }
     }
 
-    // アイコンのアクティブ状態更新 (ここが重要: if/elseの外で実行する)
+    // アイコンのアクティブ状態更新
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
     if (btnCalendar) btnCalendar.classList.toggle('active', showCalendar);
-    // バックリンクボタンの状態更新
     if (btnBacklinks) btnBacklinks.classList.toggle('active', showBacklinks);
 
     document.querySelectorAll('.custom-link-icon').forEach(icon => {
@@ -4986,12 +4787,10 @@ async function generatePdfPreview() {
         if (!globalEditorView) return;
         const markdownContent = globalEditorView.state.doc.toString();
 
+        // コンテンツが空ならクリア
         if (!markdownContent.trim()) {
-            const canvas = document.getElementById('pdf-canvas');
-            if (canvas) {
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-            }
+            const container = document.getElementById('pdf-preview-container');
+            if (container) container.innerHTML = '';
             return;
         }
 
@@ -5004,23 +4803,18 @@ async function generatePdfPreview() {
         // カスタムCSSを取得してオプションに追加
         if (typeof getActiveCssContent === 'function') {
             options.customCss = getActiveCssContent();
-        } else {
-            console.warn('getActiveCssContent function not found');
         }
 
-        // タイトルの取得 (入力欄の値を使用)
+        // タイトルの取得
         const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
 
-        // 共通関数でHTML生成（目次処理含む）
+        // 共通関数でHTML生成
         const htmlContent = await convertMarkdownToHtml(markdownContent, options, currentTitle);
 
         if (typeof window.electronAPI?.generatePdf === 'function') {
             await renderHtmlToPdf(htmlContent, options);
         } else {
-            console.warn('PDF generation API not available, using fallback');
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = htmlContent;
-            await createCanvasBasedPreview(tempDiv);
+            console.warn('PDF generation API not available');
         }
     } catch (error) {
         console.error('Failed to generate PDF preview:', error);
@@ -5136,107 +4930,114 @@ async function processMarkdownForExport(markdown) {
 
 async function renderHtmlToPdf(htmlContent, options = {}) {
     try {
+        // メインプロセスでPDF生成 (Base64文字列が返る)
         const pdfData = await window.electronAPI.generatePdf(htmlContent, options);
         if (pdfData) {
-            await displayPdfFromData(pdfData);
+            await displayPdfFromBlob(pdfData);
         }
     } catch (error) {
         console.error('Error rendering HTML to PDF:', error);
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = htmlContent;
-        await createCanvasBasedPreview(tempDiv);
     }
 }
 
-async function createCanvasBasedPreview(htmlElement) {
-    const canvas = document.getElementById('pdf-canvas');
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    canvas.width = 794;
-    canvas.height = 1123;
-
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.fillStyle = 'black';
-    ctx.font = '14px Arial';
-
-    const text = htmlElement.textContent;
-    const lines = text.split('\n');
-    const lineHeight = 20;
-    const maxLines = Math.floor((canvas.height - 80) / lineHeight);
-    const currentPageLines = lines.slice(0, maxLines);
-
-    let y = 50;
-    currentPageLines.forEach(line => {
-        const words = line.split(' ');
-        let currentLine = '';
-        const maxWidth = canvas.width - 100;
-
-        words.forEach(word => {
-            const testLine = currentLine + word + ' ';
-            const metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && currentLine !== '') {
-                ctx.fillText(currentLine, 50, y);
-                currentLine = word + ' ';
-                y += lineHeight;
-            } else {
-                currentLine = testLine;
-            }
-        });
-        ctx.fillText(currentLine, 50, y);
-        y += lineHeight;
-    });
-}
-
-async function displayPdfFromData(pdfData) {
+async function displayPdfFromBlob(pdfDataBase64) {
     try {
-
-        const pdfDataArray = Uint8Array.from(atob(pdfData), c => c.charCodeAt(0));
-        const loadingTask = pdfjsLib.getDocument({ data: pdfDataArray });
-        pdfDocument = await loadingTask.promise;
-
-        const pageInfo = document.getElementById('pdf-page-info');
-        if (pageInfo) {
-            pageInfo.textContent = `全 ${pdfDocument.numPages} ページ`;
+        // Base64をBlobに変換
+        const byteCharacters = atob(pdfDataBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+
+        // 新しいBlob URLを生成
+        const newBlobUrl = URL.createObjectURL(blob);
 
         const container = document.getElementById('pdf-preview-container');
-        if (!container) return;
-        container.innerHTML = '';
+        const rightPane = document.getElementById('right-pane');
 
-        for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-            await renderPageToContainer(pageNum, container);
+        if (!container || !rightPane) return;
+
+        // 1. 親要素(右ペイン)のスタイル補正
+        if (window.getComputedStyle(rightPane).display !== 'flex') {
+            rightPane.style.display = 'flex';
+            rightPane.style.flexDirection = 'column';
+            rightPane.style.height = '100%';
+            rightPane.style.overflow = 'hidden';
         }
+
+        // 2. コンテナのスタイル設定 (重ね合わせの基準点とする)
+        container.classList.remove('hidden');
+        Object.assign(container.style, {
+            display: 'block',
+            flex: '1 1 auto',
+            width: '100%',
+            height: '100%',
+            minHeight: '0',
+            overflow: 'hidden',     // 余計なスクロールバーを出さない
+            padding: '0',
+            margin: '0',
+            backgroundColor: '#525659', // PDFビューアの背景色に合わせてフラッシュを目立たなくする
+            position: 'relative'        // 子要素(iframe)をabsoluteにするために必須
+        });
+
+        // 3. 既存のiframeを取得（あとで削除するため）
+        // 連続更新された場合に備え、古いiframeすべてを対象にする
+        const oldIframes = Array.from(container.querySelectorAll('iframe'));
+
+        // 4. 新しいiframeを作成（透明な状態で配置）
+        const newIframe = document.createElement('iframe');
+        Object.assign(newIframe.style, {
+            width: '100%',
+            height: '100%',
+            border: 'none',
+            display: 'block',
+            position: 'absolute', // コンテナ内で重ね合わせる
+            top: '0',
+            left: '0',
+            opacity: '0',         // 最初は隠しておく
+            transition: 'opacity 0.2s ease-out', // ふんわり表示させるアニメーション
+            zIndex: '10'          // 新しいものを手前に
+        });
+
+        // iframeをDOMに追加してからURLをセット
+        container.appendChild(newIframe);
+        newIframe.src = `${newBlobUrl}#navpanes=0`;
+
+        // 5. ロード完了後の処理
+        const onIframeReady = () => {
+            // ChromeのPDFビューアはonload直後はまだ描画されていない場合があるため、
+            // わずかに遅らせてから表示することで「描画中のチラつき」を隠蔽する
+            setTimeout(() => {
+                newIframe.style.opacity = '1';
+
+                // フェードイン完了（0.2秒）を待ってから古い要素を削除
+                setTimeout(() => {
+                    oldIframes.forEach(frame => frame.remove());
+
+                    // 古いBlob URLを解放（メモリリーク防止）
+                    if (currentPdfBlobUrl && currentPdfBlobUrl !== newBlobUrl) {
+                        URL.revokeObjectURL(currentPdfBlobUrl);
+                    }
+                    // 現在のURLを更新
+                    currentPdfBlobUrl = newBlobUrl;
+                }, 250); // transition時間(200ms) + マージン
+            }, 150); // PDF描画待ちウェイト (短すぎるとグレー画面が見える)
+        };
+
+        newIframe.onload = onIframeReady;
+
+        // フォールバック: 万が一onloadが来ない場合の強制表示 (3秒後)
+        setTimeout(() => {
+            if (newIframe.style.opacity === '0') {
+                newIframe.style.opacity = '1';
+                oldIframes.forEach(frame => frame.remove());
+            }
+        }, 3000);
 
     } catch (error) {
         console.error('Error displaying PDF:', error);
-    }
-}
-
-async function renderPageToContainer(pageNumber, container) {
-    try {
-        const page = await pdfDocument.getPage(pageNumber);
-        const canvas = document.createElement('canvas');
-        canvas.className = 'pdf-page-canvas';
-        container.appendChild(canvas);
-
-        const context = canvas.getContext('2d');
-        const viewport = page.getViewport({ scale: 1.5 });
-
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-        };
-
-        await page.render(renderContext).promise;
-
-    } catch (error) {
-        console.error(`Error rendering page ${pageNumber}:`, error);
     }
 }
 
@@ -7467,6 +7268,8 @@ function updateFileTitleBars() {
     // ヘルパー: タイトルバーを隠すべきパスか判定
     const shouldHide = (p) => {
         if (!p) return true; // パスなしは隠す
+        const fType = getFileType(p);
+        if (fType === 'image' || fType === 'pdf') return true;
         // 設定画面、スタートページ、README(互換)、Diff画面の場合は隠す
         if (p === 'settings://view' || p === 'StartPage' || p === 'README.md' || p.startsWith('DIFF://')) {
             return true;
@@ -8783,37 +8586,26 @@ function getFileType(filePath) {
 /**
  * 画像やPDFを #media-view に描画する関数
  * 修正: 幅とFlex設定を明示的に指定し、分割解除後の全画面表示を確実にする
+ * 修正: PDFをChrome標準フレーム(iframe)で表示するよう変更
  */
 async function renderMediaContent(filePath, type) {
     const container = document.getElementById('media-view');
     if (!container) return;
 
-    // --- 修正: 既に同じファイルを表示している場合は再描画しない ---
+    // 既に同じファイルを表示している場合は再描画しない
     if (container.dataset.currentFile === filePath && container.innerHTML.trim() !== '') {
         container.classList.remove('hidden');
-
+        // 分割ビューなどでスタイルが崩れている場合に備えてスタイルのみ再適用
         if (type === 'pdf') {
-            // PDFの場合はFlex-Columnで高さを確保し、親コンテナ自体のスクロールは無効化
             container.style.display = 'flex';
             container.style.flexDirection = 'column';
             container.style.height = '100%';
             container.style.width = '100%';
             container.style.flex = '1';
             container.style.overflow = 'hidden';
-        } else {
-            // 画像の場合は中央揃え
-            container.style.display = 'flex';
-            container.style.flexDirection = 'row';
-            container.style.justifyContent = 'center';
-            container.style.alignItems = 'center';
-            container.style.height = '100%';
-            container.style.width = '100%';
-            container.style.flex = '1';
-            container.style.overflow = 'auto';
         }
         return;
     }
-    // -----------------------------------------------------------
 
     container.dataset.currentFile = filePath;
     container.classList.remove('hidden');
@@ -8842,7 +8634,7 @@ async function renderMediaContent(filePath, type) {
         container.appendChild(img);
 
     } else if (type === 'pdf') {
-        // PDF表示設定: 親コンテナをFlex-Columnにし、高さを100%に固定
+        // PDF表示設定: Chrome標準ビューア(iframe)を使用
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
         container.style.height = '100%';
@@ -8850,28 +8642,13 @@ async function renderMediaContent(filePath, type) {
         container.style.flex = '1';
         container.style.overflow = 'hidden';
 
-        // 【修正点】自前描画をやめて、iframeを作成してsrcにPDFのパスを指定する
         const iframe = document.createElement('iframe');
-        iframe.src = fileUrl; // file://... のパス
+        iframe.src = `${fileUrl}#navpanes=0`;
         iframe.style.width = '100%';
         iframe.style.height = '100%';
         iframe.style.border = 'none';
-        
+
         container.appendChild(iframe);
-
-        try {
-            const loadingTask = pdfjsLib.getDocument(fileUrl);
-            const pdf = await loadingTask.promise;
-
-            // ロード完了
-            container.removeChild(loading);
-
-            // 描画関数呼び出し
-            await renderAllPdfPages(pdf, container, filePath);
-        } catch (e) {
-            loading.textContent = `Error loading PDF: ${e.message}`;
-            console.error(e);
-        }
     }
 }
 
