@@ -182,6 +182,7 @@ let activeEditorView = null;
 let activeCustomLinkId = null; // 現在表示中のカスタムリンクID
 let isPreviewMode = false; // プレビューモードの状態
 let splitLayoutRatio = 0.5; // エディタとプレビューの分割比率 (初期値50%)
+let commandPalette;
 
 // 言語状態を管理するフィールド
 const currentLanguageField = StateField.define({
@@ -1236,6 +1237,36 @@ async function convertMarkdownToHtml(markdown, pdfOptions, title) {
             return `<h${level} id="${anchor}">${text}</h${level}>\n`;
         };
     }
+
+    // --- チェックボックス（タスクリスト）のカスタムレンダリング ---
+    renderer.checkbox = function (checked) {
+        return '<input type="checkbox" ' + (checked ? 'checked="" ' : '') + 'disabled="" class="task-list-item-checkbox"> ';
+    };
+
+    // --- リストアイテムのカスタムレンダリング（タスクリスト用クラス付与） ---
+    renderer.listitem = function (text, task) {
+        if (task) {
+            return '<li class="task-list-item">' + text + '</li>\n';
+        }
+        return '<li>' + text + '</li>\n';
+    };
+
+    // --- Mermaidコードブロックの対応 ---
+    renderer.code = (code, language) => {
+        // 言語が mermaid の場合は専用のdivタグを返す
+        if (language === 'mermaid') {
+            return `<div class="mermaid">${code}</div>`;
+        }
+        // 通常のコードブロック（HTMLエスケープ処理）
+        // markedのデフォルト挙動に近い処理を再現
+        const escapedCode = (code || '').replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+
+        return `<pre><code class="language-${language || ''}">${escapedCode}</code></pre>`;
+    };
 
     // --- 画像のカスタムレンダラー (サイズ指定とパス解決) ---
     renderer.image = (href, title, text) => {
@@ -3825,10 +3856,24 @@ async function executePdfExport() {
 
     try {
         // オプション取得
-        const options = appSettings.pdfOptions || {
-            pageSize: 'A4', marginsType: 0, printBackground: true,
-            displayHeaderFooter: false, landscape: false, enableToc: false, includeTitle: false
+        const options = {
+            ...(appSettings.pdfOptions || {}),
+            // デフォルト値の補完（既存の設定があればそれを優先）
+            pageSize: appSettings.pdfOptions?.pageSize || 'A4',
+            marginsType: appSettings.pdfOptions?.marginsType !== undefined ? parseInt(appSettings.pdfOptions.marginsType) : 0,
+            printBackground: appSettings.pdfOptions?.printBackground !== undefined ? appSettings.pdfOptions.printBackground : true,
+            displayHeaderFooter: appSettings.pdfOptions?.displayHeaderFooter || false,
+            landscape: appSettings.pdfOptions?.landscape || false,
+            enableToc: appSettings.pdfOptions?.enableToc || false,
+            includeTitle: appSettings.pdfOptions?.includeTitle || false,
+            // 【重要】現在のテーマを渡してCSS変数を正しく解決させる
+            theme: appSettings.theme
         };
+
+        // カスタムCSSを取得してオプションに追加（スニペット用）
+        if (typeof getActiveCssContent === 'function') {
+            options.customCss = getActiveCssContent();
+        }
 
         // タイトルの取得
         const currentTitle = document.getElementById('file-title-input')?.value || 'Untitled';
@@ -8314,6 +8359,31 @@ window.addEventListener('load', async () => {
             toggleHighlightColor(globalEditorView, command.color);
         }
     });
+
+    if (typeof CommandPalette !== 'undefined') {
+        commandPalette = new CommandPalette();
+    }
+
+    // スニペット設定イベントもここで呼ぶ
+    setupSnippetSettingsEvents();
+
+    // すべての初期化が終わったらローディング画面を消す
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        // テーマに合わせて背景色を調整（ちらつき防止）
+        if (appSettings.theme === 'dark') {
+            overlay.style.backgroundColor = '#1e1e1e';
+            overlay.style.color = '#ccc';
+        }
+
+        // 少し待ってからフェードアウト（初期描画の安定待ち）
+        setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.remove();
+            }, 300); // transition: opacity 0.3s に合わせる
+        }, 100);
+    }
 });
 
 // ブランチ切り替え機能のセットアップ (サイドバー & ステータスバー)
@@ -8794,7 +8864,7 @@ async function renderMediaContent(filePath, type) {
                         parts.pop();
                     }
                 }
-                
+
                 keyName = keyName.toLowerCase();
 
                 const reqShift = parts.includes('Shift');
@@ -12212,14 +12282,6 @@ function setupSettingsActivationHandler() {
         }
     });
 }
-
-// インスタンス作成
-let commandPalette;
-window.addEventListener('load', () => {
-    // ... 既存のloadイベント内 ...
-    commandPalette = new CommandPalette();
-    setupSnippetSettingsEvents();
-});
 
 // ショートカットキー登録 (Ctrl+Shift+P)
 COMMANDS_REGISTRY.push({

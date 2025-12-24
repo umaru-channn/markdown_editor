@@ -5103,3 +5103,228 @@ body[data-theme="dark"] .custom-webview-content {
     /* 線の濃さを調整 */
     opacity: 0.4;
 }
+
+/* =========================================
+    PDF / Export / Preview Compatibility Styles
+    (CodeMirror以外の標準HTML用スタイル)
+   ========================================= */
+
+/* コンテナの基本設定 */
+.markdown-rendered {
+    font-family: var(--editor-font-family);
+    font-size: var(--editor-font-size);
+    line-height: var(--line-height);
+    color: var(--text-color);
+    background-color: transparent;
+    word-wrap: break-word;
+}
+
+/* 見出し (Editorの .cm-live-hX と同じ設定) */
+.markdown-rendered h1 {
+    font-size: 1.618em;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+    border-bottom: none;
+}
+
+.markdown-rendered h2 {
+    font-size: 1.462em;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.markdown-rendered h3 {
+    font-size: 1.318em;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.markdown-rendered h4 {
+    font-size: 1.188em;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.markdown-rendered h5 {
+    font-size: 1.076em;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.markdown-rendered h6 {
+    font-size: 1.0em;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+/* 段落 */
+.markdown-rendered p {
+    margin: 0.5em 0;
+}
+
+/* 引用 (Editorの .cm-live-quote と同じ設定) */
+.markdown-rendered blockquote {
+    margin: 1em 0;
+    padding: 0 10px;
+    color: #6a737d;
+    border-left: 4px solid var(--cb-border-color);
+    background: transparent;
+}
+
+body[data-theme="dark"] .markdown-rendered blockquote {
+    color: #8b949e;
+}
+
+/* コードブロック (Editorの .cm-code-block 風) */
+.markdown-rendered pre {
+    background-color: var(--cb-body-bg);
+    border: 1px solid var(--cb-border-color);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-x: auto;
+    font-family: var(--editor-font-family-mono, monospace);
+    margin: 1em 0;
+}
+
+.markdown-rendered code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+body[data-theme="dark"] .markdown-rendered code {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.markdown-rendered pre code {
+    background-color: transparent;
+    padding: 0;
+    font-size: 1em;
+}
+
+/* リスト */
+.markdown-rendered ul,
+.markdown-rendered ol {
+    padding-left: 2em;
+    margin: 0.5em 0;
+}
+
+/* タスクリスト (チェックボックス) の位置調整 */
+.markdown-rendered .task-list-item {
+    list-style-type: none;
+    /* 黒点を消す */
+    position: relative;
+    padding-left: 0;
+    /* インデントをリセット */
+    margin-left: 0;
+}
+
+/* タスクリストを含む親のULのインデント調整 */
+/* Electron環境(Chromium)なら :has が使用可能 */
+.markdown-rendered ul:has(> .task-list-item) {
+    list-style-type: none;
+    padding-left: 1.5em;
+    /* 通常のリストより少し浅くする */
+}
+
+/* チェックボックス本体 */
+.markdown-rendered input[type="checkbox"] {
+    position: absolute;
+    left: -1.4em;
+    /* 左側のマージンエリアに配置 */
+    top: 0.3em;
+    margin: 0;
+    vertical-align: middle;
+    cursor: default;
+}
+
+/* リンク */
+.markdown-rendered a {
+    color: #0366d6;
+    text-decoration: none;
+}
+
+.markdown-rendered a:hover {
+    text-decoration: underline;
+}
+
+body[data-theme="dark"] .markdown-rendered a {
+    color: #58a6ff;
+}
+
+/* テーブル */
+.markdown-rendered table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+.markdown-rendered th,
+.markdown-rendered td {
+    border: 1px solid var(--sidebar-border);
+    padding: 6px 13px;
+}
+
+.markdown-rendered th {
+    background-color: var(--cb-header-bg);
+    font-weight: bold;
+}
+
+.markdown-rendered tr:nth-child(2n) {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+body[data-theme="dark"] .markdown-rendered tr:nth-child(2n) {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* 水平線 */
+.markdown-rendered hr {
+    height: 2px;
+    padding: 0;
+    margin: 24px 0;
+    background-color: var(--sidebar-border);
+    border: 0;
+}
+
+/* 太字・斜体など */
+.markdown-rendered strong {
+    font-weight: bold;
+}
+
+.markdown-rendered em {
+    font-style: italic;
+}
+
+.markdown-rendered del {
+    text-decoration: line-through;
+    color: #6a737d;
+}
+
+.markdown-rendered mark {
+    background-color: yellow;
+    color: #333;
+    padding: 0 0.2em;
+    border-radius: 2px;
+}
+
+body[data-theme="dark"] .markdown-rendered mark {
+    background-color: rgba(255, 255, 0, 0.2);
+    color: inherit;
+}
+
+/* Mermaid図形の中央揃え */
+.markdown-rendered .mermaid {
+    display: flex;
+    justify-content: center;
+    margin: 1.5em 0;
+    background-color: transparent; /* 背景色を透明に */
+}

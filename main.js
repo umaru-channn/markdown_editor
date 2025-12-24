@@ -2775,298 +2775,140 @@ ipcMain.handle('export-pdf', async (event, htmlContent, options = {}) => {
 // HTMLテンプレートを生成するヘルパー関数
 function getPdfHtmlTemplate(htmlContent, options = {}) {
 
+  // 1. KaTeX CSS (数式用)
   let katexCss = '';
   try {
-    // node_modules内のCSSファイルのパス
     const katexPath = path.join(__dirname, 'node_modules', 'katex', 'dist', 'katex.min.css');
     if (fs.existsSync(katexPath)) {
       katexCss = fs.readFileSync(katexPath, 'utf8');
     }
   } catch (e) {
-    console.error("Failed to load KaTeX CSS for PDF:", e);
+    console.error("Failed to load KaTeX CSS:", e);
   }
 
-  let bodyPadding = '40px'; // デフォルト (Type 0)
+  // 2. Mermaid JS (図形用)
+  let mermaidScriptTag = '';
+  try {
+    const mermaidPath = path.join(__dirname, 'node_modules', 'mermaid', 'dist', 'mermaid.min.js');
+    if (fs.existsSync(mermaidPath)) {
+      const jsContent = fs.readFileSync(mermaidPath, 'utf8');
+      mermaidScriptTag = `<script>${jsContent}</script>`;
+    } else {
+      console.warn("Mermaid local file not found. Using CDN.");
+      mermaidScriptTag = `<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>`;
+    }
+  } catch (e) {
+    mermaidScriptTag = `<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>`;
+  }
 
+  // 3. Prism.js の読み込み (コードハイライト用)
+  // テーマ選択 (ライト: default / ダーク: tomorrow)
+  const prismTheme = options.theme === 'dark' ? 'prism-tomorrow' : 'prism';
+  const prismVersion = '1.29.0';
+  const prismCssUrl = `https://cdnjs.cloudflare.com/ajax/libs/prism/${prismVersion}/themes/${prismTheme}.min.css`;
+  const prismJsUrl = `https://cdnjs.cloudflare.com/ajax/libs/prism/${prismVersion}/prism.min.js`;
+  // 自動で言語ファイルを読み込むプラグイン
+  const prismAutoloaderUrl = `https://cdnjs.cloudflare.com/ajax/libs/prism/${prismVersion}/plugins/autoloader/prism-autoloader.min.js`;
+
+  // 4. アプリCSS (styles.css)
+  let appStyles = '';
+  try {
+    const stylesPath = path.join(__dirname, 'styles.css');
+    if (fs.existsSync(stylesPath)) {
+      appStyles = fs.readFileSync(stylesPath, 'utf8');
+    }
+  } catch (e) {
+    console.error("Failed to load styles.css:", e);
+  }
+
+  // 5. 余白設定
+  let bodyPadding = '40px';
   if (options.marginsType === 1 || options.marginsType === '1') {
-    // 余白なし
     bodyPadding = '0';
   } else if (options.marginsType === 2 || options.marginsType === '2') {
-    // 余白最小
-    // Electron側の marginsType: 2 はプリンタの最小余白などを使いますが、
-    // ここでCSSパディングも小さくしないと見た目が変わりません。
-    // お好みで '0' や '5mm' などに設定してください。
     bodyPadding = '5mm';
   }
 
+  // 6. テーマ属性
+  const themeAttr = options.theme === 'dark' ? 'data-theme="dark"' : '';
+
   return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <style>
-          /* Katexスタイル定義 */
-          ${katexCss}
-          /* PDF用の変数定義 */
-            :root {
-                /* インデントを0にして、すべての見出しの位置を左端に均等に揃える */
-                --padding-text: 0px; 
-                --main-bg: #ffffff;
-                --text-color: #333;
-            }
-            body {
-              font-family: "Segoe UI", "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-              padding: ${bodyPadding};
-              line-height: 1.4;
-              color: #333;
-            }
-            h1, h2, h3, h4, h5, h6 {
-              margin-top: 0.5em;
-              margin-bottom: 0.2em;
-              font-weight: 600;
-              line-height: 1.3;
-            }
-            /* PDFタイトルのスタイル */
-            .pdf-title {
-              font-size: 28px;
-              font-weight: bold;
-              text-align: center;
-              margin-bottom: 30px;
-              padding-bottom: 10px;
-              border-bottom: 2px solid #eaecef;
-            }
-            p {
-              margin-bottom: 0.5em;
-            }
-            code {
-              background-color: #f6f8fa;
-              padding: 2px 6px;
-              border-radius: 3px;
-              font-family: monospace;
-            }
-            pre {
-              background-color: #f6f8fa;
-              padding: 16px;
-              border-radius: 6px;
-              overflow-x: auto;
-            }
-            pre code {
-              padding: 0;
-              background-color: transparent;
-            }
-            blockquote {
-              border-left: 4px solid #ddd;
-              padding-left: 16px;
-              color: #666;
-              margin: 16px 0;
-            }
-            /* List Styling */
-            ul, ol {
-              padding-left: 2em;
-              margin-bottom: 1em;
-            }
-            ol ol, ul ol, ol ul, ul ul {
-                margin-bottom: 0;
-            }
-            li {
-              margin-bottom: 0.2em; /* 0.5em から変更 */
-              white-space: pre-wrap; /* リストのネストのインデント用スペースを保持 */
-            }
-            /* リスト内の段落マージンを削除して隙間を詰める */
-            li > p {
-              margin-top: 0;
-              margin-bottom: 0;
-            }
-            /* Task List (Checklist) Styling */
-            li:has(input[type="checkbox"]) {
-              list-style-type: none;
-              position: relative;
-            }
-            input[type="checkbox"] {
-              margin-right: 0.5em;
-              vertical-align: middle;
-            }
-            
-            /* Mark styling for ==highlight== */
-            mark {
-              background-color: #fff700;
-              color: black;
-              padding: 0 2px;
-              border-radius: 2px;
-            }
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      
+      <link rel="stylesheet" href="${prismCssUrl}">
 
-            table {
-              border-collapse: collapse;
-              width: 100%;
-              margin: 16px 0;
-            }
-            table th, table td {
-              border: 1px solid #ddd;
-              padding: 8px;
-              text-align: left;
-            }
-            table th {
-              background-color: #f6f8fa;
-              font-weight: 600;
-            }
-            img {
-              max-width: 100%;
-            }
-            /* 改ページ用スタイル */
-            .page-break {
-              page-break-after: always;
-              break-after: page;
-              display: block;
-              height: 0;
-              margin: 0;
-              border: none;
-            }
-            /* ブックマークカード用スタイル */
-            .cm-bookmark-widget {
-                display: flex;
-                width: 100%;
-                max-width: 100%;
-                height: 120px;
-                border: 1px solid #e5e7eb;
-                border-radius: 6px;
-                overflow: hidden;
-                margin: 16px 0;
-                background-color: #ffffff;
-                text-decoration: none;
-                color: inherit;
-                page-break-inside: avoid;
-            }
-            .cm-bookmark-content {
-                flex: 1;
-                padding: 12px 16px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                overflow: hidden;
-                min-width: 0;
-            }
-            .cm-bookmark-title {
-                font-size: 14px;
-                font-weight: 600;
-                color: #111827;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                margin-bottom: 4px;
-                line-height: 1.4;
-            }
-            .cm-bookmark-desc {
-                font-size: 12px;
-                color: #6b7280;
-                display: -webkit-box;
-                -webkit-line-clamp: 2;
-                -webkit-box-orient: vertical;
-                overflow: hidden;
-                line-height: 1.5;
-                margin: 0;
-            }
-            .cm-bookmark-meta {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                margin-top: 8px;
-                font-size: 12px;
-                color: #6b7280;
-            }
-            .cm-bookmark-favicon {
-                width: 16px;
-                height: 16px;
-                object-fit: contain;
-            }
-            .cm-bookmark-cover {
-                width: 33%;
-                max-width: 240px;
-                min-width: 120px;
-                height: 100%;
-                border-left: 1px solid #f3f4f6;
-                position: relative;
-            }
-            .cm-bookmark-image {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-                display: block;
-            }
-            /* 目次 (TOC) 用のスタイル */
-            .toc {
-                margin-bottom: 20px;
-                page-break-after: always; /* 目次の後で改ページ */
-            }
-            .toc-title {
-                text-align: center;
-                margin-bottom: 10px;
-                font-size: 20px;
-                font-weight: 600;
-                border-bottom: 2px solid #333;
-                padding-bottom: 5px;
-            }
-            .toc-list {
-                list-style: none;
-                padding: 0;
-                margin: 0;
-            }
-            .toc-item {
-                white-space: normal;
-            }
-            .toc-link {
-                text-decoration: none;
-                color: #333;
-                display: flex;          /* Flexboxを使って横並びにする */
-                align-items: flex-end;  /* 下揃えにして点線の高さを合わせる */
-                width: 100%;
-            }
+      <style>
+        /* ライブラリCSS (KaTeX) */
+        ${katexCss}
+        
+        /* アプリスタイル */
+        ${appStyles}
 
-            /* 点線を描画する疑似要素 */
-            .toc-link::after {
-                content: "";            /* ここにページ番号を入れる場所ですが、自動取得不可のため空に */
-                flex-grow: 1;           /* 余白を埋めるように伸ばす */
-                border-bottom: 1px dotted #333; /* 1pxの点線 */
-                margin-left: 5px;       /* 文字との間隔 */
-                margin-bottom: 6px;     /* 高さの微調整（フォントサイズに合わせて調整してください） */
-                opacity: 0.5;           /* 点線を少し薄くして目立たせすぎない */
-            }
+        /* PDF出力用の追加調整 */
+        body {
+          font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+          padding: ${bodyPadding} !important;
+          background-color: var(--main-bg);
+          color: var(--text-color);
+          width: 100%;
+          margin: 0 !important;
+          overflow: visible;
+        }
+        
+        /* Mermaid調整 */
+        .mermaid {
+          display: flex;
+          justify-content: center;
+          margin: 1.5em 0;
+          background-color: transparent;
+        }
 
-            .toc-link:hover {
-                color: #007acc;
-            }
-            .toc-link:hover::after {
-                border-bottom-color: #007acc;
-            }
-            /* 階層ごとのインデント */
-            .toc-level-1 { padding-left: 0; font-weight: 600; font-size: 1.05em; margin-top: 6px; }
-            .toc-level-2 { padding-left: 30px; }
-            .toc-level-3 { padding-left: 60px; }
-            .toc-level-4 { padding-left: 90px; font-size: 0.9em; }
-            .toc-level-5 { padding-left: 110px; font-size: 0.9em; }
-            .toc-level-6 { padding-left: 120px; font-size: 0.9em; }
+        /* Prism.js用の微調整 (エディタのフォントと合わせる) */
+        code[class*="language-"],
+        pre[class*="language-"] {
+          font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace !important;
+          font-size: 0.95em;
+        }
 
-            /* カスタムCSSスニペット */
-            ${options.customCss || ''}
+        /* カスタムCSSスニペット */
+        ${options.customCss || ''}
+      </style>
+    </head>
+    <body ${themeAttr}>
+      <div class="markdown-rendered">
+        ${htmlContent}
+      </div>
 
-            /* カスタムCSSより後に記述して、見出しのインデントを強制リセットする */
-            .markdown-rendered h1,
-            .markdown-rendered h2,
-            .markdown-rendered h3,
-            .markdown-rendered h4,
-            .markdown-rendered h5,
-            .markdown-rendered h6 {
-                margin-left: 0 !important;
-                padding-left: 25px !important;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="markdown-rendered">
-            ${htmlContent}
-          </div>
-        </body>
-      </html>
-    `;
+      ${mermaidScriptTag}
+      
+      <script src="${prismJsUrl}"></script>
+      <script src="${prismAutoloaderUrl}"></script>
+
+      <script>
+        document.addEventListener("DOMContentLoaded", function() {
+          // Mermaid初期化
+          if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({ 
+              startOnLoad: true, 
+              theme: '${options.theme === 'dark' ? 'dark' : 'default'}',
+              securityLevel: 'loose'
+            });
+          }
+
+          // Prism.jsは通常自動実行されますが、念のため手動キックも入れておきます
+          if (typeof Prism !== 'undefined') {
+            // AutoloaderのCDNパスを明示的に指定（ローカル実行時のパス解決エラー防止）
+            Prism.plugins.autoloader.languages_path = 'https://cdnjs.cloudflare.com/ajax/libs/prism/${prismVersion}/components/';
+            Prism.highlightAll();
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `;
 }
 
 // ========== エディタコンテキストメニュー ==========
