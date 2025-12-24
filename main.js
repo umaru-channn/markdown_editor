@@ -1069,7 +1069,9 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      plugins: true,
+      webSecurity: false // CORS制限を無効化
     }
   })
 
@@ -1082,7 +1084,7 @@ function createWindow() {
           ...details.responseHeaders,
           'Content-Security-Policy': [
             // frame-src に https: を追加して、任意のHTTPSサイトを表示可能にします
-            "default-src 'self'; img-src 'self' https: data: file: blob:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https:;"
+            "default-src 'self'; img-src 'self' https: data: file: blob:; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; connect-src 'self' https://www.googleapis.com https://*.dropboxapi.com; frame-src https: file:;"
           ]
         }
       })

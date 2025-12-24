@@ -8850,12 +8850,14 @@ async function renderMediaContent(filePath, type) {
         container.style.flex = '1';
         container.style.overflow = 'hidden';
 
-        const loading = document.createElement('div');
-        loading.textContent = 'Loading PDF...';
-        loading.style.color = '#888';
-        loading.style.marginTop = '20px';
-        loading.style.textAlign = 'center';
-        container.appendChild(loading);
+        // 【修正点】自前描画をやめて、iframeを作成してsrcにPDFのパスを指定する
+        const iframe = document.createElement('iframe');
+        iframe.src = fileUrl; // file://... のパス
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        
+        container.appendChild(iframe);
 
         try {
             const loadingTask = pdfjsLib.getDocument(fileUrl);
