@@ -653,9 +653,15 @@ function applySettingsToUI() {
     // ファイルタイトルバーの制御
     const fileTitleBarEl = document.getElementById('file-title-bar');
     const readmeContent = document.getElementById('content-readme');
+    const mediaViewEl = document.getElementById('media-view'); // 追加: メディアビュー要素を取得
+
     if (fileTitleBarEl && readmeContent) {
         const isEditorViewActive = !readmeContent.classList.contains('content-hidden');
-        if (appSettings.showFileTitleBar && isEditorViewActive && currentFilePath !== 'StartPage' && currentFilePath !== 'settings://view') {
+        // メディアビューが表示されているかチェック
+        const isMediaViewActive = mediaViewEl && !mediaViewEl.classList.contains('hidden');
+
+        // メディアビューが表示されている場合はタイトルバーを隠す条件を追加 (!isMediaViewActive)
+        if (appSettings.showFileTitleBar && isEditorViewActive && !isMediaViewActive && currentFilePath !== 'StartPage' && currentFilePath !== 'settings://view') {
             fileTitleBarEl.classList.remove('hidden');
         } else {
             fileTitleBarEl.classList.add('hidden');
@@ -8583,73 +8589,270 @@ function getFileType(filePath) {
     return 'external';
 }
 
+// グローバル変数としてイベントハンドラを保持（重複登録防止のため）
+let globalMediaKeyHandler = null;
+
 /**
  * 画像やPDFを #media-view に描画する関数
- * 修正: 幅とFlex設定を明示的に指定し、分割解除後の全画面表示を確実にする
- * 修正: PDFをChrome標準フレーム(iframe)で表示するよう変更
+ * 修正: タブ切替時のショートカット不具合修正、フォーカス強制、ズーム状態の維持
  */
 async function renderMediaContent(filePath, type) {
-    const container = document.getElementById('media-view');
-    if (!container) return;
+    let container = document.getElementById('media-view');
 
-    // 既に同じファイルを表示している場合は再描画しない
-    if (container.dataset.currentFile === filePath && container.innerHTML.trim() !== '') {
-        container.classList.remove('hidden');
-        // 分割ビューなどでスタイルが崩れている場合に備えてスタイルのみ再適用
-        if (type === 'pdf') {
-            container.style.display = 'flex';
-            container.style.flexDirection = 'column';
-            container.style.height = '100%';
-            container.style.width = '100%';
-            container.style.flex = '1';
-            container.style.overflow = 'hidden';
+    // 1. コンテナが存在しない場合は作成
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'media-view';
+        container.className = 'hidden';
+        container.tabIndex = -1; // フォーカス可能にするために必要
+
+        const editorEl = document.getElementById('editor');
+        if (editorEl && editorEl.parentElement) {
+            editorEl.parentElement.appendChild(container);
+        } else {
+            const centerPane = document.getElementById('center-pane');
+            if (centerPane) centerPane.appendChild(container);
         }
-        return;
     }
 
-    container.dataset.currentFile = filePath;
+    // 2. 前回のキーハンドラを確実に削除 (重複防止)
+    if (globalMediaKeyHandler) {
+        window.removeEventListener('keydown', globalMediaKeyHandler, { capture: true });
+        globalMediaKeyHandler = null;
+    }
+
+    // 3. エディタ類を非表示にする
+    const editorEl = document.getElementById('editor');
+    if (editorEl) editorEl.style.display = 'none';
+    const splitEl = document.getElementById('editor-split');
+    if (splitEl) splitEl.style.display = 'none';
+    const diffEl = document.getElementById('diff-view-container');
+    if (diffEl) diffEl.style.display = 'none';
+
+    // 4. メディアビューを表示し、フォーカスを強制する (これが重要)
     container.classList.remove('hidden');
-    container.innerHTML = '';
+    container.style.display = 'flex';
+    container.focus(); // エディタからフォーカスを奪う
 
-    // パスを正規化して file:/// URLを生成
-    const normalizedPath = filePath.replace(/\\/g, '/');
-    const fileUrl = normalizedPath.startsWith('/') ? `file://${normalizedPath}` : `file:///${normalizedPath}`;
+    // 状態変数の準備 (既存の状態があれば引き継ぐ)
+    let isNewFile = (container.dataset.currentFile !== filePath);
+    container.dataset.currentFile = filePath;
 
-    if (type === 'image') {
-        // 画像表示の設定
-        container.style.display = 'flex';
-        container.style.flexDirection = 'row';
-        container.style.justifyContent = 'center';
-        container.style.alignItems = 'center';
-        container.style.height = '100%';
-        container.style.width = '100%';
-        container.style.flex = '1';
-        container.style.overflow = 'auto';
-
-        const img = document.createElement('img');
-        img.src = fileUrl;
-        img.style.maxWidth = '100%';
-        img.style.maxHeight = '100%';
-        img.style.boxShadow = '0 0 10px rgba(0,0,0,0.1)';
-        container.appendChild(img);
-
-    } else if (type === 'pdf') {
-        // PDF表示設定: Chrome標準ビューア(iframe)を使用
-        container.style.display = 'flex';
-        container.style.flexDirection = 'column';
-        container.style.height = '100%';
-        container.style.width = '100%';
-        container.style.flex = '1';
-        container.style.overflow = 'hidden';
-
-        const iframe = document.createElement('iframe');
-        iframe.src = `${fileUrl}#navpanes=0`;
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
-        iframe.style.border = 'none';
-
-        container.appendChild(iframe);
+    // 画像用ヘルパー関数 (リスナーで共有するためにここで定義)
+    // 状態は container._mediaState オブジェクトで管理する
+    if (!container._mediaState || isNewFile) {
+        container._mediaState = { scale: 1, pannedX: 0, pannedY: 0 };
     }
+    const state = container._mediaState;
+
+    const getImg = () => container.querySelector('img');
+    const updateTransform = () => {
+        const img = getImg();
+        if (img) {
+            img.style.transform = `translate(${state.pannedX}px, ${state.pannedY}px) scale(${state.scale})`;
+        }
+    };
+    const zoom = (delta) => {
+        const newScale = Math.min(Math.max(0.1, state.scale + delta), 10);
+        state.scale = newScale;
+        updateTransform();
+    };
+
+    // --- コンテンツの描画 (新規ファイルの場合のみ) ---
+    if (isNewFile) {
+        container.innerHTML = '';
+
+        // パスの正規化
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        const fileUrl = normalizedPath.startsWith('/') ? `file://${normalizedPath}` : `file:///${normalizedPath}`;
+
+        // スタイル設定
+        Object.assign(container.style, {
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100%',
+            width: '100%',
+            flex: '1',
+            overflow: 'hidden',
+            backgroundColor: '#1e1e1e',
+            position: 'relative',
+            cursor: 'default',
+            outline: 'none'
+        });
+
+        if (type === 'image') {
+            const img = document.createElement('img');
+            img.src = fileUrl;
+            Object.assign(img.style, {
+                maxWidth: '100%',
+                maxHeight: '100%',
+                cursor: 'grab',
+                transition: 'transform 0.08s ease-out',
+                transformOrigin: 'center center',
+                userSelect: 'none',
+                willChange: 'transform'
+            });
+            container.appendChild(img);
+
+            // マウス操作系リスナーの設定
+            let isDragging = false;
+            let startX = 0;
+            let startY = 0;
+
+            container.onwheel = (e) => {
+                // 拡大縮小
+                if (e.ctrlKey) {
+                    e.preventDefault();
+                    zoom(e.deltaY > 0 ? -0.1 : 0.1);
+                } else {
+                    // スクロール等の微調整
+                    e.preventDefault();
+                    zoom(e.deltaY > 0 ? -0.05 : 0.05);
+                }
+            };
+
+            img.onmousedown = (e) => {
+                e.preventDefault();
+                isDragging = true;
+                startX = e.clientX - state.pannedX;
+                startY = e.clientY - state.pannedY;
+                img.style.cursor = 'grabbing';
+                img.style.transition = 'none';
+            };
+
+            const onMouseMove = (e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+                state.pannedX = e.clientX - startX;
+                state.pannedY = e.clientY - startY;
+                updateTransform();
+            };
+            const onMouseUp = () => {
+                if (isDragging) {
+                    isDragging = false;
+                    const el = getImg();
+                    if (el) {
+                        el.style.cursor = 'grab';
+                        el.style.transition = 'transform 0.08s ease-out';
+                    }
+                }
+            };
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+
+            container.ondblclick = () => {
+                state.scale = 1;
+                state.pannedX = 0;
+                state.pannedY = 0;
+                const el = getImg();
+                if (el) {
+                    el.style.transition = 'transform 0.3s ease';
+                    updateTransform();
+                    setTimeout(() => { el.style.transition = 'transform 0.08s ease-out'; }, 300);
+                }
+            };
+
+        } else if (type === 'pdf') {
+            const iframe = document.createElement('iframe');
+            iframe.src = fileUrl;
+            Object.assign(iframe.style, {
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+                pointerEvents: 'auto' // クリックイベントを受け取る
+            });
+            container.appendChild(iframe);
+        }
+    } else {
+        // 既存ファイルの場合、画像位置などを復元
+        if (type === 'image') {
+            updateTransform();
+        }
+    }
+
+    // 5. ショートカットキーハンドラの登録 (毎回必ず実行)
+    globalMediaKeyHandler = (e) => {
+        // 表示中でなければ無視
+        if (container.classList.contains('hidden') || container.style.display === 'none') return;
+
+        // キーバインド判定用ヘルパー関数
+        const matchesCommand = (commandId) => {
+            const bindings = getKeybindingsForCommand(commandId); // ['Mod-;', 'Mod-='] などを取得
+            const isMac = navigator.platform.toUpperCase().includes('MAC');
+
+            return bindings.some(binding => {
+                const parts = binding.split('-');
+                let keyName = parts.pop();
+                // 'Mod--' のように末尾がハイフンの場合、splitの結果末尾が空文字になるため補正する
+                if (keyName === '') {
+                    keyName = '-';
+                    // もし配列にまだ空文字が残っていれば整理（必須ではないが安全のため）
+                    if (parts.length > 0 && parts[parts.length - 1] === '') {
+                        parts.pop();
+                    }
+                }
+                
+                keyName = keyName.toLowerCase();
+
+                const reqShift = parts.includes('Shift');
+                const reqAlt = parts.includes('Alt');
+                const reqCtrl = parts.includes('Ctrl');
+                const reqMeta = parts.includes('Meta');
+                const reqMod = parts.includes('Mod');
+
+                // Shift & Alt の判定
+                if (e.shiftKey !== reqShift) return false;
+                if (e.altKey !== reqAlt) return false;
+
+                // Mod (Mac:Cmd, Win:Ctrl) の解決
+                const effectiveCtrl = reqCtrl || (reqMod && !isMac);
+                const effectiveMeta = reqMeta || (reqMod && isMac);
+
+                // Ctrl & Meta の判定 (厳密にチェック)
+                if (e.ctrlKey !== effectiveCtrl) return false;
+                if (e.metaKey !== effectiveMeta) return false;
+
+                // キーコードの判定
+                return e.key.toLowerCase() === keyName;
+            });
+        };
+
+        // 画像操作
+        if (type === 'image') {
+            if (matchesCommand('view:font-zoom-in')) {
+                e.preventDefault(); e.stopPropagation();
+                zoom(0.1);
+                return;
+            } else if (matchesCommand('view:font-zoom-out')) {
+                e.preventDefault(); e.stopPropagation();
+                zoom(-0.1);
+                return;
+            } else if (matchesCommand('view:font-zoom-reset')) {
+                e.preventDefault(); e.stopPropagation();
+                state.scale = 1; state.pannedX = 0; state.pannedY = 0;
+                updateTransform();
+                return;
+            }
+        }
+
+        // PDF/画像共通: エディタ設定への干渉ブロック
+        // (PDF表示中もズームショートカット等で裏のエディタ設定が変わらないようにする)
+        if (matchesCommand('view:font-zoom-in') ||
+            matchesCommand('view:font-zoom-out') ||
+            matchesCommand('view:font-zoom-reset')) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    };
+
+    // 最優先でイベントを捕捉する (capture: true)
+    window.addEventListener('keydown', globalMediaKeyHandler, { capture: true });
+
+    // UI設定を再適用
+    applySettingsToUI();
 }
 
 // ========== コンフリクト解消機能の実装 ==========
