@@ -4574,6 +4574,10 @@ ipcMain.handle('is-directory', async (event, filePath) => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // 開発環境以外（本番ビルド時）はメニューを無効化
+  if (process.env.NODE_ENV !== 'development' && app.isPackaged) {
+    Menu.setApplicationMenu(null);
+  }
   createWindow()
 
   // 本番環境（exe化されている）ならアップデート確認を開始
