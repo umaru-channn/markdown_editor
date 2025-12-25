@@ -1,7 +1,7 @@
 {
   "name": "markdown-ide",
   "version": "1.0.0",
-  "description": "Integrated Markdown IDE with Live Preview",
+  "description": "Integrated Markdown Editor with Live Preview",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -16,6 +16,7 @@
   "keywords": [
     "Electron",
     "Markdown",
+    "Editor",
     "IDE",
     "Terminal",
     "LivePreview"
@@ -23,8 +24,8 @@
   "author": "GitHub",
   "license": "CC0-1.0",
   "build": {
-    "appId": "com.example.markdown-ide",
-    "productName": "MarkdownIDE",
+    "appId": "com.example.markdown-editor",
+    "productName": "MarkdownEditor",
     "win": {
       "target": [
         "nsis"

@@ -513,9 +513,8 @@ function switchMainView(targetId) {
 // 透明度を適用する関数
 function applyWindowOpacity(transparency) {
     if (window.electronAPI && window.electronAPI.setWindowOpacity) {
-        // 透明度(0-90)を不透明度(1.0-0.1)に変換して送信
-        // 0% -> 1.0 (不透明), 90% -> 0.1 (透明)
-        const opacity = 1.0 - (transparency / 100);
+        const actualTransparency = transparency * 0.6;
+        const opacity = 1.0 - (actualTransparency / 100);
         window.electronAPI.setWindowOpacity(opacity);
     }
 }
@@ -1382,9 +1381,9 @@ function getLanguageExtensions(filePath) {
     return extensions;
 }
 
-const startDoc = `# Welcome to Markdown IDE
+const startDoc = `# Welcome to Markdown Editor
 
-高機能な統合Markdown編集環境へようこそ。
+Markdown編集環境へようこそ。
 このドキュメント自体がエディタの機能デモになっています。自由に編集して試してみてください。
 
 ## すぐに試せる機能

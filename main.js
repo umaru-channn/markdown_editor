@@ -1060,12 +1060,20 @@ const fetchHtmlHead = (url) => {
 };
 
 function createWindow() {
+  // 設定を読み込んで起動時のテーマ色を決定
+  const settings = loadAppSettings();
+  const currentTheme = settings.theme || 'light'; // デフォルトはlight
+  // ダークモードなら濃いグレー(#1e1e1e)、ライトモードなら白(#ffffff)
+  const initialBgColor = currentTheme === 'dark' ? '#1e1e1e' : '#ffffff';
+
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     frame: false,           // OS標準のフレーム(タイトルバーなど)を削除
     autoHideMenuBar: true,  // メニューバーを隠す
+    show: false,            // 準備ができるまでウィンドウを表示しない
+    backgroundColor: initialBgColor, // ウィンドウ自体の背景色をダークにする
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
@@ -1320,7 +1328,12 @@ function createWindow() {
   // --- End of Terminal Setup ---
 
   // and load the index.html of the app.
-  mainWindow.loadFile('index.html')
+  mainWindow.loadFile('index.html', { query: { theme: currentTheme } });
+
+  // 描画準備が整ったらウィンドウを表示する
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
   // Zoom factorを1.0に設定（拡大縮小をリセット）
   mainWindow.webContents.on('did-finish-load', () => {
