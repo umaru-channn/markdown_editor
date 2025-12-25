@@ -1079,7 +1079,8 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false,
       plugins: true,
-      webSecurity: false // CORS制限を無効化
+      webSecurity: false, // CORS制限を無効化
+      webviewTag: true,
     }
   })
 
