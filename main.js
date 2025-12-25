@@ -636,8 +636,8 @@ async function performGDriveSync(config, localRoot, sender) {
 
   const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
-  // 1. 同期ルートフォルダ「MarkdownIDE_Data」のIDを取得（存在しなければ作成）
-  const rootFolderId = await getOrCreateDriveFolder(drive, 'MarkdownIDE_Data');
+  // 1. 同期ルートフォルダ「MarkdownEditor_Data」のIDを取得（存在しなければ作成）
+  const rootFolderId = await getOrCreateDriveFolder(drive, 'MarkdownEditor_Data');
   console.log(`[GDrive] Root Folder ID: ${rootFolderId}`);
 
   // 2. ローカルファイルスキャン（Dropbox版と同じロジック）
@@ -3061,7 +3061,7 @@ ipcMain.handle('get-github-user', async () => {
     const user = await got('https://api.github.com/user', {
       headers: {
         Authorization: `token ${token}`,
-        'User-Agent': 'Markdown-IDE'
+        'User-Agent': 'Markdown-Editor'
       }
     }).json();
 

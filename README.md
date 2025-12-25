@@ -1,6 +1,6 @@
-# Markdown IDE
+# Markdown Editor
 
-**Markdown IDE** は、ElectronとCodeMirror 6で構築された、開発者とライターのための高機能な統合執筆環境です。
+**Markdown Editor** は、ElectronとCodeMirror 6で構築された、開発者とライターのための高機能な統合執筆環境です。
 Notionライクなテーブル編集、リアルタイムプレビュー、Gitクライアント、統合ターミナルを一つのウィンドウに集約。コンテキストスイッチを極限まで減らし、執筆と開発のフローを加速させます。
 
 ## ✨ 主な機能

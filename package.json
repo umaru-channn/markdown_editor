@@ -1,5 +1,5 @@
 {
-  "name": "markdown-ide",
+  "name": "markdown-editor",
   "version": "1.0.0",
   "description": "Integrated Markdown Editor with Live Preview",
   "main": "main.js",
@@ -17,7 +17,6 @@
     "Electron",
     "Markdown",
     "Editor",
-    "IDE",
     "Terminal",
     "LivePreview"
   ],

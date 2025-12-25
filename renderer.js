@@ -1,5 +1,5 @@
 /**
- * Markdown IDE - Main Renderer Process
+ * Markdown Editor - Main Renderer Process
  * Integrated layout with full Markdown functionality (CodeMirror 6) and Terminal Support
  * Update: Added Search functionality (Ctrl+F) with VS Code like styling
  * Update: Added drawSelection for persistent selection visibility
@@ -1421,7 +1421,7 @@ JS, Python, Bashなどのコードブロックには「▶ Run」ボタンが表
 
 \`\`\`javascript
 // 右上の「▶ Run」ボタンを押してみてください
-const greeting = "Hello, Markdown IDE!";
+const greeting = "Hello, Markdown Editor!";
 console.log(greeting);
 console.log("現在時刻: " + new Date().toLocaleString());
 \`\`\`
@@ -8177,7 +8177,7 @@ if (projectSearchClearBtn) {
 
 // window load イベントリスナー全文 (setupTabReordering呼び出しを追加)
 window.addEventListener('load', async () => {
-    console.log('Markdown IDE loaded');
+    console.log('Markdown Editor loaded');
 
     await loadSettings();
     await loadRecentFiles();
@@ -9607,7 +9607,7 @@ function switchToFile(filePath, targetPane = 'left') {
     updateFileTitleBars();
 
     if (fileData) {
-        document.title = `${fileData.fileName} - Markdown IDE`;
+        document.title = `${fileData.fileName} - Markdown Editor`;
     }
 
     updateOutline();
