@@ -87,7 +87,6 @@ const rightPane = document.getElementById('right-pane');
 const rightActivityBar = document.querySelector('.right-activity-bar');
 const bottomPane = document.getElementById('bottom-pane');
 const centerPane = document.getElementById('center-pane');
-const btnCalendar = document.getElementById('btn-calendar');
 const resizerEditorSplit = document.getElementById('resizer-editor-split');
 
 // トップバー操作
@@ -4419,8 +4418,6 @@ function updateTerminalVisibility() {
     const customWebHeader = document.getElementById('custom-webview-header');
     const customWebContainer = document.getElementById('custom-webview-container');
 
-    const showCalendar = window.calendarAPI ? window.calendarAPI.getVisible() : false;
-
     if (rightActivityBar) {
         rightActivityBar.classList.toggle('hidden', !isRightActivityBarVisible);
     }
@@ -4431,7 +4428,7 @@ function updateTerminalVisibility() {
 
     const showCustomWeb = !!activeCustomLinkId; // IDがあれば表示
 
-    const needRightPane = (showPdf || showTerminalRight || showCalendar || showBacklinks || showCustomWeb) && isRightActivityBarVisible;
+    const needRightPane = (showPdf || showTerminalRight || showBacklinks || showCustomWeb) && isRightActivityBarVisible;
 
     const barWidth = isRightActivityBarVisible ? rightActivityBarWidth : 0;
     document.documentElement.style.setProperty('--right-activity-offset,', barWidth + 'px');
@@ -4452,9 +4449,7 @@ function updateTerminalVisibility() {
         if (customWebContainer) customWebContainer.classList.add('hidden');
 
         // 必要なものだけ表示
-        if (showCalendar) {
-            // カレンダーはAPI側で制御されるため何もしない
-        } else if (showPdf) {
+        if (showPdf) {
             // PDFヘッダー表示コードを削除し、コンテナのみ表示
             if (pdfPreviewContainer) pdfPreviewContainer.classList.remove('hidden');
         } else if (showTerminalRight) {
@@ -4539,7 +4534,6 @@ function updateTerminalVisibility() {
     // アイコンのアクティブ状態更新
     if (btnTerminalRight) btnTerminalRight.classList.toggle('active', isTerminalVisible);
     if (btnPdfPreview) btnPdfPreview.classList.toggle('active', isPdfPreviewVisible);
-    if (btnCalendar) btnCalendar.classList.toggle('active', showCalendar);
     if (btnBacklinks) btnBacklinks.classList.toggle('active', showBacklinks);
 
     document.querySelectorAll('.custom-link-icon').forEach(icon => {
@@ -4712,7 +4706,6 @@ if (btnTerminalRight) {
             isPdfPreviewVisible = false;
             isBacklinksVisible = false;
             activeCustomLinkId = null;
-            if (window.calendarAPI) window.calendarAPI.hide();
         }
         updateTerminalVisibility();
     });
@@ -4823,29 +4816,7 @@ if (btnPdfPreview) { // togglePdfPreview関数を直接呼んでいる既存コ�
             isTerminalVisible = false;
             isBacklinksVisible = false;
             activeCustomLinkId = null;
-            if (window.calendarAPI) window.calendarAPI.hide();
             generatePdfPreview(); // PDF生成
-        }
-        updateTerminalVisibility();
-    });
-}
-
-if (btnCalendar) {
-    btnCalendar.addEventListener('click', () => {
-        // calendarAPIが存在するか確認
-        if (!window.calendarAPI) return;
-
-        const isCalendarVisible = window.calendarAPI.getVisible();
-
-        if (isCalendarVisible) {
-            window.calendarAPI.hide();
-        } else {
-            // 排他制御: カレンダーを開くときは他を閉じる
-            window.calendarAPI.show();
-            isTerminalVisible = false;
-            isPdfPreviewVisible = false;
-            isBacklinksVisible = false;
-            activeCustomLinkId = null;
         }
         updateTerminalVisibility();
     });
@@ -6737,7 +6708,6 @@ if (btnBacklinks) {
             isTerminalVisible = false;
             isPdfPreviewVisible = false;
             activeCustomLinkId = null;
-            if (window.calendarAPI) window.calendarAPI.hide();
 
             // バックリンク更新
             updateBacklinks();
@@ -8246,11 +8216,6 @@ window.addEventListener('load', async () => {
     updateLeftPaneWidthVariable();
     initToolbarOverflow();
     setupToolbarDropdownPositioning();
-
-    // カレンダー機能の初期化
-    if (window.calendarAPI) {
-        window.calendarAPI.init();
-    }
 
     if (isTerminalVisible) {
         initializeTerminal();
@@ -12371,7 +12336,6 @@ function toggleCustomLinkView(linkId) {
         isTerminalVisible = false;
         isPdfPreviewVisible = false;
         isBacklinksVisible = false;
-        if (window.calendarAPI) window.calendarAPI.hide();
 
         // リンク情報を取得して表示
         const link = (appSettings.customLinks || []).find(l => l.id === linkId);

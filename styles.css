@@ -3723,33 +3723,6 @@ body[data-theme="dark"] .hotkey-action-btn:hover {
     opacity: 0.7;
 }
 
-/* ========== Calendar Styles ========== */
-.calendar-header {
-    padding: 0 10px;
-    background: #252526;
-    border-bottom: 1px solid #333;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    font-size: 12px;
-    color: #ccc;
-    flex-shrink: 0;
-}
-
-.calendar-content {
-    flex: 1;
-    overflow: hidden;
-    background-color: #fff;
-    /* カレンダー背景 */
-    display: flex;
-    flex-direction: column;
-}
-
-/* ダークモード時のボーダー調整（iframeの中身はGoogle依存なので完全対応不可） */
-body[data-theme="dark"] .calendar-content {
-    background-color: #1e1e1e;
-}
-
 /* CodeMirror の改ページ、カード、水平線などのバッファ要素を非表示にする */
 .ͼ1 .cm-widgetBuffer {
     display: none;
@@ -5326,5 +5299,6 @@ body[data-theme="dark"] .markdown-rendered mark {
     display: flex;
     justify-content: center;
     margin: 1.5em 0;
-    background-color: transparent; /* 背景色を透明に */
+    background-color: transparent;
+    /* 背景色を透明に */
 }
