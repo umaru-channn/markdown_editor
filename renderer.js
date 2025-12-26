@@ -12446,14 +12446,15 @@ const SUPPORTED_RUN_LANGUAGES = new Set([
 ]);
 
 const btnRunCode = document.getElementById('btn-run-code');
+const runArgsInput = document.getElementById('run-args-input'); // 要素取得
 
-// ボタンの表示/非表示を切り替える関数
 function updateRunButtonVisibility() {
     if (!btnRunCode) return;
 
     // ファイルが開かれていない場合は非表示
     if (!currentFilePath) {
         btnRunCode.style.display = 'none';
+        if (runArgsInput) runArgsInput.style.display = 'none';
         return;
     }
 
@@ -12463,13 +12464,16 @@ function updateRunButtonVisibility() {
     // 設定ファイルなどは除外
     if (currentFilePath.startsWith('settings:')) {
         btnRunCode.style.display = 'none';
+        if (runArgsInput) runArgsInput.style.display = 'none';
         return;
     }
 
     if (SUPPORTED_RUN_LANGUAGES.has(ext)) {
         btnRunCode.style.display = 'flex';
+        if (runArgsInput) runArgsInput.style.display = 'block';
     } else {
         btnRunCode.style.display = 'none';
+        if (runArgsInput) runArgsInput.style.display = 'none';
     }
 }
 
@@ -12538,64 +12542,71 @@ if (btnRunCode) {
             const isWin = process.platform === 'win32';
             const safePath = `"${activePath}"`; // パスをクォート
 
+            // 引数の取得と整形
+            const argsInput = document.getElementById('run-args-input');
+            const rawArgs = argsInput ? argsInput.value.trim() : '';
+            // 引数がある場合は先頭にスペースを入れる
+            const argsStr = rawArgs ? ` ${rawArgs}` : '';
+
             let command = '';
 
             switch (langLower) {
                 case 'javascript':
-                    command = `node ${safePath}`;
+                    command = `node ${safePath}${argsStr}`;
                     break;
                 case 'typescript':
-                    command = `tsc ${safePath} && node "${path.join(path.dirname(activePath), fileNameNoExt + '.js')}"`;
+                    command = `tsc ${safePath} && node "${path.join(path.dirname(activePath), fileNameNoExt + '.js')}"${argsStr}`;
                     break;
                 case 'python':
                     // 指定があればそれを使う、なければOSごとのデフォルト
                     if (customExecPath) {
-                        command = `"${customExecPath}" ${safePath}`;
+                        command = `"${customExecPath}" ${safePath}${argsStr}`;
                     } else {
-                        command = isWin ? `py ${safePath}` : `python3 ${safePath}`;
+                        command = isWin ? `py ${safePath}${argsStr}` : `python3 ${safePath}${argsStr}`;
                     }
                     break;
                 case 'php':
-                    command = `php ${safePath}`;
+                    command = `php ${safePath}${argsStr}`;
                     break;
                 case 'ruby':
-                    command = `ruby ${safePath}`;
+                    command = `ruby ${safePath}${argsStr}`;
                     break;
                 case 'perl':
-                    command = `perl ${safePath}`;
+                    command = `perl ${safePath}${argsStr}`;
                     break;
                 case 'lua':
-                    command = `lua ${safePath}`;
+                    command = `lua ${safePath}${argsStr}`;
                     break;
                 case 'r':
-                    command = `Rscript ${safePath}`;
+                    command = `Rscript ${safePath}${argsStr}`;
                     break;
                 case 'dart':
-                    command = `dart ${safePath}`;
+                    command = `dart ${safePath}${argsStr}`;
                     break;
                 case 'go':
-                    command = `go run ${safePath}`;
+                    command = `go run ${safePath}${argsStr}`;
                     break;
                 case 'rust':
                     const rustOut = isWin ? `${fileNameNoExt}.exe` : fileNameNoExt;
                     const rustRun = isWin ? `.\\${rustOut}` : `./${rustOut}`;
-                    command = `rustc ${safePath} -o "${rustOut}" && ${rustRun}`;
+                    command = `rustc ${safePath} -o "${rustOut}" && ${rustRun}${argsStr}`;
                     break;
                 case 'c':
                     const cOut = isWin ? `${fileNameNoExt}.exe` : fileNameNoExt;
                     const cRun = isWin ? `.\\${cOut}` : `./${cOut}`;
-                    command = `gcc ${safePath} -o "${cOut}" && ${cRun}`;
+                    command = `gcc ${safePath} -o "${cOut}" && ${cRun}${argsStr}`;
                     break;
                 case 'cpp':
                     const cppOut = isWin ? `${fileNameNoExt}.exe` : fileNameNoExt;
                     const cppRun = isWin ? `.\\${cppOut}` : `./${cppOut}`;
-                    command = `g++ ${safePath} -o "${cppOut}" && ${cppRun}`;
+                    command = `g++ ${safePath} -o "${cppOut}" && ${cppRun}${argsStr}`;
                     break;
                 case 'csharp':
-                    command = `dotnet run`;
+                    // dotnet run の引数として渡すため -- を使用
+                    command = `dotnet run --${argsStr}`;
                     break;
                 case 'swift':
-                    command = `swift ${safePath}`;
+                    command = `swift ${safePath}${argsStr}`;
                     break;
                 case 'scala':
                     // scala-cli または scala の使える方を採用
@@ -12605,7 +12616,7 @@ if (btnRunCode) {
                     if (hasScalaCli) {
                         scalaCmd = 'scala-cli';
                     }
-                    command = `${scalaCmd} ${safePath}`;
+                    command = `${scalaCmd} ${safePath}${argsStr}`;
                     break;
                 case 'bash':
                     // WSLが選択された場合の特別処理
@@ -12614,7 +12625,7 @@ if (btnRunCode) {
                         const toWslPath = (p) => p.replace(/^([a-zA-Z]):/, (m, d) => `/mnt/${d.toLowerCase()}`).replace(/\\/g, '/');
                         const wslPath = toWslPath(activePath);
                         // wslコマンド経由でbashを実行
-                        command = `wsl bash "${wslPath}"`;
+                        command = `wsl bash "${wslPath}"${argsStr}`;
                     } else {
                         // 通常のBash (Git Bashなど)
                         let bashExec = 'bash';
@@ -12638,17 +12649,19 @@ if (btnRunCode) {
                                 }
                             } catch (e) { /* ignore */ }
                         }
-                        command = `${bashExec} ${safePath}`;
+                        command = `${bashExec} ${safePath}${argsStr}`;
                     }
                     break;
                 case 'batch':
-                    command = `cmd /c ${safePath}`;
+                    command = `cmd /c ${safePath}${argsStr}`;
                     break;
                 case 'sql':
+                    // SQLファイルはリダイレクト入力のため通常引数はとらないが、sqlite3自体の引数として渡すか、無視するか。
+                    // ここではリダイレクト形式を維持し、引数は影響させない（エラー防止のため）
                     command = `sqlite3 :memory: < ${safePath}`;
                     break;
                 case 'kotlin':
-                    command = `kotlinc ${safePath} -include-runtime -d "${fileNameNoExt}.jar" && java -jar "${fileNameNoExt}.jar"`;
+                    command = `kotlinc ${safePath} -include-runtime -d "${fileNameNoExt}.jar" && java -jar "${fileNameNoExt}.jar"${argsStr}`;
                     break;
                 case 'java':
                     let javaClassName = fileNameNoExt;
@@ -12659,12 +12672,13 @@ if (btnRunCode) {
                             javaClassName = match[1];
                         }
                     }
-                    command = `javac ${safePath} && java ${javaClassName}`;
+                    command = `javac ${safePath} && java ${javaClassName}${argsStr}`;
                     break;
                 case 'brainfuck':
                 case 'whitespace':
                     console.log(`Delegating ${langLower} execution to main process...`);
                     const code = globalEditorView ? globalEditorView.state.doc.toString() : "";
+                    // 必要であれば executeCode の引数に追加する修正が別途必要
                     const result = await window.electronAPI.executeCode(code, langLower, null, path.dirname(activePath));
 
                     if (activeTerminalId) {

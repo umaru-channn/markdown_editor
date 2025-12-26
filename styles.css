@@ -5302,3 +5302,33 @@ body[data-theme="dark"] .markdown-rendered mark {
     background-color: transparent;
     /* 背景色を透明に */
 }
+
+/* 引数入力欄のスタイル */
+.run-args-input {
+    display: none; /* 初期状態はJSで制御 */
+    width: 120px;
+    height: 24px;
+    font-size: 12px;
+    margin-right: 8px;
+    padding: 0 8px;
+    background-color: var(--input-bg);
+    color: var(--main-fg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 4px;
+    outline: none;
+    transition: all 0.2s ease;
+    font-family: 'Consolas', 'Monaco', monospace; /* 引数なので等幅フォント推奨 */
+    align-self: center;
+}
+
+/* フォーカス時の強調表示 */
+.run-args-input:focus {
+    border-color: var(--accent-color);
+    background-color: var(--main-bg);
+}
+
+/* プレースホルダーの色調整 */
+.run-args-input::placeholder {
+    color: var(--sidebar-fg);
+    opacity: 0.7;
+}
