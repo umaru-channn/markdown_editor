@@ -206,7 +206,7 @@ function loadAppSettings() {
     showWhitespace: false,
     defaultImageLocation: '.',
     // デフォルトの除外設定
-    excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian',
+    excludePatterns: 'node_modules, .git, .DS_Store, dist, build, .obsidian, .vscode, .env, secrets.js',
     showStatusBar: true,
     // キーバインド設定
     keybindings: {},
@@ -510,18 +510,23 @@ async function performDropboxSync(config, localRoot, sender) {
 
   dbx.auth.setAccessToken(config.accessToken);
 
+  // 設定を読み込み、除外リストを取得
+  const settings = loadAppSettings();
+  // 安全のため .env や secrets.js もデフォルトで除外対象に含めるように結合
+  const defaultExcludes = 'node_modules,.git,dist,build,.env,secrets.js,.DS_Store';
+  const excludePatterns = settings.excludePatterns ? (settings.excludePatterns + ',' + defaultExcludes) : defaultExcludes;
+
   // 1. ローカルファイルリスト取得 (再帰的)
   const getLocalFiles = (dir) => {
     let results = [];
     try {
       const list = fs.readdirSync(dir);
       list.forEach(file => {
+        if (shouldExclude(file, excludePatterns)) return;
         const fullPath = path.join(dir, file);
         const stat = fs.statSync(fullPath);
         if (stat && stat.isDirectory()) {
-          if (file !== '.git' && file !== 'node_modules') {
-            results = results.concat(getLocalFiles(fullPath));
-          }
+          results = results.concat(getLocalFiles(fullPath));
         } else {
           results.push({
             path: fullPath,
@@ -596,6 +601,7 @@ async function performDropboxSync(config, localRoot, sender) {
 
   // クラウドにしか存在しないファイル -> ダウンロード
   for (const [relPath, cloud] of cloudMap) {
+    if (shouldExclude(path.basename(relPath), excludePatterns)) continue;
     console.log(`Downloading new file ${relPath}`);
     const localPath = path.join(localRoot, relPath);
     const dir = path.dirname(localPath);
@@ -640,18 +646,22 @@ async function performGDriveSync(config, localRoot, sender) {
   const rootFolderId = await getOrCreateDriveFolder(drive, 'MarkdownEditor_Data');
   console.log(`[GDrive] Root Folder ID: ${rootFolderId}`);
 
+  // 設定を読み込み、除外リストを取得
+  const settings = loadAppSettings();
+  const defaultExcludes = 'node_modules,.git,dist,build,.env,secrets.js,.DS_Store';
+  const excludePatterns = settings.excludePatterns ? (settings.excludePatterns + ',' + defaultExcludes) : defaultExcludes;
+
   // 2. ローカルファイルスキャン（Dropbox版と同じロジック）
   const getLocalFiles = (dir) => {
     let results = [];
     try {
       const list = fs.readdirSync(dir);
       list.forEach(file => {
+        if (shouldExclude(file, excludePatterns)) return;
         const fullPath = path.join(dir, file);
         const stat = fs.statSync(fullPath);
         if (stat && stat.isDirectory()) {
-          if (file !== '.git' && file !== 'node_modules') {
-            results = results.concat(getLocalFiles(fullPath));
-          }
+          results = results.concat(getLocalFiles(fullPath));
         } else {
           results.push({
             path: fullPath,
@@ -713,6 +723,7 @@ async function performGDriveSync(config, localRoot, sender) {
 
   // C. クラウドにしか存在しないファイル -> ダウンロード
   for (const [relPath, cloud] of cloudMap) {
+    if (shouldExclude(path.basename(relPath), excludePatterns)) continue;
     console.log(`[GDrive] Downloading new file: ${relPath}`);
     const localPath = path.join(localRoot, relPath);
     const dir = path.dirname(localPath);
