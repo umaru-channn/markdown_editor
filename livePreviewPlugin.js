@@ -830,7 +830,7 @@ class PdfWidget extends WidgetType {
 
         return wrapper;
     }
-    
+
     updateSizeInMarkdown(view, wrapperDom, newWidth) {
         const pos = view.posAtDOM(wrapperDom);
         if (pos === null) return;
@@ -964,9 +964,16 @@ class ExecutionResultWidget extends WidgetType {
         closeBtn.style.top = "5px";
         closeBtn.style.right = "5px";
 
+        // 固定のIDではなく、クリック時のDOM位置から最新の座標を取得して削除する
         closeBtn.onmousedown = (e) => {
             e.preventDefault();
-            view.dispatch({ effects: clearExecutionResult.of(this.id) });
+            // 現在のDOM位置を取得
+            const currentPos = view.posAtDOM(div);
+            if (currentPos !== null) {
+                view.dispatch({
+                    effects: clearExecutionResult.of(currentPos)
+                });
+            }
         };
 
         // --- コンテンツ ---
@@ -1060,11 +1067,12 @@ class MermaidWidget extends WidgetType {
 /* CodeBlockLanguageWidget (修正版: 検索機能の復活とMermaid/実行機能の維持) */
 class CodeBlockLanguageWidget extends WidgetType {
     // コンストラクタ: Mermaid対応のため mode, codeContent を維持
-    constructor(lang, mode = 'code', codeContent = '') {
+    constructor(lang, mode = 'code', codeContent = '', args = '') {
         super();
         this.lang = lang;
         this.mode = mode; // mermaid用のモード
         this.codeContent = codeContent; // 保存用にコードを保持
+        this.args = args;
         this.selectedPath = null;
         this.selectedLabel = "Default";
     }
@@ -1073,7 +1081,8 @@ class CodeBlockLanguageWidget extends WidgetType {
         // 同値判定
         return other.lang === this.lang &&
             other.mode === this.mode &&
-            other.codeContent === this.codeContent;
+            other.codeContent === this.codeContent &&
+            other.args === this.args;
     }
 
     toDOM(view) {
@@ -1159,18 +1168,46 @@ class CodeBlockLanguageWidget extends WidgetType {
             container.appendChild(verBtn);
         }
 
-        // 4. 実行ボタン
+        // 4. 引数入力欄 (実行可能な言語の場合)
         if (EXECUTABLE_LANGUAGES.has(normLang)) {
+            const argsInput = document.createElement("input");
+            argsInput.type = "text";
+            argsInput.className = "cm-code-args-input";
+            argsInput.placeholder = "Args...";
+            argsInput.value = this.args;
+            argsInput.spellcheck = false;
+
+            // スタイル設定 (CSSファイルに追加推奨ですが、即時反映のためここに記述)
+            argsInput.style.marginLeft = "8px";
+            argsInput.style.width = "100px";
+            argsInput.style.height = "20px";
+            argsInput.style.fontSize = "12px";
+            argsInput.style.padding = "0 4px";
+            argsInput.style.border = "1px solid #ccc";
+            argsInput.style.borderRadius = "3px";
+            argsInput.style.backgroundColor = "transparent";
+            argsInput.style.color = "inherit";
+
+            // 入力変更時に状態を更新せずDOMだけ保持する（Widget再生成を防ぐため）
+            // 必要ならdispatchで更新をかけるが、入力中のちらつきを防ぐため
+            // 実行時にDOMから値を取得する方式にします。
+
+            container.appendChild(argsInput);
+
+            // 実行ボタン
             const runBtn = document.createElement("button");
             runBtn.className = "cm-code-copy-btn";
             runBtn.textContent = "▶ Run";
             runBtn.style.marginLeft = "4px";
             runBtn.style.color = "#28a745";
             runBtn.style.fontWeight = "bold";
+
             runBtn.onmousedown = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                this.runCode(view, container, runBtn);
+                // 入力欄から直接値を取得
+                const currentArgs = argsInput.value;
+                this.runCode(view, container, runBtn, currentArgs);
             };
             container.appendChild(runBtn);
         }
@@ -1404,7 +1441,7 @@ class CodeBlockLanguageWidget extends WidgetType {
     }
 
     // コード実行処理 (既存のまま)
-    async runCode(view, container, btn) {
+    async runCode(view, container, btn, args = "") {
         const pos = view.posAtDOM(container);
         if (pos === null) return;
         let node = syntaxTree(view.state).resolveInner(pos, 1);
@@ -1420,7 +1457,7 @@ class CodeBlockLanguageWidget extends WidgetType {
             try {
                 // ディレクトリパスを取得して実行
                 const currentFileDir = document.body.dataset.activeFileDir || null;
-                const result = await window.electronAPI.executeCode(code, this.lang, this.selectedPath, currentFileDir);
+                const result = await window.electronAPI.executeCode(code, this.lang, this.selectedPath, currentFileDir, args);
                 const output = result.success ? result.stdout : result.stderr;
 
                 view.dispatch({

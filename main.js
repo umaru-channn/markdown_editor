@@ -3744,7 +3744,7 @@ ipcMain.handle('get-lang-versions', async (event, lang) => {
 });
 
 // コード実行ハンドラ
-ipcMain.handle('execute-code', async (event, code, language, execPath = null, workingDir = null) => {
+ipcMain.handle('execute-code', async (event, code, language, execPath = null, workingDir = null, args = "") => {
   return new Promise(async (resolve) => {
     const tempDir = os.tmpdir();
 
@@ -4077,44 +4077,48 @@ while (ip < instructions.length) {
 }
 `;
 
+    // 引数を整形 (空でなければ先頭にスペースを追加)
+    const argsStr = args ? ` ${args}` : '';
+
     const langConfig = {
-      'javascript': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
-      'js': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"` },
-      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec || 'python'}" "${f}"` },
-      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec || 'python'}" "${f}"` },
+      'javascript': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"${argsStr}` },
+      'js': { ext: '.js', base: 'node', cmd: (f) => `node "${f}"${argsStr}` },
+      'python': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec || 'python'}" "${f}"${argsStr}` },
+      'py': { ext: '.py', base: 'python', cmd: (f) => `"${targetExec || 'python'}" "${f}"${argsStr}` },
       // PHP (検出済み変数を優先、なければ 'php')
-      'php': { ext: '.php', base: (targetExec || 'php'), cmd: (f) => `"${targetExec || (process.platform === 'win32' && fs.existsSync('C:\\php\\php.exe') ? 'C:\\php\\php.exe' : 'php')}" "${f}"` },
+      'php': { ext: '.php', base: (targetExec || 'php'), cmd: (f) => `"${targetExec || (process.platform === 'win32' && fs.existsSync('C:\\php\\php.exe') ? 'C:\\php\\php.exe' : 'php')}" "${f}"${argsStr}` },
       // ※ 上記PHPロジックは少し重複しているので、targetExecが設定されていればそれを使う形に整理します
 
-      'ruby': { ext: '.rb', base: 'ruby', cmd: (f) => `"${targetExec || 'ruby'}" "${f}"` },
-      'rb': { ext: '.rb', base: 'ruby', cmd: (f) => `"${targetExec || 'ruby'}" "${f}"` },
+      'ruby': { ext: '.rb', base: 'ruby', cmd: (f) => `"${targetExec || 'ruby'}" "${f}"${argsStr}` },
+      'rb': { ext: '.rb', base: 'ruby', cmd: (f) => `"${targetExec || 'ruby'}" "${f}"${argsStr}` },
 
       // --- 自動検出対応言語 ---
-      'perl': { ext: '.pl', base: perlExec, cmd: (f) => `"${perlExec}" "${f}"` },
-      'pl': { ext: '.pl', base: perlExec, cmd: (f) => `"${perlExec}" "${f}"` },
+      'perl': { ext: '.pl', base: perlExec, cmd: (f) => `"${perlExec}" "${f}"${argsStr}` },
+      'pl': { ext: '.pl', base: perlExec, cmd: (f) => `"${perlExec}" "${f}"${argsStr}` },
 
-      'lua': { ext: '.lua', base: luaExec, cmd: (f) => `"${luaExec}" "${f}"` },
+      'lua': { ext: '.lua', base: luaExec, cmd: (f) => `"${luaExec}" "${f}"${argsStr}` },
 
-      'r': { ext: '.R', base: rExec, cmd: (f) => `"${rExec}" "${f}"` },
+      'r': { ext: '.R', base: rExec, cmd: (f) => `"${rExec}" "${f}"${argsStr}` },
 
-      'dart': { ext: '.dart', base: dartExec, cmd: (f) => `"${dartExec}" "${f}"` },
+      'dart': { ext: '.dart', base: dartExec, cmd: (f) => `"${dartExec}" "${f}"${argsStr}` },
 
-      'swift': { ext: '.swift', base: swiftExec, cmd: (f) => `"${swiftExec}" "${f}"` },
+      'swift': { ext: '.swift', base: swiftExec, cmd: (f) => `"${swiftExec}" "${f}"${argsStr}` },
 
       // Kotlin (コンパイル -> 実行)
       'kotlin': {
         ext: '.kt', base: kotlinExec,
         cmd: (f) => {
           const jarPath = f.replace(/\.kt$/, '.jar');
-          // kotlinExec (kotlinc) でコンパイル
-          return `"${kotlinExec}" "${f}" -include-runtime -d "${jarPath}" && java -jar "${jarPath}"`;
+          const encodingOpts = '-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8';
+          return `"${kotlinExec}" "${f}" -include-runtime -d "${jarPath}" && java ${encodingOpts} -jar "${jarPath}"${argsStr}`;
         }
       },
       'kt': {
         ext: '.kt', base: kotlinExec,
         cmd: (f) => {
           const jarPath = f.replace(/\.kt$/, '.jar');
-          return `"${kotlinExec}" "${f}" -include-runtime -d "${jarPath}" && java -jar "${jarPath}"`;
+          const encodingOpts = '-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8';
+          return `"${kotlinExec}" "${f}" -include-runtime -d "${jarPath}" && java ${encodingOpts} -jar "${jarPath}"${argsStr}`;
         }
       },
 
@@ -4123,14 +4127,14 @@ while (ip < instructions.length) {
         ext: '.ts', base: tscExec,
         cmd: (f) => {
           const jsPath = f.replace(/\.ts$/, '.js');
-          return `"${tscExec}" "${f}" && node "${jsPath}"`;
+          return `"${tscExec}" "${f}" && node "${jsPath}"${argsStr}`;
         }
       },
       'ts': {
         ext: '.ts', base: tscExec,
         cmd: (f) => {
           const jsPath = f.replace(/\.ts$/, '.js');
-          return `"${tscExec}" "${f}" && node "${jsPath}"`;
+          return `"${tscExec}" "${f}" && node "${jsPath}"${argsStr}`;
         }
       },
 
@@ -4138,30 +4142,32 @@ while (ip < instructions.length) {
         ext: '.sh',
         base: targetExec === 'wsl' ? 'wsl' : (targetExec || 'bash'),
         cmd: (f) => {
-          if (targetExec === 'wsl') return `wsl bash "${toWslPath(f)}"`;
-          if (targetExec) return `"${targetExec}" "${f}"`;
-          return `bash "${f}"`;
+          if (targetExec === 'wsl') return `wsl bash "${toWslPath(f)}"${argsStr}`;
+          if (targetExec) return `"${targetExec}" "${f}"${argsStr}`;
+          return `bash "${f}"${argsStr}`;
         }
       },
-      'powershell': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
-      'ps1': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
-      'pwsh': { ext: '.ps1', base: 'pwsh', cmd: (f) => `pwsh -NoProfile -ExecutionPolicy Bypass -File "${f}"` },
-      'c': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"` },
-      'gcc': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"` },
-      'cpp': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"` },
+      'powershell': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"${argsStr}` },
+      'ps1': { ext: '.ps1', base: 'powershell', cmd: (f) => `powershell -NoProfile -ExecutionPolicy Bypass -File "${f}"${argsStr}` },
+      'pwsh': { ext: '.ps1', base: 'pwsh', cmd: (f) => `pwsh -NoProfile -ExecutionPolicy Bypass -File "${f}"${argsStr}` },
+      'c': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"${argsStr}` },
+      'gcc': { ext: '.c', base: 'gcc', cmd: (f) => `gcc "${f}" -o "${f.replace(/\.c$/, '.exe')}" && "${f.replace(/\.c$/, '.exe')}"${argsStr}` },
+      'cpp': { ext: '.cpp', base: 'g++', cmd: (f) => `g++ "${f}" -o "${f.replace(/\.cpp$/, '.exe')}" && "${f.replace(/\.cpp$/, '.exe')}"${argsStr}` },
       'java': {
         ext: '.java', base: 'javac',
         cmd: (f) => {
-          const compileCmd = `javac "${f}" -d "${tempDir}"`;
-          const runCmd = `java -cp "${tempDir}" ${baseFileName}`;
+          const encodingOpts = '-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8';
+          const compileCmd = `javac -encoding UTF-8 -J"${encodingOpts}" "${f}" -d "${tempDir}"`;
+          const runCmd = `java ${encodingOpts} -cp "${tempDir}" ${baseFileName}${argsStr}`;
           return `${compileCmd} && ${runCmd}`;
         }
       },
-      'csharp': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
-      'cs': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"` },
-      'go': { ext: '.go', base: 'go', cmd: (f) => `go run "${f}"` },
-      'rust': { ext: '.rs', base: 'rustc', cmd: (f) => `rustc "${f}" -o "${f.replace(/\.rs$/, '.exe')}" && "${f.replace(/\.rs$/, '.exe')}"` },
-      // SQL (SQLite): インメモリDB(:memory:)に対してファイル内容を入力(<)として実行
+      'csharp': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"${argsStr}` },
+      'cs': { ext: '.cs', base: cscExec, cmd: (f) => `"${cscExec}" /nologo /out:"${f.replace(/\.cs$/, '.exe')}" "${f}" && "${f.replace(/\.cs$/, '.exe')}"${argsStr}` },
+      'go': { ext: '.go', base: 'go', cmd: (f) => `go run "${f}"${argsStr}` },
+      'rust': { ext: '.rs', base: 'rustc', cmd: (f) => `rustc "${f}" -o "${f.replace(/\.rs$/, '.exe')}" && "${f.replace(/\.rs$/, '.exe')}"${argsStr}` },
+      // SQL (SQLite): インメモリDB(:memory:)に対してファイル内容を入力(<)として実行。
+      // SQLスクリプトへの引数渡しは一般的ではないため、ここではargsStrを追加せずそのままにします。
       'sql': {
         ext: '.sql',
         base: sqliteExec,
@@ -4171,7 +4177,7 @@ while (ip < instructions.length) {
       'scala': {
         ext: '.scala',
         base: scalaExec,
-        cmd: (f) => `"${scalaExec}" "${f}"`
+        cmd: (f) => `"${scalaExec}" "${f}"${argsStr}`
       },
 
       'brainfuck': {
@@ -4180,7 +4186,7 @@ while (ip < instructions.length) {
         cmd: (f) => {
           const runnerPath = path.join(path.dirname(f), 'bf_runner.js');
           fs.writeFileSync(runnerPath, bfRunnerScript);
-          return `node "${runnerPath}" "${f}"`;
+          return `node "${runnerPath}" "${f}"${argsStr}`;
         }
       },
       'bf': {
@@ -4189,7 +4195,7 @@ while (ip < instructions.length) {
         cmd: (f) => {
           const runnerPath = path.join(path.dirname(f), 'bf_runner.js');
           fs.writeFileSync(runnerPath, bfRunnerScript);
-          return `node "${runnerPath}" "${f}"`;
+          return `node "${runnerPath}" "${f}"${argsStr}`;
         }
       },
       'whitespace': {
@@ -4198,7 +4204,7 @@ while (ip < instructions.length) {
         cmd: (f) => {
           const runnerPath = path.join(path.dirname(f), 'ws_runner.js');
           fs.writeFileSync(runnerPath, wsRunnerScript);
-          return `node "${runnerPath}" "${f}"`;
+          return `node "${runnerPath}" "${f}"${argsStr}`;
         }
       },
       'ws': {
@@ -4207,7 +4213,7 @@ while (ip < instructions.length) {
         cmd: (f) => {
           const runnerPath = path.join(path.dirname(f), 'ws_runner.js');
           fs.writeFileSync(runnerPath, wsRunnerScript);
-          return `node "${runnerPath}" "${f}"`;
+          return `node "${runnerPath}" "${f}"${argsStr}`;
         }
       },
     };
@@ -4266,7 +4272,27 @@ while (ip < instructions.length) {
         cwdPath = workingDir;
       }
 
-      exec(command, { timeout: 15000, cwd: cwdPath }, (error, stdout, stderr) => {
+      // 環境変数を追加して文字コードをUTF-8に強制するオプションを作成
+      const execOptions = {
+        timeout: 15000,
+        cwd: cwdPath,
+        env: {
+          ...process.env,        // 既存の環境変数を継承
+          PYTHONIOENCODING: 'utf-8', // Pythonの出力をUTF-8に強制
+          JAVA_TOOL_OPTIONS: '-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8', // Java, Kotlin, Scala用
+          LANG: 'ja_JP.UTF-8'    // Linux/Mac向けのロケール設定 (念のため)
+        }
+      };
+
+      // Windowsの場合はコマンドの実行前にコードページをUTF-8(65001)に切り替える
+      // これにより C#, C, C++ などもUTF-8で出力されるようになり文字化けが解消します
+      let finalCommand = command;
+      if (process.platform === 'win32') {
+        // chcp 65001 > nul で表示を消しつつ設定変更し、&& で元のコマンドを実行
+        finalCommand = `chcp 65001 > nul && ${command}`;
+      }
+
+      exec(finalCommand, execOptions, (error, stdout, stderr) => {
         try {
           if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
 
