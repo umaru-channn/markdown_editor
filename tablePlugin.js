@@ -290,7 +290,7 @@ const Cell = ({
                 htmlContent = value;
             }
         }
-        
+
         content = html`
             <div class="cm-table-cell-content view-mode"
                 dangerouslySetInnerHTML=${{ __html: htmlContent }}
@@ -373,22 +373,174 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
 
     const [selection, setSelection] = useState(null);
     const [isDragging, setIsDragging] = useState(false);
-
     const [isEditing, setIsEditing] = useState(false);
     const [caretPosition, setCaretPosition] = useState('end');
-
-    // Drag & Drop State
     const [dragState, setDragState] = useState({ type: null, fromIndex: null, toIndex: null });
-
-    // Context Menu State
     const [contextMenu, setContextMenu] = useState(null);
-
-    // Resize State
     const [resizingColIndex, setResizingColIndex] = useState(-1);
     const [hoveredResizeColIndex, setHoveredResizeColIndex] = useState(-1);
 
+    // 最新の状態をイベントリスナー内で参照するためのRef
+    const stateRef = useRef({ data, widths, selection, isEditing });
+    useEffect(() => {
+        stateRef.current = { data, widths, selection, isEditing };
+    }, [data, widths, selection, isEditing]);
+
     const lastDeletePressRef = useRef(0);
     const tableRef = useRef(null);
+
+    // --- Global Key & Copy/Paste Handling (Capture Phase) ---
+    useEffect(() => {
+        const handleCaptureKeyDown = (e) => {
+            const { selection, isEditing, data } = stateRef.current;
+
+            // 文字入力中、またはテーブル選択がない場合は標準動作に任せる
+            if (isEditing || !selection) return;
+
+            // --- Copy (Ctrl+C / Cmd+C) ---
+            if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const { minR, maxR, minC, maxC } = getNormalizedSelection(selection);
+
+                // 1. Markdown形式 (text/plain)
+                const mdRows = [];
+                // 2. HTML形式 (text/html) - Excel等用
+                let htmlTable = '<table border="1">';
+
+                // 選択範囲だけをループ処理
+                for (let r = minR; r <= maxR; r++) {
+                    const rowCells = [];
+                    htmlTable += '<tr>';
+
+                    for (let c = minC; c <= maxC; c++) {
+                        let val = "";
+                        // 行インデックスが -1 ならヘッダー、それ以外ならデータ行
+                        if (r === -1) {
+                            val = data.headers[c] || "";
+                        } else if (data.rows[r] && data.rows[r][c] !== undefined) {
+                            val = data.rows[r][c];
+                        }
+
+                        rowCells.push(val);
+                        htmlTable += `<td>${val}</td>`;
+                    }
+                    htmlTable += '</tr>';
+
+                    // Markdown行: | val | val |
+                    mdRows.push("| " + rowCells.join(" | ") + " |");
+                }
+                htmlTable += '</table>';
+
+                // --- セパレーター挿入ロジック (ユーザー提案) ---
+                const cols = maxC - minC + 1;
+                const separator = "| " + Array(cols).fill("---").join(" | ") + " |";
+
+                if (minR === -1) {
+                    // ケース1: ヘッダー行(1行目)が含まれている場合
+                    // Markdownの仕様上、ヘッダー行の直後にセパレーターが必要。
+                    // mdRows[0] がヘッダーなので、index 1 に挿入する。
+                    mdRows.splice(1, 0, separator);
+                } else {
+                    // ケース2: ヘッダー行が含まれない（データ行のみ）場合
+                    // コピーした範囲の一番若い行（n行目 = mdRows[0]）を擬似ヘッダーとし、
+                    // その直下（n行目とn+1行目の間 = index 1）にセパレーターを挿入する。
+                    mdRows.splice(1, 0, separator);
+                }
+
+                const mdText = mdRows.join("\n");
+
+                // ElectronのClipboard APIを使用して書き込む
+                try {
+                    const { clipboard } = require('electron');
+                    clipboard.write({
+                        text: mdText,
+                        html: htmlTable
+                    });
+                    console.log("Table copied (Formatted)");
+                } catch (err) {
+                    console.warn("Electron clipboard failed, using navigator", err);
+                    navigator.clipboard.writeText(mdText);
+                }
+                return;
+            }
+
+            // --- Paste (Ctrl+V / Cmd+V) ---
+            if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                e.preventDefault();
+                e.stopPropagation();
+
+                navigator.clipboard.readText()
+                    .then(text => applyPasteData(text))
+                    .catch(err => console.error('Failed to read clipboard:', err));
+            }
+        };
+
+        // useCapture: true でイベントを最優先で取得する
+        window.addEventListener('keydown', handleCaptureKeyDown, true);
+
+        return () => {
+            window.removeEventListener('keydown', handleCaptureKeyDown, true);
+        };
+    }, []);
+
+    // --- Key Down Handler (for Nav) ---
+    const handleKeyDown = (e) => {
+        if (isEditing) return;
+
+        // Copy/Pasteは上記の window.addEventListener で処理するのでここでは無視
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v')) {
+            return;
+        }
+
+        // Navigation
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            e.preventDefault();
+            if (!selection) {
+                setSelection({ anchor: { r: -1, c: 0 }, head: { r: -1, c: 0 } });
+                return;
+            }
+            if (e.shiftKey) {
+                const { head } = selection;
+                let r = head.r;
+                let c = head.c;
+                const maxR = data.rows.length - 1;
+                const maxC = data.headers.length - 1;
+                if (e.key === 'ArrowUp') r--;
+                if (e.key === 'ArrowDown') r++;
+                if (e.key === 'ArrowLeft') c--;
+                if (e.key === 'ArrowRight') c++;
+                r = Math.max(-1, Math.min(r, maxR));
+                c = Math.max(0, Math.min(c, maxC));
+                setSelection(prev => ({ ...prev, head: { r, c } }));
+            } else {
+                if (e.key === 'ArrowUp') moveSelection(-1, 0);
+                if (e.key === 'ArrowDown') moveSelection(1, 0);
+                if (e.key === 'ArrowLeft') moveSelection(0, -1);
+                if (e.key === 'ArrowRight') moveSelection(0, 1);
+            }
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (selection) handleNavigateRequest('enter');
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault();
+            const now = Date.now();
+            const isDouble = (now - lastDeletePressRef.current) < 300;
+            lastDeletePressRef.current = now;
+            if (isDouble) {
+                const handled = deleteSelection();
+                if (!handled) clearContentSelection();
+            } else {
+                clearContentSelection();
+            }
+        }
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            handleEditStart();
+        }
+    };
 
     useEffect(() => { if (onRender) onRender(); });
 
@@ -448,15 +600,21 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
         }
     }, [selection, isEditing]);
 
-    // --- Logic ---
+    const getNormalizedSelection = (sel = selection) => {
+        if (!sel) return { minR: 0, maxR: -1, minC: 0, maxC: -1 };
+        const { anchor, head } = sel;
+        return {
+            minR: Math.min(anchor.r, head.r),
+            maxR: Math.max(anchor.r, head.r),
+            minC: Math.min(anchor.c, head.c),
+            maxC: Math.max(anchor.c, head.c)
+        };
+    };
 
     const getEffectiveWidths = () => {
         if (!tableRef.current) return widths;
-        // 現在のヘッダーセルの幅を取得
         const headerCells = tableRef.current.querySelectorAll('thead th');
         const currentPixelWidths = Array.from(headerCells).map(cell => cell.getBoundingClientRect().width);
-
-        // widthsステートとマージ（既に値がある場合はそれを優先、nullの場合はDOM幅を採用）
         return widths.map((w, i) => {
             return (w === null || w === undefined) ? currentPixelWidths[i] : w;
         });
@@ -627,7 +785,6 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
         }
         if (changed) {
             setData(newData);
-            // 削除時に現在の列幅を固定して、幅が変わらないようにする
             const effectiveWidths = getEffectiveWidths();
             setWidths(effectiveWidths);
             requestUpdate(newData, effectiveWidths);
@@ -706,17 +863,6 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
         timeoutRef.current = setTimeout(() => { onUpdate(newData, newWidths); }, 500);
     };
 
-    const getNormalizedSelection = () => {
-        if (!selection) return { minR: 0, maxR: -1, minC: 0, maxC: -1 };
-        const { anchor, head } = selection;
-        return {
-            minR: Math.min(anchor.r, head.r),
-            maxR: Math.max(anchor.r, head.r),
-            minC: Math.min(anchor.c, head.c),
-            maxC: Math.max(anchor.c, head.c)
-        };
-    };
-
     const isCellSelected = (r, c) => {
         if (!selection) return false;
         const { minR, maxR, minC, maxC } = getNormalizedSelection();
@@ -780,52 +926,72 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
         }
     };
 
-    const handleKeyDown = (e) => {
-        if (isEditing) return;
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-            e.preventDefault();
-            if (!selection) {
-                setSelection({ anchor: { r: -1, c: 0 }, head: { r: -1, c: 0 } });
-                return;
-            }
-            if (e.shiftKey) {
-                const { head } = selection;
-                let r = head.r;
-                let c = head.c;
-                const maxR = data.rows.length - 1;
-                const maxC = data.headers.length - 1;
-                if (e.key === 'ArrowUp') r--;
-                if (e.key === 'ArrowDown') r++;
-                if (e.key === 'ArrowLeft') c--;
-                if (e.key === 'ArrowRight') c++;
-                r = Math.max(-1, Math.min(r, maxR));
-                c = Math.max(0, Math.min(c, maxC));
-                setSelection(prev => ({ ...prev, head: { r, c } }));
-            } else {
-                if (e.key === 'ArrowUp') moveSelection(-1, 0);
-                if (e.key === 'ArrowDown') moveSelection(1, 0);
-                if (e.key === 'ArrowLeft') moveSelection(0, -1);
-                if (e.key === 'ArrowRight') moveSelection(0, 1);
-            }
+    const applyPasteData = (clipboardText) => {
+        if (!clipboardText) return;
+        const rows = clipboardText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+        if (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+
+        const isMarkdown = rows.every(row => {
+            const trimmed = row.trim();
+            return trimmed.startsWith('|') && trimmed.endsWith('|');
+        });
+
+        let pasteData;
+        if (isMarkdown) {
+            pasteData = rows
+                .filter(row => !/^[|\s-]*$/.test(row))
+                .map(row => {
+                    return row.trim().split('|').slice(1, -1).map(c => c.trim());
+                });
+        } else {
+            pasteData = rows.map(row => row.split("\t"));
         }
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            if (selection) handleNavigateRequest('enter');
-        }
-        if (e.key === 'Delete' || e.key === 'Backspace') {
-            e.preventDefault();
-            const now = Date.now();
-            const isDouble = (now - lastDeletePressRef.current) < 300;
-            lastDeletePressRef.current = now;
-            if (isDouble) {
-                const handled = deleteSelection();
-                if (!handled) clearContentSelection();
-            } else {
-                clearContentSelection();
-            }
-        }
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            handleEditStart();
+
+        if (pasteData.length === 0) return;
+
+        const { minR, minC } = getNormalizedSelection();
+        const newData = { ...data };
+        let newWidths = [...widths];
+        let dataChanged = false;
+
+        pasteData.forEach((rowValues, rIdx) => {
+            const targetR = minR + rIdx;
+            rowValues.forEach((cellValue, cIdx) => {
+                const targetC = minC + cIdx;
+
+                if (targetC >= newData.headers.length) {
+                    while (newData.headers.length <= targetC) {
+                        newData.headers.push("");
+                        if (newData.aligns) newData.aligns.push("left");
+                        newData.rows.forEach(row => row.push(""));
+                        newWidths.push(100);
+                    }
+                    dataChanged = true;
+                }
+
+                if (targetR === -1) {
+                    if (newData.headers[targetC] !== cellValue) {
+                        newData.headers[targetC] = cellValue;
+                        dataChanged = true;
+                    }
+                } else {
+                    while (newData.rows.length <= targetR) {
+                        const newRow = new Array(newData.headers.length).fill("");
+                        newData.rows.push(newRow);
+                        dataChanged = true;
+                    }
+                    if (newData.rows[targetR][targetC] !== cellValue) {
+                        newData.rows[targetR][targetC] = cellValue;
+                        dataChanged = true;
+                    }
+                }
+            });
+        });
+
+        if (dataChanged) {
+            setData(newData);
+            setWidths(newWidths);
+            requestUpdate(newData, newWidths);
         }
     };
 
@@ -878,7 +1044,6 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
                 <thead>
                     <tr>
                         ${data.headers.map((h, i) => {
-        // Drag Target Logic for Columns (Headers)
         const isColDragTarget = dragState.type === 'col' && dragState.toIndex === i;
         let dragClass = '';
         if (isColDragTarget && dragState.fromIndex !== i) {
@@ -926,17 +1091,12 @@ const TableComponent = ({ initialData, initialWidths, onUpdate, onRender }) => {
                     ${data.rows.map((row, rI) => html`
                         <tr key=${rI}>
                             ${row.map((cell, cI) => {
-        // Drag Target Logic for Body Cells (Row & Column)
         let dragClass = '';
-
-        // 1. Row Dragging Logic
         const isRowDragTarget = dragState.type === 'row' && dragState.toIndex === rI;
         if (isRowDragTarget && dragState.fromIndex !== rI) {
             if (dragState.fromIndex < rI) dragClass = 'drag-target-bottom';
             else dragClass = 'drag-target-top';
         }
-
-        // 2. Column Dragging Logic
         const isColDragTarget = dragState.type === 'col' && dragState.toIndex === cI;
         if (isColDragTarget && dragState.fromIndex !== cI) {
             if (dragState.fromIndex < cI) dragClass = 'drag-target-right';

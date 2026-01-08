@@ -1,6 +1,6 @@
 {
   "name": "markdown-editor",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Integrated Markdown Editor with Live Preview",
   "main": "main.js",
   "scripts": {
